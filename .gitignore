@@ -1,0 +1,13 @@
+# Compiled bytecode
+__pycache__
+
+# Pytest and Coverage report
+.pytest_cache
+.coverage
+htmlcov
+
+# VSCode debugger
+.vscode
+
+# Environment variables files
+*.env
