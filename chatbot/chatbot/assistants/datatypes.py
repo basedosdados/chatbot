@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel, Field
 
 from chatbot.agents import Chart
@@ -8,7 +10,10 @@ class UserQuestion(BaseModel):
     id: str
     question: str
 
-class SQLAssistantAnswer(UserQuestion):
+class SQLAssistantAnswer(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    question_id: str
+    question: str
     model_uri: ModelURI
     answer: str
     sql_queries: list[str] | None = Field(default=None)

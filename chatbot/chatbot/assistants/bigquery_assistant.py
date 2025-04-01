@@ -288,13 +288,15 @@ class BigQueryAssistant:
                 "answer": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos. Obrigado pela paciência!",
             }
 
-        answer = user_question.model_dump()
-        answer["model_uri"] = self.model_uri
-        answer.update(response)
+        response.update({
+            "question_id": user_question.id,
+            "question": user_question.question,
+            "model_uri": self.model_uri
+        })
 
         self.logger.info(f"Returning answer for question {user_question.id}")
 
-        return BigQueryAssistantAnswer(**answer)
+        return BigQueryAssistantAnswer(**response)
 
     async def aask(self, user_question: UserQuestion, thread_id: str) -> BigQueryAssistantAnswer:
         """Asynchronously answers user question using a LLM agent
@@ -324,13 +326,15 @@ class BigQueryAssistant:
                 "answer": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos. Obrigado pela paciência!",
             }
 
-        answer = user_question.model_dump()
-        answer["model_uri"] = self.model_uri
-        answer.update(response)
+        response.update({
+            "question_id": user_question.id,
+            "question": user_question.question,
+            "model_uri": self.model_uri
+        })
 
         self.logger.info(f"Returning answer for question {user_question.id}")
 
-        return BigQueryAssistantAnswer(**answer)
+        return BigQueryAssistantAnswer(**response)
 
     def clear_memory(self, thread_id: str):
         """Clears the assistant memory"""
