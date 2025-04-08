@@ -27,7 +27,7 @@ async def create_sql_assistant(
     vector_store_url: str | None = None,
     sql_agent_collection: str | None = None,
 ):
-    """Yields a `BigQueryAssistant` instance with an async PostgreSQL checkpointer
+    """Yields a `SQLAssistant` instance with an async PostgreSQL checkpointer
 
     Args:
         database (Database):
@@ -210,7 +210,7 @@ class SQLAssistant:
             question (str): User question
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLAssistantAnswer: Generated answer
         """
         self.logger.info(f"Received question {user_question.id}: {user_question.question}")
 
@@ -248,7 +248,7 @@ class SQLAssistant:
             question (str): User question
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLAssistantAnswer: Generated answer
         """
         self.logger.info(f"Received question {user_question.id}: {user_question.question}")
 

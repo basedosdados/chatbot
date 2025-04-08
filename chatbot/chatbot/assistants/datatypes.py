@@ -18,5 +18,5 @@ class SQLAssistantAnswer(BaseModel):
     answer: str
     sql_queries: list[str] | None = Field(default=None)
 
-class BigQueryAssistantAnswer(SQLAssistantAnswer):
+class SQLVizAssistantAnswer(SQLAssistantAnswer):
     chart: Chart | None = Field(default=None)

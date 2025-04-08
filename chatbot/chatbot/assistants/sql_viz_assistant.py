@@ -9,29 +9,30 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
-from chatbot.databases import BigQueryDatabase
+from chatbot.databases import Database
 from chatbot.exceptions import EnvironmentVariableUnset
 from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 from chatbot.storage import get_chroma_client
 
-from .datatypes import BigQueryAssistantAnswer, ModelURI, UserQuestion
+from .datatypes import SQLVizAssistantAnswer, ModelURI, UserQuestion
 
 
 @asynccontextmanager
-async def create_bigquery_assistant(
+async def create_sqlviz_assistant(
+    database: Database,
     db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
     question_limit: int | None = 5,
     vector_store_url: str | None = None,
     sql_agent_collection: str | None = None,
     viz_agent_collection: str | None = None,
-    billing_project: str | None = None,
-    query_project: str | None = None,
 ):
-    """Yields a `BigQueryAssistant` instance with an async PostgreSQL checkpointer
+    """Yields a `SQLVizAssistant` instance with an async PostgreSQL checkpointer
 
     Args:
+        database (Database):
+            A `Database` object, i.e., an object that implements the `Database` protocol
         db_url (str | None, optional):
             The checkpointer database URL. If set to `None`, it will be obtained
             from the `DB_URL` env variable. Defaults to `None`.
@@ -51,17 +52,9 @@ async def create_bigquery_assistant(
         viz_agent_collection (str | None, optional):
             Name of the collection that contains examples for the `VizAgent`.
             If set to `None`, no examples will be used. Defaults to `None`
-        billing_project (str | None, optional):
-            Project ID for the project which the client acts on behalf of.
-            Will be used when creating a dataset/table/job. If not provided,
-            falls back to the default project inferred from the environment
-        query_project (str | None, optional):
-            Project ID for the project from which the datasets and tables
-            will be fetched and in which SQL queries will be run. If not provided,
-            falls back to the default project inferred from the environment
 
     Yields:
-        BigQueryAssistant: The assistant
+        SQLVizAssistant: The assistant
     """
     db_url = db_url or os.getenv("DB_URL")
 
@@ -89,23 +82,24 @@ async def create_bigquery_assistant(
 
         await checkpointer.setup()
 
-        assistant = BigQueryAssistant(
+        assistant = SQLVizAssistant(
+            database=database,
             model_uri=model_uri,
             checkpointer=checkpointer,
             question_limit=question_limit,
             vector_store_url=vector_store_url,
             sql_agent_collection=sql_agent_collection,
             viz_agent_collection=viz_agent_collection,
-            billing_project=billing_project,
-            query_project=query_project
         )
 
         yield assistant
 
-class BigQueryAssistant:
+class SQLVizAssistant:
     """LLM-powered assistant for querying and visualizing BigQuery datasets
 
     Args:
+        database (Database):
+            A `Database` object, i.e., an object that implements the `Database` protocol
         model_uri (str | ModelURI | None, optional):
             An URI for the LLM to be used. It must be in the format `<provider>/<model_name>`.
             For example, it could be `openai/gpt-4o` or `google/gemini-1.5-flash-001`. If set
@@ -125,14 +119,6 @@ class BigQueryAssistant:
         viz_agent_collection (str | None, optional):
             Name of the collection that contains examples for the `VizAgent`.
             If set to `None`, no examples will be used. Defaults to `None`
-        billing_project (str | None, optional):
-            Project ID for the project which the client acts on behalf of.
-            Will be used when creating a dataset/table/job. If not provided,
-            falls back to the default project inferred from the environment
-        query_project (str | None, optional):
-            Project ID for the project from which the datasets and tables
-            will be fetched and in which SQL queries will be run. If not provided,
-            falls back to the default project inferred from the environment
 
     Raises:
         TypeError: If the checkpointer is not `None` or an instance of `AsyncPostgresSaver`
@@ -140,14 +126,13 @@ class BigQueryAssistant:
 
     def __init__(
         self,
+        database: Database,
         model_uri: str | ModelURI | None = None,
         checkpointer: PostgresSaver | AsyncPostgresSaver | None = None,
         question_limit: int | None = 5,
         vector_store_url: str | None = None,
         sql_agent_collection: str | None = None,
         viz_agent_collection: str | None = None,
-        billing_project: str | None = None,
-        query_project: str | None = None,
     ):
         if isinstance(checkpointer, (PostgresSaver, AsyncPostgresSaver)):
             subgraph_checkpointer = True
@@ -178,14 +163,6 @@ class BigQueryAssistant:
         sql_agent_collection = sql_agent_collection or os.getenv("SQL_AGENT_COLLECTION")
         viz_agent_collection = viz_agent_collection or os.getenv("VIZ_AGENT_COLLECTION")
 
-        billing_project = billing_project or os.getenv("BILLING_PROJECT_ID")
-        query_project = query_project or os.getenv("QUERY_PROJECT_ID")
-
-        bigquery_db = BigQueryDatabase(
-            billing_project=billing_project,
-            query_project=query_project,
-        )
-
         if vector_store_url is not None:
             sql_vector_store = get_chroma_client(
                 url=vector_store_url,
@@ -204,7 +181,7 @@ class BigQueryAssistant:
         model = ModelFactory.from_model_uri(self.model_uri)
 
         sql_agent = SQLAgent(
-            db=bigquery_db,
+            db=database,
             model=model,
             checkpointer=subgraph_checkpointer,
             vector_store=sql_vector_store,
@@ -260,14 +237,14 @@ class BigQueryAssistant:
 
         return formatted_response
 
-    def ask(self, user_question: UserQuestion, thread_id: str) -> BigQueryAssistantAnswer:
+    def ask(self, user_question: UserQuestion, thread_id: str) -> SQLVizAssistantAnswer:
         """Answers user question using a LLM agent
 
         Args:
             question (str): User question
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLVizAssistantAnswer: Generated answer
         """
         self.logger.info(f"Received question {user_question.id}: {user_question.question}")
 
@@ -296,16 +273,16 @@ class BigQueryAssistant:
 
         self.logger.info(f"Returning answer for question {user_question.id}")
 
-        return BigQueryAssistantAnswer(**response)
+        return SQLVizAssistantAnswer(**response)
 
-    async def aask(self, user_question: UserQuestion, thread_id: str) -> BigQueryAssistantAnswer:
+    async def aask(self, user_question: UserQuestion, thread_id: str) -> SQLVizAssistantAnswer:
         """Asynchronously answers user question using a LLM agent
 
         Args:
             question (str): User question
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLVizAssistantAnswer: Generated answer
         """
         self.logger.info(f"Received question {user_question.id}: {user_question.question}")
 
@@ -334,7 +311,7 @@ class BigQueryAssistant:
 
         self.logger.info(f"Returning answer for question {user_question.id}")
 
-        return BigQueryAssistantAnswer(**response)
+        return SQLVizAssistantAnswer(**response)
 
     def clear_memory(self, thread_id: str):
         """Clears the assistant memory"""

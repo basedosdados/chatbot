@@ -123,13 +123,14 @@ def test_format_response_with_no_sql_queries(assistant: SQLAssistant):
 def test_ask(assistant: SQLAssistant, user_question: UserQuestion):
     response = assistant.ask(user_question, str(uuid.uuid4()))
 
-    expected_response = user_question.model_dump()
-    expected_response.update({
-        "model_uri": MODEL_URI,
-        "answer": "mock final answer",
-        "sql_queries": None,
-    })
-    expected_response = SQLAssistantAnswer(**expected_response)
+    expected_response = SQLAssistantAnswer(
+        id=response.id,
+        question_id=user_question.id,
+        question=user_question.question,
+        model_uri=MODEL_URI,
+        answer="mock final answer",
+        sql_queries=None,
+    )
 
     assert response == expected_response
 
@@ -137,12 +138,13 @@ def test_ask(assistant: SQLAssistant, user_question: UserQuestion):
 async def test_aask(assistant: SQLAssistant, user_question: UserQuestion):
     response = await assistant.aask(user_question, str(uuid.uuid4()))
 
-    expected_response = user_question.model_dump()
-    expected_response.update({
-        "model_uri": MODEL_URI,
-        "answer": "mock final answer",
-        "sql_queries": None,
-    })
-    expected_response = SQLAssistantAnswer(**expected_response)
+    expected_response = SQLAssistantAnswer(
+        id=response.id,
+        question_id=user_question.id,
+        question=user_question.question,
+        model_uri=MODEL_URI,
+        answer="mock final answer",
+        sql_queries=None,
+    )
 
     assert response == expected_response
