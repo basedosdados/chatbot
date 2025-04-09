@@ -216,7 +216,11 @@ class ReActAgent:
     # except by deleting its checkpoints, as noted in this github discussion:
     # https://github.com/langchain-ai/langgraph/discussions/912
     def clear_memory(self, thread_id: str):
-        """Clears the assistant memory"""
+        """Clears the assistant memory
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         try:
             if self.checkpointer is None:
                 self.logger.info("Checkpointer is None, ignoring...")
@@ -227,7 +231,11 @@ class ReActAgent:
             self.logger.exception(f"Error on clearing memory for thread {thread_id}:")
 
     async def aclear_memory(self, thread_id: str):
-        """Asynchronously clears the assistant memory"""
+        """Asynchronously Clears the assistant memory
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         try:
             if self.checkpointer is None:
                 self.logger.info("Checkpointer is None, ignoring...")
