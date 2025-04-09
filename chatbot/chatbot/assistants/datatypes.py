@@ -8,10 +8,12 @@ from chatbot.models import ModelURI
 
 class UserQuestion(BaseModel):
     id: str
+    thread_id: str
     question: str
 
 class SQLAssistantAnswer(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    thread_id: str
     question_id: str
     question: str
     model_uri: ModelURI

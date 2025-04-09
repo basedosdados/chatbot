@@ -5,7 +5,7 @@ from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.agents.reducers import Item
-from chatbot.assistants import SQLAssistant, SQLAssistantAnswer,UserQuestion
+from chatbot.assistants import SQLAssistant, SQLAssistantAnswer, UserQuestion
 from chatbot.models import ModelURI
 
 MODEL_URI = ModelURI.gpt_4o_mini
@@ -66,6 +66,7 @@ def assistant(monkeypatch):
 def user_question() -> UserQuestion:
     return UserQuestion(
         id=str(uuid.uuid4()),
+        thread_id=str(uuid.uuid4()),
         question="mock question"
     )
 
@@ -121,10 +122,11 @@ def test_format_response_with_no_sql_queries(assistant: SQLAssistant):
     assert formatted_response == expected_formatted_response
 
 def test_ask(assistant: SQLAssistant, user_question: UserQuestion):
-    response = assistant.ask(user_question, str(uuid.uuid4()))
+    response = assistant.ask(user_question)
 
     expected_response = SQLAssistantAnswer(
         id=response.id,
+        thread_id=user_question.thread_id,
         question_id=user_question.id,
         question=user_question.question,
         model_uri=MODEL_URI,
@@ -136,10 +138,11 @@ def test_ask(assistant: SQLAssistant, user_question: UserQuestion):
 
 @pytest.mark.asyncio
 async def test_aask(assistant: SQLAssistant, user_question: UserQuestion):
-    response = await assistant.aask(user_question, str(uuid.uuid4()))
+    response = await assistant.aask(user_question)
 
     expected_response = SQLAssistantAnswer(
         id=response.id,
+        thread_id=user_question.thread_id,
         question_id=user_question.id,
         question=user_question.question,
         model_uri=MODEL_URI,

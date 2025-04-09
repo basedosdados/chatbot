@@ -86,6 +86,7 @@ def assistant(monkeypatch):
 def user_question() -> UserQuestion:
     return UserQuestion(
         id=str(uuid.uuid4()),
+        thread_id=str(uuid.uuid4()),
         question="mock question"
     )
 
@@ -171,10 +172,11 @@ def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
     assert formatted_response == expected_formatted_response
 
 def test_ask(assistant: SQLVizAssistant, user_question: UserQuestion):
-    response = assistant.ask(user_question, str(uuid.uuid4()))
+    response = assistant.ask(user_question)
 
     expected_response = SQLVizAssistantAnswer(
         id=response.id,
+        thread_id=user_question.thread_id,
         question_id=user_question.id,
         question=user_question.question,
         model_uri=MODEL_URI,
@@ -191,10 +193,11 @@ def test_ask(assistant: SQLVizAssistant, user_question: UserQuestion):
 
 @pytest.mark.asyncio
 async def test_aask(assistant: SQLVizAssistant, user_question: UserQuestion):
-    response = await assistant.aask(user_question, str(uuid.uuid4()))
+    response = await assistant.aask(user_question)
 
     expected_response = SQLVizAssistantAnswer(
         id=response.id,
+        thread_id=user_question.thread_id,
         question_id=user_question.id,
         question=user_question.question,
         model_uri=MODEL_URI,

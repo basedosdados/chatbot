@@ -237,7 +237,7 @@ class SQLVizAssistant:
 
         return formatted_response
 
-    def ask(self, user_question: UserQuestion, thread_id: str) -> SQLVizAssistantAnswer:
+    def ask(self, user_question: UserQuestion) -> SQLVizAssistantAnswer:
         """Answers user question using a LLM agent
 
         Args:
@@ -250,7 +250,7 @@ class SQLVizAssistant:
 
         config = {
             "configurable": {
-                "thread_id": thread_id,
+                "thread_id": user_question.thread_id,
             },
             "run_id": user_question.id,
             "recursion_limit": 32
@@ -266,6 +266,7 @@ class SQLVizAssistant:
             }
 
         response.update({
+            "thread_id": user_question.thread_id,
             "question_id": user_question.id,
             "question": user_question.question,
             "model_uri": self.model_uri
@@ -275,7 +276,7 @@ class SQLVizAssistant:
 
         return SQLVizAssistantAnswer(**response)
 
-    async def aask(self, user_question: UserQuestion, thread_id: str) -> SQLVizAssistantAnswer:
+    async def aask(self, user_question: UserQuestion) -> SQLVizAssistantAnswer:
         """Asynchronously answers user question using a LLM agent
 
         Args:
@@ -288,7 +289,7 @@ class SQLVizAssistant:
 
         config = {
             "configurable": {
-                "thread_id": thread_id,
+                "thread_id": user_question.thread_id,
             },
             "run_id": user_question.id,
             "recursion_limit": 32
@@ -304,6 +305,7 @@ class SQLVizAssistant:
             }
 
         response.update({
+            "thread_id": user_question.thread_id,
             "question_id": user_question.id,
             "question": user_question.question,
             "model_uri": self.model_uri
@@ -314,11 +316,19 @@ class SQLVizAssistant:
         return SQLVizAssistantAnswer(**response)
 
     def clear_memory(self, thread_id: str):
-        """Clears the assistant memory"""
+        """Clears the assistant memory
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         self.logger.info(f"Clearing memory for thread {thread_id}")
         self.router_agent.clear_memory(thread_id)
 
     async def aclear_memory(self, thread_id: str):
-        """Asynchronously clears the assistant memory"""
+        """Asynchronously Clears the assistant memory
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         self.logger.info(f"Clearing memory for thread {thread_id}")
         await self.router_agent.aclear_memory(thread_id)
