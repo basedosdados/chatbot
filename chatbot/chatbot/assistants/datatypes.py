@@ -6,19 +6,14 @@ from chatbot.agents import Chart
 from chatbot.models import ModelURI
 
 
-class UserQuestion(BaseModel):
-    id: str
-    thread_id: str
-    question: str
-
-class SQLAssistantAnswer(BaseModel):
+class UserMessage(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    content: str
     thread_id: str
-    question_id: str
-    question: str
-    model_uri: ModelURI
-    answer: str
+
+class SQLAssistantMessage(UserMessage):
+    model_uri: str
     sql_queries: list[str] | None = Field(default=None)
 
-class SQLVizAssistantAnswer(SQLAssistantAnswer):
+class SQLVizAssistantMessage(SQLAssistantMessage):
     chart: Chart | None = Field(default=None)

@@ -1,6 +1,6 @@
 from typing import Any, Protocol
 
-from .datatypes import UserQuestion
+from .datatypes import UserMessage
 
 
 class Assistant(Protocol):
@@ -8,14 +8,14 @@ class Assistant(Protocol):
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
         ...
 
-    def ask(self, user_question: UserQuestion) -> Any:
+    def invoke(self, message: UserMessage) -> Any:
         ...
 
-    async def aask(self, user_question: UserQuestion) -> Any:
+    async def ainvoke(self, message: UserMessage) -> Any:
         ...
 
-    def clear_memory(self, thread_id: str):
+    def clear_thread(self, thread_id: str):
         ...
 
-    async def aclear_memory(self, thread_id: str):
+    async def aclear_thread(self, thread_id: str):
         ...
