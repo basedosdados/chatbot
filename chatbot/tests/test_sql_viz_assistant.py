@@ -6,8 +6,8 @@ from loguru import logger
 from chatbot.agents import RouterAgent
 from chatbot.agents.reducers import Item
 from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
-from chatbot.assistants import (SQLVizAssistant, SQLVizAssistantAnswer,
-                                UserQuestion)
+from chatbot.assistants import (SQLVizAssistant, SQLVizAssistantMessage,
+                                UserMessage)
 from chatbot.models import ModelURI
 
 MODEL_URI = ModelURI.gpt_4o_mini
@@ -83,11 +83,10 @@ def assistant(monkeypatch):
     return mock_assistant
 
 @pytest.fixture
-def user_question() -> UserQuestion:
-    return UserQuestion(
-        id=str(uuid.uuid4()),
+def user_message() -> UserMessage:
+    return UserMessage(
+        content="mock question",
         thread_id=str(uuid.uuid4()),
-        question="mock question"
     )
 
 def test_format_response(assistant: SQLVizAssistant):
@@ -105,7 +104,7 @@ def test_format_response(assistant: SQLVizAssistant):
     }
 
     expected_formatted_response = {
-        "answer": "hello world!",
+        "content": "hello world!",
         "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
         "chart": Chart(
             data=ChartData(),
@@ -133,7 +132,7 @@ def test_format_response_with_special_characters(assistant: SQLVizAssistant):
     }
 
     expected_formatted_response = {
-        "answer": "ħ&łłø wø®łð!",
+        "content": "ħ&łłø wø®łð!",
         "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
         "chart": Chart(
             data=ChartData(),
@@ -158,7 +157,7 @@ def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
     }
 
     expected_formatted_response = {
-        "answer": "hello world!",
+        "content": "hello world!",
         "sql_queries": None,
         "chart": Chart(
             data=ChartData(),
@@ -171,16 +170,13 @@ def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_ask(assistant: SQLVizAssistant, user_question: UserQuestion):
-    response = assistant.ask(user_question)
+def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
+    response = assistant.invoke(user_message)
 
-    expected_response = SQLVizAssistantAnswer(
-        id=response.id,
-        thread_id=user_question.thread_id,
-        question_id=user_question.id,
-        question=user_question.question,
+    expected_response = SQLVizAssistantMessage(
+        content="mock final answer",
+        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
-        answer="mock final answer",
         sql_queries=None,
         chart=Chart(
             data=ChartData(),
@@ -189,19 +185,20 @@ def test_ask(assistant: SQLVizAssistant, user_question: UserQuestion):
         ),
     )
 
-    assert response == expected_response
+    assert response.content == expected_response.content
+    assert response.thread_id == expected_response.thread_id
+    assert response.model_uri == expected_response.model_uri
+    assert response.sql_queries == expected_response.sql_queries
+    assert response.chart == expected_response.chart
 
 @pytest.mark.asyncio
-async def test_aask(assistant: SQLVizAssistant, user_question: UserQuestion):
-    response = await assistant.aask(user_question)
+async def test_ainvoke(assistant: SQLVizAssistant, user_message: UserMessage):
+    response = await assistant.ainvoke(user_message)
 
-    expected_response = SQLVizAssistantAnswer(
-        id=response.id,
-        thread_id=user_question.thread_id,
-        question_id=user_question.id,
-        question=user_question.question,
+    expected_response = SQLVizAssistantMessage(
+        content="mock final answer",
+        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
-        answer="mock final answer",
         sql_queries=None,
         chart=Chart(
             data=ChartData(),
@@ -210,4 +207,8 @@ async def test_aask(assistant: SQLVizAssistant, user_question: UserQuestion):
         ),
     )
 
-    assert response == expected_response
+    assert response.content == expected_response.content
+    assert response.thread_id == expected_response.thread_id
+    assert response.model_uri == expected_response.model_uri
+    assert response.sql_queries == expected_response.sql_queries
+    assert response.chart == expected_response.chart
