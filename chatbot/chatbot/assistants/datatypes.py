@@ -12,7 +12,7 @@ class UserMessage(BaseModel):
     thread_id: str
 
 class SQLAssistantMessage(UserMessage):
-    model_uri: str
+    model_uri: ModelURI
     sql_queries: list[str] | None = Field(default=None)
 
 class SQLVizAssistantMessage(SQLAssistantMessage):
