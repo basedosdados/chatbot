@@ -15,7 +15,7 @@ from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 from chatbot.storage import get_chroma_client
 
-from .datatypes import ModelURI, SQLAssistantAnswer, UserQuestion
+from .datatypes import ModelURI, SQLAssistantMessage, UserMessage
 
 
 @asynccontextmanager
@@ -27,7 +27,7 @@ async def create_sql_assistant(
     vector_store_url: str | None = None,
     sql_agent_collection: str | None = None,
 ):
-    """Yields a `BigQueryAssistant` instance with an async PostgreSQL checkpointer
+    """Yields a `SQLAssistant` instance with an async PostgreSQL checkpointer
 
     Args:
         database (Database):
@@ -197,90 +197,102 @@ class SQLAssistant:
             sql_queries.append(sql_query)
 
         formatted_response = {
-            "answer": answer,
+            "content": answer,
             "sql_queries": sql_queries or None,
         }
 
         return formatted_response
 
-    def ask(self, user_question: UserQuestion, thread_id: str) -> SQLAssistantAnswer:
-        """Answers user question using a LLM agent
+    def invoke(self, message: UserMessage) -> SQLAssistantMessage:
+        """Sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            question (str): User question
+            message (str): The user message
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLAssistantMessage: The generated response
         """
-        self.logger.info(f"Received question {user_question.id}: {user_question.question}")
+        self.logger.info(f"Received message {message.id}: {message.content}")
 
         config = {
             "configurable": {
-                "thread_id": thread_id,
+                "thread_id": message.thread_id,
             },
-            "run_id": user_question.id,
+            "run_id": message.id,
             "recursion_limit": 32
         }
 
         try:
-            response = self.sql_agent.invoke(user_question.question, config)
+            response = self.sql_agent.invoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error on answering user question {user_question.id}:")
+            self.logger.exception(f"Error on responding message {message.id}:")
             response = {
-                "answer": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos. Obrigado pela paciência!",
+                "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
+                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
             }
 
-        answer = user_question.model_dump()
-        answer["model_uri"] = self.model_uri
-        answer.update(response)
+        response.update({
+            "thread_id": message.thread_id,
+            "model_uri": self.model_uri
+        })
 
-        self.logger.info(f"Returning answer for question {user_question.id}")
+        self.logger.info(f"Returning response for message {message.id}")
 
-        return SQLAssistantAnswer(**answer)
+        return SQLAssistantMessage(**response)
 
-    async def aask(self, user_question: UserQuestion, thread_id: str) -> SQLAssistantAnswer:
-        """Asynchronously answers user question using a LLM agent
+    async def ainvoke(self, message: UserMessage) -> SQLAssistantMessage:
+        """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            question (str): User question
+            message (str): The user message
 
         Returns:
-            BigQueryAssistantAnswer: Generated answer
+            SQLAssistantMessage: The generated response
         """
-        self.logger.info(f"Received question {user_question.id}: {user_question.question}")
+        self.logger.info(f"Received message {message.id}: {message.content}")
 
         config = {
             "configurable": {
-                "thread_id": thread_id,
+                "thread_id": message.thread_id,
             },
-            "run_id": user_question.id,
+            "run_id": message.id,
             "recursion_limit": 32
         }
 
         try:
-            response = await self.sql_agent.ainvoke(user_question.question, config)
+            response = await self.sql_agent.ainvoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error on answering user question {user_question.id}:")
+            self.logger.exception(f"Error on responding message {message.id}:")
             response = {
-                "answer": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos. Obrigado pela paciência!",
+                "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
+                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
             }
 
-        answer = user_question.model_dump()
-        answer["model_uri"] = self.model_uri
-        answer.update(response)
+        response.update({
+            "thread_id": message.thread_id,
+            "model_uri": self.model_uri
+        })
 
-        self.logger.info(f"Returning answer for question {user_question.id}")
+        self.logger.info(f"Returning response for message {message.id}")
 
-        return SQLAssistantAnswer(**answer)
+        return SQLAssistantMessage(**response)
 
-    def clear_memory(self, thread_id: str):
-        """Clears the assistant memory"""
+    def clear_thread(self, thread_id: str):
+        """Clears a thread
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         self.logger.info(f"Clearing memory for thread {thread_id}")
-        self.sql_agent.clear_memory(thread_id)
+        self.sql_agent.clear_thread(thread_id)
 
-    async def aclear_memory(self, thread_id: str):
-        """Asynchronously clears the assistant memory"""
+    async def aclear_thread(self, thread_id: str):
+        """Asynchronously clears a thread
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         self.logger.info(f"Clearing memory for thread {thread_id}")
-        await self.sql_agent.aclear_memory(thread_id)
+        await self.sql_agent.aclear_thread(thread_id)

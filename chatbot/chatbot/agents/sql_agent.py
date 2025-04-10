@@ -529,8 +529,12 @@ class SQLAgent:
     # Unfortunately, there is no clean way to delete an agent's memory
     # except by deleting its checkpoints, as noted in this github discussion:
     # https://github.com/langchain-ai/langgraph/discussions/912
-    def clear_memory(self, thread_id: str):
-        """Clears the assistant memory"""
+    def clear_thread(self, thread_id: str):
+        """Clears a thread
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         try:
             if self.checkpointer is None:
                 self.logger.info("Checkpointer is None, ignoring...")
@@ -538,10 +542,14 @@ class SQLAgent:
                 delete_checkpoints(self.checkpointer, thread_id)
                 self.logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing memory for thread {thread_id}:")
+            self.logger.exception(f"Error on clearing thread {thread_id}:")
 
-    async def aclear_memory(self, thread_id: str):
-        """Asynchronously clears the assistant memory"""
+    async def aclear_thread(self, thread_id: str):
+        """Asynchronously clears a thread
+
+        Args:
+            thread_id (str): The thread unique identifier
+        """
         try:
             if self.checkpointer is None:
                 self.logger.info("Checkpointer is None, ignoring...")
@@ -549,7 +557,7 @@ class SQLAgent:
                 await async_delete_checkpoints(self.checkpointer, thread_id)
                 self.logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing memory for thread {thread_id}:")
+            self.logger.exception(f"Error on clearing thread {thread_id}:")
 
 def _check_tables_info(state: State) -> Literal["call_select_datasets", "similarity_search"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the
