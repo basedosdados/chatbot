@@ -226,7 +226,7 @@ class SQLAssistant:
             response = self.sql_agent.invoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error responding message {message.id}:")
+            self.logger.exception(f"Error on responding message {message.id}:")
             response = {
                 "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
                     "Se o problema persistir, avise-nos. Obrigado pela paciência!",
@@ -264,7 +264,7 @@ class SQLAssistant:
             response = await self.sql_agent.ainvoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error responding message {message.id}:")
+            self.logger.exception(f"Error on responding message {message.id}:")
             response = {
                 "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
                     "Se o problema persistir, avise-nos. Obrigado pela paciência!",
