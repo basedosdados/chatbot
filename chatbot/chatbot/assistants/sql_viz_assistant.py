@@ -246,7 +246,7 @@ class SQLVizAssistant:
             thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
-            SQLAssistantMessage: The generated response
+            SQLVizAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
@@ -282,14 +282,14 @@ class SQLVizAssistant:
         return SQLVizAssistantMessage(**response)
 
     async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
-        """Asynchronously sends a user message to the `SQLAgent` and returns its response
+        """Asynchronously sends a user message to the `RouterAgent` and returns its response
 
         Args:
             message (UserMessage): The user message
             thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
-            SQLAssistantMessage: The generated response
+            SQLVizAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
