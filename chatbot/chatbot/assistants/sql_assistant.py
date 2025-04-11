@@ -1,5 +1,6 @@
 import codecs
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -203,24 +204,29 @@ class SQLAssistant:
 
         return formatted_response
 
-    def invoke(self, message: UserMessage) -> SQLAssistantMessage:
+    def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
         """Sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            message (str): The user message
+            message (UserMessage): The user message
+            thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
             SQLAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
+        run_id = str(uuid.uuid4())
+
         config = {
-            "configurable": {
-                "thread_id": message.thread_id,
-            },
-            "run_id": message.id,
+            "run_id": run_id,
             "recursion_limit": 32
         }
+
+        if thread_id is not None:
+            config["configurable"] = {
+                "thread_id": thread_id
+            }
 
         try:
             response = self.sql_agent.invoke(message.content, config)
@@ -233,7 +239,7 @@ class SQLAssistant:
             }
 
         response.update({
-            "thread_id": message.thread_id,
+            "id": run_id,
             "model_uri": self.model_uri
         })
 
@@ -241,24 +247,29 @@ class SQLAssistant:
 
         return SQLAssistantMessage(**response)
 
-    async def ainvoke(self, message: UserMessage) -> SQLAssistantMessage:
+    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
         """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            message (str): The user message
+            message (UserMessage): The user message
+            thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
             SQLAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
+        run_id = str(uuid.uuid4())
+
         config = {
-            "configurable": {
-                "thread_id": message.thread_id,
-            },
-            "run_id": message.id,
+            "run_id": run_id,
             "recursion_limit": 32
         }
+
+        if thread_id is not None:
+            config["configurable"] = {
+                "thread_id": thread_id
+            }
 
         try:
             response = await self.sql_agent.ainvoke(message.content, config)
@@ -271,7 +282,7 @@ class SQLAssistant:
             }
 
         response.update({
-            "thread_id": message.thread_id,
+            "id": run_id,
             "model_uri": self.model_uri
         })
 

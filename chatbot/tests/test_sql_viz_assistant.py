@@ -84,10 +84,7 @@ def assistant(monkeypatch):
 
 @pytest.fixture
 def user_message() -> UserMessage:
-    return UserMessage(
-        content="mock question",
-        thread_id=str(uuid.uuid4()),
-    )
+    return UserMessage(content="mock question")
 
 def test_format_response(assistant: SQLVizAssistant):
     response = {
@@ -175,7 +172,6 @@ def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
 
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
-        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
         sql_queries=None,
         chart=Chart(
@@ -186,7 +182,6 @@ def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
     )
 
     assert response.content == expected_response.content
-    assert response.thread_id == expected_response.thread_id
     assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart
@@ -197,7 +192,6 @@ async def test_ainvoke(assistant: SQLVizAssistant, user_message: UserMessage):
 
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
-        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
         sql_queries=None,
         chart=Chart(
@@ -208,7 +202,6 @@ async def test_ainvoke(assistant: SQLVizAssistant, user_message: UserMessage):
     )
 
     assert response.content == expected_response.content
-    assert response.thread_id == expected_response.thread_id
     assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart

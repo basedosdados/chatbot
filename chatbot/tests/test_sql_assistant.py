@@ -64,10 +64,7 @@ def assistant(monkeypatch):
 
 @pytest.fixture
 def user_message() -> UserMessage:
-    return UserMessage(
-        content="mock question",
-        thread_id=str(uuid.uuid4()),
-    )
+    return UserMessage(content="mock question")
 
 def test_format_response(assistant: SQLAssistant):
     response = {
@@ -125,13 +122,11 @@ def test_ask(assistant: SQLAssistant, user_message: UserMessage):
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
-        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
         sql_queries=None,
     )
 
     assert response.content == expected_response.content
-    assert response.thread_id == expected_response.thread_id
     assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
 
@@ -141,12 +136,10 @@ async def test_aask(assistant: SQLAssistant, user_message: UserMessage):
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
-        thread_id=user_message.thread_id,
         model_uri=MODEL_URI,
         sql_queries=None,
     )
 
     assert response.content == expected_response.content
-    assert response.thread_id == expected_response.thread_id
     assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries

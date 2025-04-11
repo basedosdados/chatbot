@@ -1,5 +1,6 @@
 import codecs
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -237,24 +238,29 @@ class SQLVizAssistant:
 
         return formatted_response
 
-    def invoke(self, message: UserMessage) -> SQLVizAssistantMessage:
+    def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
         """Sends a user message to the `RouterAgent` and returns its response
 
         Args:
-            message (str): The user message
+            message (UserMessage): The user message
+            thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
-            SQLVizAssistantMessage: The generated response
+            SQLAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
+        run_id = str(uuid.uuid4())
+
         config = {
-            "configurable": {
-                "thread_id": message.thread_id,
-            },
-            "run_id": message.id,
+            "run_id": run_id,
             "recursion_limit": 32
         }
+
+        if thread_id is not None:
+            config["configurable"] = {
+                "thread_id": thread_id
+            }
 
         try:
             response = self.router_agent.invoke(message.content, config)
@@ -267,7 +273,7 @@ class SQLVizAssistant:
             }
 
         response.update({
-            "thread_id": message.thread_id,
+            "id": run_id,
             "model_uri": self.model_uri
         })
 
@@ -275,24 +281,29 @@ class SQLVizAssistant:
 
         return SQLVizAssistantMessage(**response)
 
-    async def ainvoke(self, message: UserMessage) -> SQLVizAssistantMessage:
-        """Asynchronously sends a user message to the `RouterAgent` and returns its response
+    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
+        """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            message (str): The user message
+            message (UserMessage): The user message
+            thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
-            SQLVizAssistantMessage: The generated response
+            SQLAssistantMessage: The generated response
         """
         self.logger.info(f"Received message {message.id}: {message.content}")
 
+        run_id = str(uuid.uuid4())
+
         config = {
-            "configurable": {
-                "thread_id": message.thread_id,
-            },
-            "run_id": message.id,
+            "run_id": run_id,
             "recursion_limit": 32
         }
+
+        if thread_id is not None:
+            config["configurable"] = {
+                "thread_id": thread_id
+            }
 
         try:
             response = await self.router_agent.ainvoke(message.content, config)
@@ -305,7 +316,7 @@ class SQLVizAssistant:
             }
 
         response.update({
-            "thread_id": message.thread_id,
+            "id": run_id,
             "model_uri": self.model_uri
         })
 

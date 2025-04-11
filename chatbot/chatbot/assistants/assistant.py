@@ -8,10 +8,10 @@ class Assistant(Protocol):
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
         ...
 
-    def invoke(self, message: UserMessage) -> Any:
+    def invoke(self, message: UserMessage, thread_id: str) -> Any:
         ...
 
-    async def ainvoke(self, message: UserMessage) -> Any:
+    async def ainvoke(self, message: UserMessage, thread_id: str) -> Any:
         ...
 
     def clear_thread(self, thread_id: str):
