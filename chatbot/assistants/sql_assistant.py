@@ -8,7 +8,7 @@ import sqlparse
 from langchain_core.vectorstores import VectorStore
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from chatbot.agents import SQLAgent
 from chatbot.databases import Database
@@ -21,7 +21,7 @@ from .datatypes import ModelURI, SQLAssistantMessage, UserMessage
 
 
 @asynccontextmanager
-async def create_sql_assistant(
+async def create_async_sql_assistant(
     database: Database,
     db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
@@ -105,7 +105,7 @@ async def create_sql_assistant(
 
         yield assistant
 
-async def get_sql_assistant(
+async def get_async_sql_assistant(
     database: Database,
     db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
@@ -183,6 +183,179 @@ async def get_sql_assistant(
     checkpointer = AsyncPostgresSaver(pool)
 
     await checkpointer.setup()
+
+    assistant = SQLAssistant(
+        database=database,
+        model_uri=model_uri,
+        checkpointer=checkpointer,
+        vector_store=chroma_vector_store,
+        question_limit=question_limit
+    )
+
+    return assistant, pool
+
+def create_sync_sql_assistant(
+    database: Database,
+    db_url: str | None = None,
+    model_uri: str | ModelURI | None = None,
+    question_limit: int | None = 5,
+    chroma_host: str | None = None,
+    chroma_port: str | int | None = None,
+    chroma_collection: str | None = None
+):
+    """Yields a `SQLAssistant` instance with a sync PostgreSQL checkpointer
+
+    Args:
+        database (Database):
+            A `Database` object, i.e., an object that implements the `Database` protocol
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
+        model_uri (str | ModelURI | None, optional):
+            An URI for the LLM to be used by the assistant. It must be in the format
+            `<provider>/<model_name>`. If set to `None`, it will be obtained
+            from the `MODEL_URI` env variable. Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
+        chroma_host (str | None, optional):
+            The host of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
+            Defaults to `None`
+        chroma_port (str | int | None, optional):
+            The port of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_PORT` env variable.
+            Defaults to `None`
+        chroma_collection (str | None, optional):
+            Name of a Chroma collection that contains examples for the `SQLAgent`.
+            If set to `None`, it will be obtained from the `SQL_CHROMA_COLLECTION` env variable.
+            Defaults to `None`
+
+    Yields:
+        SQLAssistant: The assistant
+    """
+    db_url = db_url or os.getenv("DB_URL")
+
+    if db_url is None:
+        raise EnvironmentVariableUnset(
+            "The checkpointer database URL was not passed and could not be inferred "
+            "from the environment. Please pass a valid database URL to the `db_url` "
+            "argument or set the `DB_URL` environment variable"
+        )
+
+    chroma_host = chroma_host or os.getenv("CHROMA_HOST")
+    chroma_port = chroma_port or os.getenv("CHROMA_PORT")
+    chroma_collection = chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
+
+    chroma_vector_store = get_chroma_or_none(
+        chroma_host, chroma_port, chroma_collection
+    )
+
+    # Connection kwargs defined according to:
+    # https://github.com/langchain-ai/langgraph/issues/2887
+    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
+    conn_kwargs = {
+        "autocommit": True,
+        "prepare_threshold": 0
+    }
+
+    with ConnectionPool(
+        conninfo=db_url,
+        max_size=8,
+        kwargs=conn_kwargs
+    ) as pool:
+        checkpointer = PostgresSaver(pool)
+
+        checkpointer.setup()
+
+        assistant = SQLAssistant(
+            database=database,
+            model_uri=model_uri,
+            checkpointer=checkpointer,
+            vector_store=chroma_vector_store,
+            question_limit=question_limit
+        )
+
+        yield assistant
+
+def get_sync_sql_assistant(
+    database: Database,
+    db_url: str | None = None,
+    model_uri: str | ModelURI | None = None,
+    question_limit: int | None = 5,
+    chroma_host: str | None = None,
+    chroma_port: str | int | None = None,
+    chroma_collection: str | None = None
+) -> tuple["SQLAssistant", ConnectionPool]:
+    """Returns a `SQLAssistant` instance and a sync PostgreSQL connection pool
+
+    Args:
+        database (Database):
+            A `Database` object, i.e., an object that implements the `Database` protocol
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
+        model_uri (str | ModelURI | None, optional):
+            An URI for the LLM to be used by the assistant. It must be in the format
+            `<provider>/<model_name>`. If set to `None`, it will be obtained
+            from the `MODEL_URI` env variable. Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
+        chroma_host (str | None, optional):
+            The host of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
+            Defaults to `None`
+        chroma_port (str | int | None, optional):
+            The port of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_PORT` env variable.
+            Defaults to `None`
+        chroma_collection (str | None, optional):
+            Name of a Chroma collection that contains examples for the `SQLAgent`.
+            If set to `None`, it will be obtained from the `SQL_CHROMA_COLLECTION` env variable.
+            Defaults to `None`
+
+    Returns:
+        tuple[SQLAssistant, ConnectionPool]: A tuple containing a `SQLAssistant` instance
+            and a sync PostgreSQL connection pool. The connection pool must be manually closed
+    """
+    db_url = db_url or os.getenv("DB_URL")
+
+    if db_url is None:
+        raise EnvironmentVariableUnset(
+            "The checkpointer database URL was not passed and could not be inferred "
+            "from the environment. Please pass a valid database URL to the `db_url` "
+            "argument or set the `DB_URL` environment variable"
+        )
+
+    chroma_host = chroma_host or os.getenv("CHROMA_HOST")
+    chroma_port = chroma_port or os.getenv("CHROMA_PORT")
+    chroma_collection = chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
+
+    chroma_vector_store = get_chroma_or_none(
+        chroma_host, chroma_port, chroma_collection
+    )
+
+    # Connection kwargs defined according to:
+    # https://github.com/langchain-ai/langgraph/issues/2887
+    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
+    conn_kwargs = {
+        "autocommit": True,
+        "prepare_threshold": 0
+    }
+
+    pool = ConnectionPool(
+        conninfo=db_url,
+        max_size=8,
+        kwargs=conn_kwargs,
+        open=False
+    )
+
+    pool.open()
+
+    checkpointer = PostgresSaver(pool)
+
+    checkpointer.setup()
 
     assistant = SQLAssistant(
         database=database,
