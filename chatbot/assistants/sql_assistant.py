@@ -72,7 +72,7 @@ async def create_sql_assistant(
 
     chroma_host = chroma_host or os.getenv("CHROMA_HOST")
     chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-    chroma_collection = chroma_collection or os.getenv("SQL_AGENT_COLLECTION")
+    chroma_collection = chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
 
     chroma_vector_store = get_chroma_or_none(
         chroma_host, chroma_port, chroma_collection
@@ -157,7 +157,7 @@ async def get_sql_assistant(
 
     chroma_host = chroma_host or os.getenv("CHROMA_HOST")
     chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-    chroma_collection = chroma_collection or os.getenv("SQL_AGENT_COLLECTION")
+    chroma_collection = chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
 
     chroma_vector_store = get_chroma_or_none(
         chroma_host, chroma_port, chroma_collection
