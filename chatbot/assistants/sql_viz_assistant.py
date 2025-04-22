@@ -19,53 +19,21 @@ from chatbot.storage import get_chroma_or_none
 
 from .datatypes import ModelURI, SQLVizAssistantMessage, UserMessage
 
+# Connection kwargs defined according to:
+# https://github.com/langchain-ai/langgraph/issues/2887
+# https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
+CONN_KWARGS = {
+    "autocommit": True,
+    "prepare_threshold": 0
+}
 
-@asynccontextmanager
-async def create_async_sqlviz_assistant(
-    database: Database,
-    db_url: str | None = None,
-    model_uri: str | ModelURI | None = None,
-    question_limit: int | None = 5,
-    chroma_host: str | None = None,
-    chroma_port: str | int | None = None,
-    sql_chroma_collection: str | None = None,
-    viz_chroma_collection: str | None = None,
-):
-    """Yields a `SQLVizAssistant` instance with an async PostgreSQL checkpointer
-
-    Args:
-        database (Database):
-            A `Database` object, i.e., an object that implements the `Database` protocol
-        db_url (str | None, optional):
-            The checkpointer database URL. If set to `None`, it will be obtained
-            from the `DB_URL` env variable. Defaults to `None`.
-        model_uri (str | ModelURI | None, optional):
-            An URI for the LLM to be used by the assistant. It must be in the format
-            `<provider>/<model_name>`. If set to `None`, it will be obtained
-            from the `MODEL_URI` env variable. Defaults to `None`
-        question_limit (int | None, optional):
-            Number of questions to keep in memory. If set to `None`,
-            all questions will be kept. Defaults to `5`
-        chroma_host (str | None, optional):
-            The host of a Chroma client that contains examples for use in LLM calls.
-            If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
-            Defaults to `None`
-        chroma_port (str | int | None, optional):
-            The port of a Chroma client that contains examples for use in LLM calls.
-            If set to `None`, it will be obtained from the `CHROMA_PORT` env variable.
-            Defaults to `None`
-        sql_chroma_collection (str | None, optional):
-            Name of a Chroma collection that contains examples for the `SQLAgent`.
-            If set to `None`, it will be obtained from the `SQL_CHROMA_COLLECTION` env variable.
-            Defaults to `None`
-        viz_chroma_collection (str | None, optional):
-            Name of a Chroma collection that contains examples for the `VizAgent`.
-            If set to `None`, it will be obtained from the `VIZ_CHROMA_COLLECTION` env variable.
-            Defaults to `None`
-
-    Yields:
-        SQLVizAssistant: The assistant
-    """
+def _get_databases(
+    db_url: str | None,
+    chroma_host: str | None,
+    chroma_port: str | int | None,
+    sql_chroma_collection: str | None,
+    viz_chroma_collection: str | None,
+) -> tuple[str, VectorStore, VectorStore]:
     db_url = db_url or os.getenv("DB_URL")
 
     if db_url is None:
@@ -88,18 +56,66 @@ async def create_async_sqlviz_assistant(
         chroma_host, chroma_port, viz_chroma_collection
     )
 
-    # Connection kwargs defined according to:
-    # https://github.com/langchain-ai/langgraph/issues/2887
-    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-    conn_kwargs = {
-        "autocommit": True,
-        "prepare_threshold": 0
-    }
+    return db_url, sql_vector_store, viz_vector_store
+
+@asynccontextmanager
+async def create_async_sqlviz_assistant(
+    database: Database,
+    model_uri: str | ModelURI | None = None,
+    db_url: str | None = None,
+    chroma_host: str | None = None,
+    chroma_port: str | int | None = None,
+    sql_chroma_collection: str | None = None,
+    viz_chroma_collection: str | None = None,
+    question_limit: int | None = 5,
+):
+    """Yields a `SQLVizAssistant` instance with an async PostgreSQL checkpointer
+
+    Args:
+        database (Database):
+            A `Database` object, i.e., an object that implements the `Database` protocol
+        model_uri (str | ModelURI | None, optional):
+            An URI for the LLM to be used by the assistant. It must be in the format
+            `<provider>/<model_name>`. If set to `None`, it will be obtained
+            from the `MODEL_URI` env variable. Defaults to `None`
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
+        chroma_host (str | None, optional):
+            The host of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
+            Defaults to `None`
+        chroma_port (str | int | None, optional):
+            The port of a Chroma client that contains examples for use in LLM calls.
+            If set to `None`, it will be obtained from the `CHROMA_PORT` env variable.
+            Defaults to `None`
+        sql_chroma_collection (str | None, optional):
+            Name of a Chroma collection that contains examples for the `SQLAgent`.
+            If set to `None`, it will be obtained from the `SQL_CHROMA_COLLECTION` env variable.
+            Defaults to `None`
+        viz_chroma_collection (str | None, optional):
+            Name of a Chroma collection that contains examples for the `VizAgent`.
+            If set to `None`, it will be obtained from the `VIZ_CHROMA_COLLECTION` env variable.
+            Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
+
+    Yields:
+        SQLVizAssistant: An assistant instance
+    """
+    db_url, sql_vector_store, viz_vector_store = _get_databases(
+        db_url,
+        chroma_host,
+        chroma_port,
+        sql_chroma_collection,
+        viz_chroma_collection
+    )
 
     async with AsyncConnectionPool(
         conninfo=db_url,
         max_size=8,
-        kwargs=conn_kwargs
+        kwargs=CONN_KWARGS
     ) as pool:
         checkpointer = AsyncPostgresSaver(pool)
 
@@ -118,29 +134,26 @@ async def create_async_sqlviz_assistant(
 
 async def get_async_sqlviz_assistant(
     database: Database,
-    db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
-    question_limit: int | None = 5,
+    db_url: str | None = None,
     chroma_host: str | None = None,
     chroma_port: str | int | None = None,
     sql_chroma_collection: str | None = None,
     viz_chroma_collection: str | None = None,
+    question_limit: int | None = 5,
 ) -> tuple["SQLVizAssistant", AsyncConnectionPool]:
     """Returns a `SQLVizAssistant` instance and an async PostgreSQL connection pool
 
     Args:
         database (Database):
             A `Database` object, i.e., an object that implements the `Database` protocol
-        db_url (str | None, optional):
-            The checkpointer database URL. If set to `None`, it will be obtained
-            from the `DB_URL` env variable. Defaults to `None`.
         model_uri (str | ModelURI | None, optional):
             An URI for the LLM to be used by the assistant. It must be in the format
             `<provider>/<model_name>`. If set to `None`, it will be obtained
             from the `MODEL_URI` env variable. Defaults to `None`
-        question_limit (int | None, optional):
-            Number of questions to keep in memory. If set to `None`,
-            all questions will be kept. Defaults to `5`
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
         chroma_host (str | None, optional):
             The host of a Chroma client that contains examples for use in LLM calls.
             If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
@@ -157,45 +170,26 @@ async def get_async_sqlviz_assistant(
             Name of a Chroma collection that contains examples for the `VizAgent`.
             If set to `None`, it will be obtained from the `VIZ_CHROMA_COLLECTION` env variable.
             Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
 
     Returns:
         tuple[SQLVizAssistant, AsyncConnectionPool]: A tuple containing a `SQLVizAssistant` instance
             and an async PostgreSQL connection pool. The connection pool must be manually closed
     """
-    db_url = db_url or os.getenv("DB_URL")
-
-    if db_url is None:
-        raise EnvironmentVariableUnset(
-            "The checkpointer database URL was not passed and could not be inferred "
-            "from the environment. Please pass a valid database URL to the `db_url` "
-            "argument or set the `DB_URL` environment variable"
-        )
-
-    chroma_host = chroma_host or os.getenv("CHROMA_HOST")
-    chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-    sql_chroma_collection = sql_chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
-    viz_chroma_collection = viz_chroma_collection or os.getenv("VIZ_CHROMA_COLLECTION")
-
-    sql_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, sql_chroma_collection
+    db_url, sql_vector_store, viz_vector_store = _get_databases(
+        db_url,
+        chroma_host,
+        chroma_port,
+        sql_chroma_collection,
+        viz_chroma_collection
     )
-
-    viz_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, viz_chroma_collection
-    )
-
-    # Connection kwargs defined according to:
-    # https://github.com/langchain-ai/langgraph/issues/2887
-    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-    conn_kwargs = {
-        "autocommit": True,
-        "prepare_threshold": 0
-    }
 
     pool = AsyncConnectionPool(
         conninfo=db_url,
         max_size=8,
-        kwargs=conn_kwargs,
+        kwargs=CONN_KWARGS,
         open=False
     )
 
@@ -218,29 +212,26 @@ async def get_async_sqlviz_assistant(
 
 def create_sync_sqlviz_assistant(
     database: Database,
-    db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
-    question_limit: int | None = 5,
+    db_url: str | None = None,
     chroma_host: str | None = None,
     chroma_port: str | int | None = None,
     sql_chroma_collection: str | None = None,
     viz_chroma_collection: str | None = None,
+    question_limit: int | None = 5,
 ):
     """Yields a `SQLVizAssistant` instance with a sync PostgreSQL checkpointer
 
     Args:
         database (Database):
             A `Database` object, i.e., an object that implements the `Database` protocol
-        db_url (str | None, optional):
-            The checkpointer database URL. If set to `None`, it will be obtained
-            from the `DB_URL` env variable. Defaults to `None`.
         model_uri (str | ModelURI | None, optional):
             An URI for the LLM to be used by the assistant. It must be in the format
             `<provider>/<model_name>`. If set to `None`, it will be obtained
             from the `MODEL_URI` env variable. Defaults to `None`
-        question_limit (int | None, optional):
-            Number of questions to keep in memory. If set to `None`,
-            all questions will be kept. Defaults to `5`
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
         chroma_host (str | None, optional):
             The host of a Chroma client that contains examples for use in LLM calls.
             If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
@@ -257,44 +248,25 @@ def create_sync_sqlviz_assistant(
             Name of a Chroma collection that contains examples for the `VizAgent`.
             If set to `None`, it will be obtained from the `VIZ_CHROMA_COLLECTION` env variable.
             Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
 
     Yields:
-        SQLVizAssistant: The assistant
+        SQLVizAssistant: An assistant instance
     """
-    db_url = db_url or os.getenv("DB_URL")
-
-    if db_url is None:
-        raise EnvironmentVariableUnset(
-            "The checkpointer database URL was not passed and could not be inferred "
-            "from the environment. Please pass a valid database URL to the `db_url` "
-            "argument or set the `DB_URL` environment variable"
-        )
-
-    chroma_host = chroma_host or os.getenv("CHROMA_HOST")
-    chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-    sql_chroma_collection = sql_chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
-    viz_chroma_collection = viz_chroma_collection or os.getenv("VIZ_CHROMA_COLLECTION")
-
-    sql_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, sql_chroma_collection
+    db_url, sql_vector_store, viz_vector_store = _get_databases(
+        db_url,
+        chroma_host,
+        chroma_port,
+        sql_chroma_collection,
+        viz_chroma_collection
     )
-
-    viz_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, viz_chroma_collection
-    )
-
-    # Connection kwargs defined according to:
-    # https://github.com/langchain-ai/langgraph/issues/2887
-    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-    conn_kwargs = {
-        "autocommit": True,
-        "prepare_threshold": 0
-    }
 
     with ConnectionPool(
         conninfo=db_url,
         max_size=8,
-        kwargs=conn_kwargs
+        kwargs=CONN_KWARGS
     ) as pool:
         checkpointer = PostgresSaver(pool)
 
@@ -313,29 +285,26 @@ def create_sync_sqlviz_assistant(
 
 def get_sync_sqlviz_assistant(
     database: Database,
-    db_url: str | None = None,
     model_uri: str | ModelURI | None = None,
-    question_limit: int | None = 5,
+    db_url: str | None = None,
     chroma_host: str | None = None,
     chroma_port: str | int | None = None,
     sql_chroma_collection: str | None = None,
     viz_chroma_collection: str | None = None,
+    question_limit: int | None = 5,
 ) -> tuple["SQLVizAssistant", ConnectionPool]:
     """Returns a `SQLVizAssistant` instance and a sync PostgreSQL connection pool
 
     Args:
         database (Database):
             A `Database` object, i.e., an object that implements the `Database` protocol
-        db_url (str | None, optional):
-            The checkpointer database URL. If set to `None`, it will be obtained
-            from the `DB_URL` env variable. Defaults to `None`.
         model_uri (str | ModelURI | None, optional):
             An URI for the LLM to be used by the assistant. It must be in the format
             `<provider>/<model_name>`. If set to `None`, it will be obtained
             from the `MODEL_URI` env variable. Defaults to `None`
-        question_limit (int | None, optional):
-            Number of questions to keep in memory. If set to `None`,
-            all questions will be kept. Defaults to `5`
+        db_url (str | None, optional):
+            The checkpointer database URL. If set to `None`, it will be obtained
+            from the `DB_URL` env variable. Defaults to `None`.
         chroma_host (str | None, optional):
             The host of a Chroma client that contains examples for use in LLM calls.
             If set to `None`, it will be obtained from the `CHROMA_HOST` env variable.
@@ -352,51 +321,32 @@ def get_sync_sqlviz_assistant(
             Name of a Chroma collection that contains examples for the `VizAgent`.
             If set to `None`, it will be obtained from the `VIZ_CHROMA_COLLECTION` env variable.
             Defaults to `None`
+        question_limit (int | None, optional):
+            Number of questions to keep in memory. If set to `None`,
+            all questions will be kept. Defaults to `5`
 
     Returns:
         tuple[SQLVizAssistant, ConnectionPool]: A tuple containing a `SQLVizAssistant` instance
             and a sync PostgreSQL connection pool. The connection pool must be manually closed
     """
-    db_url = db_url or os.getenv("DB_URL")
-
-    if db_url is None:
-        raise EnvironmentVariableUnset(
-            "The checkpointer database URL was not passed and could not be inferred "
-            "from the environment. Please pass a valid database URL to the `db_url` "
-            "argument or set the `DB_URL` environment variable"
-        )
-
-    chroma_host = chroma_host or os.getenv("CHROMA_HOST")
-    chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-    sql_chroma_collection = sql_chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
-    viz_chroma_collection = viz_chroma_collection or os.getenv("VIZ_CHROMA_COLLECTION")
-
-    sql_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, sql_chroma_collection
+    db_url, sql_vector_store, viz_vector_store = _get_databases(
+        db_url,
+        chroma_host,
+        chroma_port,
+        sql_chroma_collection,
+        viz_chroma_collection
     )
 
-    viz_vector_store = get_chroma_or_none(
-        chroma_host, chroma_port, viz_chroma_collection
-    )
-
-    # Connection kwargs defined according to:
-    # https://github.com/langchain-ai/langgraph/issues/2887
-    # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-    conn_kwargs = {
-        "autocommit": True,
-        "prepare_threshold": 0
-    }
-
-    pool = AsyncConnectionPool(
+    pool = ConnectionPool(
         conninfo=db_url,
         max_size=8,
-        kwargs=conn_kwargs,
+        kwargs=CONN_KWARGS,
         open=False
     )
 
     pool.open()
 
-    checkpointer = AsyncPostgresSaver(pool)
+    checkpointer = PostgresSaver(pool)
 
     checkpointer.setup()
 

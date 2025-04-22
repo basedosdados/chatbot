@@ -17,9 +17,9 @@ def get_chroma_vector_store(host: str, port: str | int, collection: str) -> Chro
     )
 
 def get_chroma_or_none(
-    host: str | None = None,
-    port: str | int | None = None,
-    collection: str | None = None
+    host: str | None,
+    port: str | int | None,
+    collection: str | None
 ) -> Chroma | None:
     if host and port and collection:
         return get_chroma_vector_store(host, port, collection)
