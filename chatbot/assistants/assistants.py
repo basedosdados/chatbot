@@ -11,10 +11,15 @@ class Assistant(Protocol):
     def invoke(self, message: UserMessage, thread_id: str) -> Any:
         ...
 
-    async def ainvoke(self, message: UserMessage, thread_id: str) -> Any:
+    def clear_thread(self, thread_id: str):
         ...
 
-    def clear_thread(self, thread_id: str):
+class AsyncAssistant(Protocol):
+    @staticmethod
+    def _format_response(response: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    async def ainvoke(self, message: UserMessage, thread_id: str) -> Any:
         ...
 
     async def aclear_thread(self, thread_id: str):

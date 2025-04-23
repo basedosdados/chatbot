@@ -4,8 +4,8 @@ import uuid
 from typing import Any, Self
 
 import sqlparse
-from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg_pool import ConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
 from chatbot.agents import SQLAgent
 from chatbot.databases import Database
@@ -17,8 +17,8 @@ from chatbot.storage import get_chroma_or_none
 from .datatypes import ModelURI, SQLAssistantMessage, UserMessage
 
 
-class SQLAssistant:
-    """LLM-powered assistant for querying databases.
+class AsyncSQLAssistant:
+    """Async LLM-powered assistant for querying databases.
 
     Args:
         database (Database):
@@ -100,13 +100,13 @@ class SQLAssistant:
                 "prepare_threshold": 0
             },
 
-            self._pool = ConnectionPool(
+            self._pool = AsyncConnectionPool(
                 conninfo=checkpointer_db_url,
                 kwargs=conn_kwargs,
                 max_size=8,
                 open=False,
             )
-            self._checkpointer = PostgresSaver(self._pool)
+            self._checkpointer = AsyncPostgresSaver(self._pool)
         else:
             self._pool = None
             self._checkpointer = None
@@ -133,26 +133,26 @@ class SQLAssistant:
 
         self._is_setup = False
 
-    def setup(self):
+    async def setup(self):
         if self._is_setup:
             return
 
         if self._checkpointer is not None:
-            self._pool.open()
-            self._checkpointer.setup()
+            await self._pool.open()
+            await self._checkpointer.setup()
 
         self._is_setup = True
 
-    def shutdown(self):
+    async def shutdown(self):
         if self._pool is not None:
-            self._pool.close()
+            await self._pool.close()
 
-    def __enter__(self) -> Self:
-        self.setup()
+    async def __aenter__(self) -> Self:
+        await self.setup()
         return self
 
-    def __exit__(self, exc_t, exc_v, exc_tb):
-        self.shutdown()
+    async def __aexit__(self, exc_t, exc_v, exc_tb):
+        await self.shutdown()
 
     def _ensure_setup(self):
         if not self._is_setup:
@@ -191,8 +191,8 @@ class SQLAssistant:
 
         return formatted_response
 
-    def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
-        """Sends a user message to the `SQLAgent` and returns its response
+    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
+        """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
             message (UserMessage): The user message
@@ -218,7 +218,7 @@ class SQLAssistant:
             }
 
         try:
-            response = self.sql_agent.invoke(message.content, config)
+            response = await self.sql_agent.ainvoke(message.content, config)
             response = self._format_response(response)
         except Exception:
             self.logger.exception(f"Error on responding message {message.id}:")
@@ -236,12 +236,12 @@ class SQLAssistant:
 
         return SQLAssistantMessage(**response)
 
-    def clear_thread(self, thread_id: str):
-        """Clears a thread
+    async def aclear_thread(self, thread_id: str):
+        """Asynchronously clears a thread
 
         Args:
             thread_id (str): The thread unique identifier
         """
         self._ensure_setup()
         self.logger.info(f"Clearing memory for thread {thread_id}")
-        self.sql_agent.clear_thread(thread_id)
+        await self.sql_agent.aclear_thread(thread_id)

@@ -4,21 +4,21 @@ import uuid
 from typing import Any, Self
 
 import sqlparse
-from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg_pool import ConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
-from chatbot.agents import SQLAgent
+from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.databases import Database
 from chatbot.exceptions import EnvironmentVariableUnset, NotInitializedError
 from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 from chatbot.storage import get_chroma_or_none
 
-from .datatypes import ModelURI, SQLAssistantMessage, UserMessage
+from .datatypes import ModelURI, SQLVizAssistantMessage, UserMessage
 
 
-class SQLAssistant:
-    """LLM-powered assistant for querying databases.
+class AsyncSQLVizAssistant:
+    """Async LLM-powered assistant for querying and visualizing databases.
 
     Args:
         database (Database):
@@ -40,16 +40,19 @@ class SQLAssistant:
         chroma_port (str | int | None, optional):
             Port for the ChromaDB client. If `None`, falls back to the `CHROMA_PORT`
             environment variable. Defaults to `None`.
-        chroma_collection (str | None, optional):
+        sql_chroma_collection (str | None, optional):
             Name of the ChromaDB collection that contains examples for the `SQLAgent` LLM calls.
             If set to `None`, will fallback to the `SQL_CHROMA_COLLECTION` env variable. Defaults to None.
+        viz_chroma_collection (str | None, optional):
+            Name of the ChromaDB collection that contains examples for the `VizAgent` LLM calls.
+            If set to `None`, will fallback to the `VIZ_CHROMA_COLLECTION` env variable. Defaults to None.
         question_limit (int | None, optional):
             Maximum number of previous questions to keep in memory. If `None`, all questions are kept.
             Defaults to `5`.
 
     Raises:
-        EnvironmentVariableUnset: If `model_uri` is not provided and `MODEL_URI` is not set.
-        EnvironmentVariableUnset: If `checkpointer_db_url` is not provided and `DB_URL` is not set.
+        EnvironmentVariableError: If `model_uri` is not provided and `MODEL_URI` is not set.
+        EnvironmentVariableError: If `checkpointer_db_url` is not provided and `DB_URL` is not set.
         TypeError: If `model_uri` is neither a string nor a `ModelURI`.
     """
 
@@ -61,7 +64,8 @@ class SQLAssistant:
         checkpointer_db_url: str | None = None,
         chroma_host: str | None = None,
         chroma_port: str | int | None = None,
-        chroma_collection: str | None = None,
+        sql_chroma_collection: str | None = None,
+        viz_chroma_collection: str | None = None,
         question_limit: int | None = 5,
     ):
         model_uri = model_uri or os.getenv("MODEL_URI")
@@ -100,32 +104,56 @@ class SQLAssistant:
                 "prepare_threshold": 0
             },
 
-            self._pool = ConnectionPool(
+            self._pool = AsyncConnectionPool(
                 conninfo=checkpointer_db_url,
                 kwargs=conn_kwargs,
                 max_size=8,
                 open=False,
             )
-            self._checkpointer = PostgresSaver(self._pool)
+            self._checkpointer = AsyncPostgresSaver(self._pool)
+            subgraph_checkpointer = True
         else:
             self._pool = None
             self._checkpointer = None
+            subgraph_checkpointer = None
 
         chroma_host = chroma_host or os.getenv("CHROMA_HOST")
         chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-        chroma_collection = chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
+        sql_chroma_collection = sql_chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
+        viz_chroma_collection = viz_chroma_collection or os.getenv("VIZ_CHROMA_COLLECTION")
 
-        vector_store = get_chroma_or_none(
+        sql_vector_store = get_chroma_or_none(
             host=chroma_host,
             port=chroma_port,
-            collection=chroma_collection
+            collection=sql_chroma_collection
         )
 
-        self.sql_agent = SQLAgent(
+        viz_vector_store = get_chroma_or_none(
+            host=chroma_host,
+            port=chroma_port,
+            collection=viz_chroma_collection
+        )
+
+        sql_agent = SQLAgent(
             db=database,
             model=model,
+            checkpointer=subgraph_checkpointer,
+            vector_store=sql_vector_store,
+            question_limit=question_limit
+        )
+
+        viz_agent = VizAgent(
+            model=model,
+            checkpointer=subgraph_checkpointer,
+            vector_store=viz_vector_store,
+            question_limit=question_limit
+        )
+
+        self.router_agent = RouterAgent(
+            model=model,
+            sql_agent=sql_agent,
+            viz_agent=viz_agent,
             checkpointer=self._checkpointer,
-            vector_store=vector_store,
             question_limit=question_limit
         )
 
@@ -133,26 +161,26 @@ class SQLAssistant:
 
         self._is_setup = False
 
-    def setup(self):
+    async def setup(self):
         if self._is_setup:
             return
 
         if self._checkpointer is not None:
-            self._pool.open()
-            self._checkpointer.setup()
+            await self._pool.open()
+            await self._checkpointer.setup()
 
         self._is_setup = True
 
-    def shutdown(self):
+    async def shutdown(self):
         if self._pool is not None:
-            self._pool.close()
+            await self._pool.close()
 
-    def __enter__(self) -> Self:
-        self.setup()
+    async def __aenter__(self) -> Self:
+        await self.setup()
         return self
 
-    def __exit__(self, exc_t, exc_v, exc_tb):
-        self.shutdown()
+    async def __aexit__(self, exc_t, exc_v, exc_tb):
+        await self.shutdown()
 
     def _ensure_setup(self):
         if not self._is_setup:
@@ -187,19 +215,20 @@ class SQLAssistant:
         formatted_response = {
             "content": answer,
             "sql_queries": sql_queries or None,
+            "chart": response["chart"],
         }
 
         return formatted_response
 
-    def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
-        """Sends a user message to the `SQLAgent` and returns its response
+    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
+        """Asynchronously sends a user message to the `RouterAgent` and returns its response
 
         Args:
             message (UserMessage): The user message
             thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
-            SQLAssistantMessage: The generated response
+            SQLVizAssistantMessage: The generated response
         """
         self._ensure_setup()
 
@@ -218,7 +247,7 @@ class SQLAssistant:
             }
 
         try:
-            response = self.sql_agent.invoke(message.content, config)
+            response = await self.router_agent.ainvoke(message.content, config)
             response = self._format_response(response)
         except Exception:
             self.logger.exception(f"Error on responding message {message.id}:")
@@ -234,14 +263,14 @@ class SQLAssistant:
 
         self.logger.info(f"Returning response for message {message.id}")
 
-        return SQLAssistantMessage(**response)
+        return SQLVizAssistantMessage(**response)
 
-    def clear_thread(self, thread_id: str):
-        """Clears a thread
+    async def aclear_thread(self, thread_id: str):
+        """Asynchronously clears a thread
 
         Args:
             thread_id (str): The thread unique identifier
         """
         self._ensure_setup()
         self.logger.info(f"Clearing memory for thread {thread_id}")
-        self.sql_agent.clear_thread(thread_id)
+        await self.router_agent.aclear_thread(thread_id)
