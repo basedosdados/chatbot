@@ -134,6 +134,7 @@ class AsyncSQLAssistant:
         self._is_setup = False
 
     async def setup(self):
+        """Opens the connection pool and setup the checkpoints tables"""
         if self._is_setup:
             return
 
@@ -144,17 +145,12 @@ class AsyncSQLAssistant:
         self._is_setup = True
 
     async def shutdown(self):
+        """Closes the connection pool"""
         if self._pool is not None:
             await self._pool.close()
 
-    async def __aenter__(self) -> Self:
-        await self.setup()
-        return self
-
-    async def __aexit__(self, exc_t, exc_v, exc_tb):
-        await self.shutdown()
-
     def _ensure_setup(self):
+        """Ensures the `setup()` method was called"""
         if not self._is_setup:
             raise NotInitializedError(
                 "The `setup()` method must be called before using this method."
@@ -245,3 +241,10 @@ class AsyncSQLAssistant:
         self._ensure_setup()
         self.logger.info(f"Clearing memory for thread {thread_id}")
         await self.sql_agent.aclear_thread(thread_id)
+
+    async def __aenter__(self) -> Self:
+        await self.setup()
+        return self
+
+    async def __aexit__(self, exc_t, exc_v, exc_tb):
+        await self.shutdown()

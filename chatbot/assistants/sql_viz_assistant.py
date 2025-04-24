@@ -162,6 +162,7 @@ class SQLVizAssistant:
         self._is_setup = False
 
     def setup(self):
+        """Opens the connection pool and setup the checkpoints tables"""
         if self._is_setup:
             return
 
@@ -172,17 +173,12 @@ class SQLVizAssistant:
         self._is_setup = True
 
     def shutdown(self):
+        """Closes the connection pool"""
         if self._pool is not None:
             self._pool.close()
 
-    def __enter__(self) -> Self:
-        self.setup()
-        return self
-
-    def __exit__(self, exc_t, exc_v, exc_tb):
-        self.shutdown()
-
     def _ensure_setup(self):
+        """Ensures the `setup()` method was called"""
         if not self._is_setup:
             raise NotInitializedError(
                 "The `setup()` method must be called before using this method."
@@ -274,3 +270,10 @@ class SQLVizAssistant:
         self._ensure_setup()
         self.logger.info(f"Clearing memory for thread {thread_id}")
         self.router_agent.clear_thread(thread_id)
+
+    def __enter__(self) -> Self:
+        self.setup()
+        return self
+
+    def __exit__(self, exc_t, exc_v, exc_tb):
+        self.shutdown()
