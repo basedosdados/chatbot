@@ -1,7 +1,8 @@
 import codecs
 import os
 import uuid
-from typing import Any, Self
+from typing import Any
+from typing_extensions import Self
 
 import sqlparse
 from langgraph.checkpoint.postgres import PostgresSaver
