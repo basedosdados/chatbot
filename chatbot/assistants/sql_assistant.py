@@ -36,13 +36,13 @@ class SQLAssistant:
             If `None` and `checkpointer` is `True`, falls back to the `DB_URL` environment variable.
             Defaults to `None`.
         chroma_host (str | None, optional):
-            Hostname for the ChromaDB client. If `None`, falls back to the `CHROMA_HOST`
+            Hostname for a Chroma server. If `None`, falls back to the `CHROMA_HOST`
             environment variable. Defaults to `None`.
         chroma_port (str | int | None, optional):
-            Port for the ChromaDB client. If `None`, falls back to the `CHROMA_PORT`
+            Port for a Chroma server. If `None`, falls back to the `CHROMA_PORT`
             environment variable. Defaults to `None`.
         chroma_collection (str | None, optional):
-            Name of the ChromaDB collection that contains examples for the `SQLAgent` LLM calls.
+            Name of a Chroma collection that contains examples for the `SQLAgent` LLM calls.
             If set to `None`, will fallback to the `SQL_CHROMA_COLLECTION` env variable. Defaults to None.
         question_limit (int | None, optional):
             Maximum number of previous questions to keep in memory. If `None`, all questions are kept.
