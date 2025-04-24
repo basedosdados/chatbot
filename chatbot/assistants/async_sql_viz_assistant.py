@@ -102,7 +102,7 @@ class AsyncSQLVizAssistant:
             conn_kwargs = {
                 "autocommit": True,
                 "prepare_threshold": 0
-            },
+            }
 
             self._pool = AsyncConnectionPool(
                 conninfo=checkpointer_db_url,
@@ -216,7 +216,7 @@ class AsyncSQLVizAssistant:
 
         return formatted_response
 
-    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
+    async def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
         """Asynchronously sends a user message to the `RouterAgent` and returns its response
 
         Args:
@@ -261,7 +261,7 @@ class AsyncSQLVizAssistant:
 
         return SQLVizAssistantMessage(**response)
 
-    async def aclear_thread(self, thread_id: str):
+    async def clear_thread(self, thread_id: str):
         """Asynchronously clears a thread
 
         Args:

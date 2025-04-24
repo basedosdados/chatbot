@@ -98,7 +98,7 @@ class AsyncSQLAssistant:
             conn_kwargs = {
                 "autocommit": True,
                 "prepare_threshold": 0
-            },
+            }
 
             self._pool = AsyncConnectionPool(
                 conninfo=checkpointer_db_url,
@@ -187,7 +187,7 @@ class AsyncSQLAssistant:
 
         return formatted_response
 
-    async def ainvoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
+    async def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
         """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
@@ -232,7 +232,7 @@ class AsyncSQLAssistant:
 
         return SQLAssistantMessage(**response)
 
-    async def aclear_thread(self, thread_id: str):
+    async def clear_thread(self, thread_id: str):
         """Asynchronously clears a thread
 
         Args:

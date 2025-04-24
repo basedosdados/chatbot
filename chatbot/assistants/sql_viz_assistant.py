@@ -102,7 +102,7 @@ class SQLVizAssistant:
             conn_kwargs = {
                 "autocommit": True,
                 "prepare_threshold": 0
-            },
+            }
 
             self._pool = ConnectionPool(
                 conninfo=checkpointer_db_url,
