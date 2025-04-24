@@ -1,20 +1,21 @@
 import uuid
 
 import pytest
+import pytest_asyncio
 from loguru import logger
 
 from chatbot.agents import RouterAgent
 from chatbot.agents.reducers import Item
 from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
-from chatbot.assistants import (SQLVizAssistant, SQLVizAssistantMessage,
+from chatbot.assistants import (AsyncSQLVizAssistant, SQLVizAssistantMessage,
                                 UserMessage)
 from chatbot.models import ModelURI
 
 MODEL_URI = ModelURI.gpt_4o_mini
 
-@pytest.fixture
-def assistant(monkeypatch):
-    """Mocks SQLVizAssistant, as it makes calls to external APIs and logs activities"""
+@pytest_asyncio.fixture
+async def assistant(monkeypatch):
+    """Mocks AsyncSQLVizAssistant, as it makes calls to external APIs and logs activities"""
     def mock_logger_info(self):
         ...
 
@@ -22,7 +23,7 @@ def assistant(monkeypatch):
         self.checkpointer = checkpointer
         self.logger = logger
 
-    def mock_invoke(self, question, config):
+    async def mock_ainvoke(self, question, config):
         chart_data = ChartData()
         chart_metadata = ChartMetadata()
         chart = Chart(
@@ -52,15 +53,15 @@ def assistant(monkeypatch):
 
     monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
-    monkeypatch.setattr(RouterAgent, "invoke", mock_invoke)
-    monkeypatch.setattr(SQLVizAssistant, "__init__", mock_assistant_init)
+    monkeypatch.setattr(RouterAgent, "ainvoke", mock_ainvoke)
+    monkeypatch.setattr(AsyncSQLVizAssistant, "__init__", mock_assistant_init)
 
     mock_agent = RouterAgent(
         checkpointer=None,
         logger=logger,
     )
 
-    with SQLVizAssistant(
+    async with AsyncSQLVizAssistant(
         model_uri=MODEL_URI,
         pool=None,
         checkpointer=None,
@@ -73,7 +74,7 @@ def assistant(monkeypatch):
 def user_message() -> UserMessage:
     return UserMessage(content="mock question")
 
-def test_format_response(assistant: SQLVizAssistant):
+def test_format_response(assistant: AsyncSQLVizAssistant):
     response = {
         "final_answer": "hello world!",
         "sql_queries": [
@@ -101,7 +102,7 @@ def test_format_response(assistant: SQLVizAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_format_response_with_special_characters(assistant: SQLVizAssistant):
+def test_format_response_with_special_characters(assistant: AsyncSQLVizAssistant):
     response = {
         "final_answer": "\n\\xc4\\xa7&\\xc5\\x82\\xc5\\x82\\xc3\\xb8 w\\xc3\\xb8\\xc2\\xae\\xc5\\x82\\xc3\\xb0!\n",
         "sql_queries": [
@@ -129,7 +130,7 @@ def test_format_response_with_special_characters(assistant: SQLVizAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
+def test_format_response_with_no_sql_queries(assistant: AsyncSQLVizAssistant):
     response = {
         "final_answer": "hello world!",
         "sql_queries": [],
@@ -154,8 +155,9 @@ def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
-    response = assistant.invoke(user_message)
+@pytest.mark.asyncio
+async def test_invoke(assistant: AsyncSQLVizAssistant, user_message: UserMessage):
+    response = await assistant.invoke(user_message)
 
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
@@ -173,5 +175,6 @@ def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart
 
-def test_clear_thread(assistant: SQLVizAssistant):
-    assistant.clear_thread(thread_id=str(uuid.uuid4()))
+@pytest.mark.asyncio
+async def test_clear_thread(assistant: AsyncSQLVizAssistant):
+    await assistant.clear_thread(thread_id=str(uuid.uuid4()))
