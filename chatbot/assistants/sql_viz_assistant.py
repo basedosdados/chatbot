@@ -174,8 +174,13 @@ class SQLVizAssistant:
 
     def shutdown(self):
         """Closes the connection pool"""
+        if not self._is_setup:
+            return
+
         if self._pool is not None:
             self._pool.close()
+
+        self._is_setup = False
 
     def _ensure_setup(self):
         """Ensures the `setup()` method was called"""
