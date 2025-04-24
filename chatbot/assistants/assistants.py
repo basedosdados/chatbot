@@ -19,8 +19,8 @@ class AsyncAssistant(Protocol):
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
         ...
 
-    async def ainvoke(self, message: UserMessage, thread_id: str) -> Any:
+    async def invoke(self, message: UserMessage, thread_id: str) -> Any:
         ...
 
-    async def aclear_thread(self, thread_id: str):
+    async def clear_thread(self, thread_id: str):
         ...
