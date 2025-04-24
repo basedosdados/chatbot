@@ -1,18 +1,20 @@
 import uuid
 
 import pytest
+import pytest_asyncio
 from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.agents.reducers import Item
-from chatbot.assistants import SQLAssistant, SQLAssistantMessage, UserMessage
+from chatbot.assistants import (AsyncSQLAssistant, SQLAssistantMessage,
+                                UserMessage)
 from chatbot.models import ModelURI
 
 MODEL_URI = ModelURI.gpt_4o_mini
 
-@pytest.fixture
-def assistant(monkeypatch):
-    """Mocks SQLAssistant, as it makes calls to external APIs and logs activities"""
+@pytest_asyncio.fixture
+async def assistant(monkeypatch):
+    """Mocks AsyncSQLAssistant, as it makes calls to external APIs and logs activities"""
     def mock_logger_info(self):
         ...
 
@@ -20,7 +22,7 @@ def assistant(monkeypatch):
         self.checkpointer = checkpointer
         self.logger = logger
 
-    def mock_invoke(self, question, config):
+    async def mock_ainvoke(self, question, config):
         return {
             "question": "mock question",
             "final_answer": "mock final answer",
@@ -36,21 +38,21 @@ def assistant(monkeypatch):
         self.model_uri = model_uri
         self.sql_agent = sql_agent
         self.logger = logger
-        self._pool = None
+        self._pool = pool
         self._checkpointer = checkpointer
         self._is_setup = False
 
     monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
-    monkeypatch.setattr(SQLAgent, "invoke", mock_invoke)
-    monkeypatch.setattr(SQLAssistant, "__init__", mock_assistant_init)
+    monkeypatch.setattr(SQLAgent, "ainvoke", mock_ainvoke)
+    monkeypatch.setattr(AsyncSQLAssistant, "__init__", mock_assistant_init)
 
     mock_agent = SQLAgent(
         checkpointer=None,
         logger=logger
     )
 
-    with SQLAssistant(
+    async with AsyncSQLAssistant(
         model_uri=MODEL_URI,
         pool=None,
         checkpointer=None,
@@ -63,7 +65,7 @@ def assistant(monkeypatch):
 def user_message() -> UserMessage:
     return UserMessage(content="mock question")
 
-def test_format_response(assistant: SQLAssistant):
+def test_format_response(assistant: AsyncSQLAssistant):
     response = {
         "final_answer": "hello world!",
         "sql_queries": [
@@ -81,7 +83,7 @@ def test_format_response(assistant: SQLAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_format_response_with_special_characters(assistant: SQLAssistant):
+def test_format_response_with_special_characters(assistant: AsyncSQLAssistant):
     response = {
         "final_answer": "\n\\xc4\\xa7&\\xc5\\x82\\xc5\\x82\\xc3\\xb8 w\\xc3\\xb8\\xc2\\xae\\xc5\\x82\\xc3\\xb0!\n",
         "sql_queries": [
@@ -99,7 +101,7 @@ def test_format_response_with_special_characters(assistant: SQLAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_format_response_with_no_sql_queries(assistant: SQLAssistant):
+def test_format_response_with_no_sql_queries(assistant: AsyncSQLAssistant):
     response = {
         "final_answer": "hello world!",
         "sql_queries": [],
@@ -114,8 +116,9 @@ def test_format_response_with_no_sql_queries(assistant: SQLAssistant):
 
     assert formatted_response == expected_formatted_response
 
-def test_invoke(assistant: SQLAssistant, user_message: UserMessage):
-    response = assistant.invoke(user_message)
+@pytest.mark.asyncio
+async def test_invoke(assistant: AsyncSQLAssistant, user_message: UserMessage):
+    response = await assistant.invoke(user_message)
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
@@ -127,5 +130,6 @@ def test_invoke(assistant: SQLAssistant, user_message: UserMessage):
     assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
 
-def test_clear_thread(assistant: SQLAssistant):
-    assistant.clear_thread(thread_id=str(uuid.uuid4()))
+@pytest.mark.asyncio
+async def test_clear_thread(assistant: AsyncSQLAssistant):
+    await assistant.clear_thread(thread_id=str(uuid.uuid4()))

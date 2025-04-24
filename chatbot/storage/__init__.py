@@ -1,1 +1,1 @@
-from .vector_database import get_chroma_client
+from .vector_database import *
