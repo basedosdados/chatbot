@@ -68,14 +68,14 @@ class SQLVizAssistant:
         else:
             raise TypeError(
                 "`checkpointer` must be an instance of langgraph `PostgresSaver` "
-                f"or `None`, but got `{type(checkpointer)}`"
+                f"or `None`, but got `{type(checkpointer)}`."
             )
 
         if sql_vector_store is not None and not isinstance(sql_vector_store, VectorStore) \
         or viz_vector_store is not None and not isinstance(viz_vector_store, VectorStore):
             raise TypeError(
                 "`sql_vector_store` and `viz_vector_store` must be instances of langchain `VectorStore` or `None`, "
-                f"but got `sql_vector_store`: {type(sql_vector_store)}`, `viz_vector_store`: {type(viz_vector_store)}`"
+                f"but got `sql_vector_store`: {type(sql_vector_store)}`, `viz_vector_store`: {type(viz_vector_store)}`."
             )
 
         self.model_uri = model_uri

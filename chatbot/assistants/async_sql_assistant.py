@@ -60,13 +60,13 @@ class AsyncSQLAssistant:
         if checkpointer is not None and not isinstance(checkpointer, AsyncPostgresSaver):
             raise TypeError(
                 "`checkpointer` must be an instance of langgraph `AsyncPostgresSaver` "
-                f"or `None`, but got `{type(checkpointer)}`"
+                f"or `None`, but got `{type(checkpointer)}`."
             )
 
         if vector_store is not None and not isinstance(vector_store, VectorStore):
             raise TypeError(
                 "`vector_store` must be an instance of langchain `VectorStore` "
-                f"or `None`, but got `{type(vector_store)}`"
+                f"or `None`, but got `{type(vector_store)}`."
             )
 
         self.model_uri = model_uri
