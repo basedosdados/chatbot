@@ -2,18 +2,16 @@ import codecs
 import os
 import uuid
 from typing import Any
-from typing_extensions import Self
 
 import sqlparse
+from langchain.vectorstores import VectorStore
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import AsyncConnectionPool
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.databases import Database
-from chatbot.exceptions import EnvironmentVariableUnset, NotInitializedError
+from chatbot.exceptions import EnvironmentVariableUnset
 from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
-from chatbot.storage import get_chroma_or_none
 
 from .datatypes import ModelURI, SQLVizAssistantMessage, UserMessage
 
@@ -28,45 +26,31 @@ class AsyncSQLVizAssistant:
             URI of the LLM to be used, in the format `<provider>/<model_name>`, e.g.,
             `openai/gpt-4o` or `google/gemini-1.5-flash-001`. If `None`, falls back
             to the `MODEL_URI` environment variable. Defaults to `None`.
-        checkpointer (bool, optional):
-            If `True`, uses an `AsyncPostgresSaver` checkpointer to persist state across assistant runs.
-            If `False`, the assistant will not retain memory of previous messages. Defaults to `True`.
-        checkpointer_db_url (str | None, optional):
-            PostgreSQL database URL used to persist checkpoints when `checkpointer` is `True`.
-            If `None` and `checkpointer` is `True`, falls back to the `DB_URL` environment variable.
+        checkpointer (AsyncPostgresSaver | None, optional):
+            A checkpointer that will be used for persisting state across assistant's runs.
+            If set to `None`, the assistant will not retain memory of previous messages.
             Defaults to `None`.
-        chroma_host (str | None, optional):
-            Hostname for a Chroma server. If `None`, falls back to the `CHROMA_HOST`
-            environment variable. Defaults to `None`.
-        chroma_port (str | int | None, optional):
-            Port for a Chroma server. If `None`, falls back to the `CHROMA_PORT`
-            environment variable. Defaults to `None`.
-        sql_chroma_collection (str | None, optional):
-            Name of a Chroma collection that contains examples for the `SQLAgent` LLM calls.
-            If set to `None`, will fallback to the `SQL_CHROMA_COLLECTION` env variable. Defaults to None.
-        viz_chroma_collection (str | None, optional):
-            Name of a Chroma collection that contains examples for the `VizAgent` LLM calls.
-            If set to `None`, will fallback to the `VIZ_CHROMA_COLLECTION` env variable. Defaults to None.
+        sql_vector_store (VectorStore | None, optional):
+            A vector store that contains examples for the `SQLAgent` LLM calls.
+            If set to `None`, no examples will be used. Defaults to `None`.
+        viz_vector_store (VectorStore | None, optional):
+            A vector store that contains examples for the `VizAgent` LLM calls.
+            If set to `None`, no examples will be used. Defaults to `None`.
         question_limit (int | None, optional):
-            Maximum number of previous questions to keep in memory. If `None`, all questions are kept.
-            Defaults to `5`.
+            Maximum number of previous questions to keep in memory.
+            If `None`, all questions are kept. Defaults to `5`.
 
     Raises:
         EnvironmentVariableError: If `model_uri` is not provided and `MODEL_URI` is not set.
-        EnvironmentVariableError: If `checkpointer_db_url` is not provided and `DB_URL` is not set.
-        TypeError: If `model_uri` is neither a string nor a `ModelURI`.
     """
 
     def __init__(
         self,
         database: Database,
         model_uri: str | ModelURI | None = None,
-        checkpointer: bool = True,
-        checkpointer_db_url: str | None = None,
-        chroma_host: str | None = None,
-        chroma_port: str | int | None = None,
-        sql_chroma_collection: str | None = None,
-        viz_chroma_collection: str | None = None,
+        checkpointer: AsyncPostgresSaver | None = None,
+        sql_vector_store: VectorStore | None = None,
+        viz_vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         model_uri = model_uri or os.getenv("MODEL_URI")
@@ -74,66 +58,28 @@ class AsyncSQLVizAssistant:
         if model_uri is None:
             raise EnvironmentVariableUnset(
                 "The model URI was not passed and could not be inferred from the environment. "
-                "Please pass a valid model URI to the `model_uri` argument or "
-                "set the `MODEL_URI` environment variable"
+                "Please pass a valid model URI or set the `MODEL_URI` environment variable."
             )
-        elif isinstance(model_uri, str):
-            model_uri = ModelURI(model_uri)
-        elif not isinstance(model_uri, ModelURI):
+
+        if checkpointer is None:
+            subgraph_checkpointer = None
+        elif isinstance(checkpointer, AsyncPostgresSaver):
+            subgraph_checkpointer = True
+        else:
             raise TypeError(
-                f"`model_uri` must be of type `str` or `ModelURI`, got `{type(model_uri)}`"
+                "`checkpointer` must be an instance of langgraph `PostgresSaver` "
+                f"or `None`, but got `{type(checkpointer)}`."
+            )
+
+        if sql_vector_store is not None and not isinstance(sql_vector_store, VectorStore) \
+        or viz_vector_store is not None and not isinstance(viz_vector_store, VectorStore):
+            raise TypeError(
+                "`sql_vector_store` and `viz_vector_store` must be instances of langchain `VectorStore` or `None`, "
+                f"but got `sql_vector_store`: {type(sql_vector_store)}, `viz_vector_store`: {type(viz_vector_store)}."
             )
 
         self.model_uri = model_uri
         model = ModelFactory.from_model_uri(self.model_uri)
-
-        if checkpointer:
-            checkpointer_db_url = checkpointer_db_url or os.getenv("DB_URL")
-
-            if checkpointer_db_url is None:
-                raise EnvironmentVariableUnset(
-                    "The checkpointer database URL was not passed and could not be inferred "
-                    "from the environment. Please pass a valid database URL to the `db_url` "
-                    "argument or set the `DB_URL` environment variable"
-                )
-
-            # Connection kwargs defined according to:
-            # https://github.com/langchain-ai/langgraph/issues/2887
-            # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-            conn_kwargs = {
-                "autocommit": True,
-                "prepare_threshold": 0
-            }
-
-            self._pool = AsyncConnectionPool(
-                conninfo=checkpointer_db_url,
-                kwargs=conn_kwargs,
-                max_size=8,
-                open=False,
-            )
-            self._checkpointer = AsyncPostgresSaver(self._pool)
-            subgraph_checkpointer = True
-        else:
-            self._pool = None
-            self._checkpointer = None
-            subgraph_checkpointer = None
-
-        chroma_host = chroma_host or os.getenv("CHROMA_HOST")
-        chroma_port = chroma_port or os.getenv("CHROMA_PORT")
-        sql_chroma_collection = sql_chroma_collection or os.getenv("SQL_CHROMA_COLLECTION")
-        viz_chroma_collection = viz_chroma_collection or os.getenv("VIZ_CHROMA_COLLECTION")
-
-        sql_vector_store = get_chroma_or_none(
-            host=chroma_host,
-            port=chroma_port,
-            collection=sql_chroma_collection
-        )
-
-        viz_vector_store = get_chroma_or_none(
-            host=chroma_host,
-            port=chroma_port,
-            collection=viz_chroma_collection
-        )
 
         sql_agent = SQLAgent(
             db=database,
@@ -154,41 +100,11 @@ class AsyncSQLVizAssistant:
             model=model,
             sql_agent=sql_agent,
             viz_agent=viz_agent,
-            checkpointer=self._checkpointer,
+            checkpointer=checkpointer,
             question_limit=question_limit
         )
 
         self.logger = get_logger(self.__class__.__name__)
-
-        self._is_setup = False
-
-    async def setup(self):
-        """Opens the connection pool and setup the checkpoints tables"""
-        if self._is_setup:
-            return
-
-        if self._checkpointer is not None:
-            await self._pool.open()
-            await self._checkpointer.setup()
-
-        self._is_setup = True
-
-    async def shutdown(self):
-        """Closes the connection pool"""
-        if not self._is_setup:
-            return
-
-        if self._pool is not None:
-            await self._pool.close()
-
-        self._is_setup = False
-
-    def _ensure_setup(self):
-        """Ensures the `setup()` method was called"""
-        if not self._is_setup:
-            raise NotInitializedError(
-                "The `setup()` method must be called before using this method."
-            )
 
     @staticmethod
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
@@ -232,8 +148,6 @@ class AsyncSQLVizAssistant:
         Returns:
             SQLVizAssistantMessage: The generated response
         """
-        self._ensure_setup()
-
         self.logger.info(f"Received message {message.id}: {message.content}")
 
         run_id = str(uuid.uuid4())
@@ -273,13 +187,5 @@ class AsyncSQLVizAssistant:
         Args:
             thread_id (str): The thread unique identifier
         """
-        self._ensure_setup()
         self.logger.info(f"Clearing memory for thread {thread_id}")
         await self.router_agent.aclear_thread(thread_id)
-
-    async def __aenter__(self) -> Self:
-        await self.setup()
-        return self
-
-    async def __aexit__(self, exc_t, exc_v, exc_tb):
-        await self.shutdown()
