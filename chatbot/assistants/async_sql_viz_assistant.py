@@ -75,16 +75,11 @@ class AsyncSQLVizAssistant:
         or viz_vector_store is not None and not isinstance(viz_vector_store, VectorStore):
             raise TypeError(
                 "`sql_vector_store` and `viz_vector_store` must be instances of langchain `VectorStore` or `None`, "
-                f"but got `sql_vector_store`: {type(sql_vector_store)}`, `viz_vector_store`: {type(viz_vector_store)}`."
+                f"but got `sql_vector_store`: {type(sql_vector_store)}, `viz_vector_store`: {type(viz_vector_store)}."
             )
 
         self.model_uri = model_uri
         model = ModelFactory.from_model_uri(self.model_uri)
-
-        if checkpointer is None:
-            subgraph_checkpointer = None
-        else:
-            subgraph_checkpointer = True
 
         sql_agent = SQLAgent(
             db=database,
