@@ -18,8 +18,7 @@ async def assistant(monkeypatch):
     def mock_logger_info(self):
         ...
 
-    def mock_agent_init(self, checkpointer, logger):
-        self.checkpointer = checkpointer
+    def mock_agent_init(self, logger):
         self.logger = logger
 
     async def mock_ainvoke(self, question, config):
@@ -33,33 +32,25 @@ async def assistant(monkeypatch):
             "is_last_step": False
         }
 
-
-    def mock_assistant_init(self, model_uri, pool, checkpointer, sql_agent, logger):
+    def mock_assistant_init(self, model_uri, sql_agent, logger):
         self.model_uri = model_uri
         self.sql_agent = sql_agent
         self.logger = logger
-        self._pool = pool
-        self._checkpointer = checkpointer
-        self._is_setup = False
 
     monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(SQLAgent, "ainvoke", mock_ainvoke)
     monkeypatch.setattr(AsyncSQLAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = SQLAgent(
-        checkpointer=None,
+    mock_agent = SQLAgent(logger=logger)
+
+    mock_assistant = AsyncSQLAssistant(
+        model_uri=MODEL_URI,
+        sql_agent=mock_agent,
         logger=logger
     )
 
-    async with AsyncSQLAssistant(
-        model_uri=MODEL_URI,
-        pool=None,
-        checkpointer=None,
-        sql_agent=mock_agent,
-        logger=logger
-    ) as mock_assistant:
-        yield mock_assistant
+    return mock_assistant
 
 @pytest.fixture
 def user_message() -> UserMessage:

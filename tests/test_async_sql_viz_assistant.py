@@ -19,8 +19,7 @@ async def assistant(monkeypatch):
     def mock_logger_info(self):
         ...
 
-    def mock_agent_init(self, checkpointer, logger):
-        self.checkpointer = checkpointer
+    def mock_agent_init(self, logger):
         self.logger = logger
 
     async def mock_ainvoke(self, question, config):
@@ -43,32 +42,25 @@ async def assistant(monkeypatch):
             "messages": [],
         }
 
-    def mock_assistant_init(self, model_uri, pool, checkpointer, router_agent, logger):
+    def mock_assistant_init(self, model_uri, router_agent, logger):
         self.model_uri = model_uri
-        self._pool = pool
-        self._checkpointer = checkpointer
         self.router_agent = router_agent
         self.logger = logger
-        self._is_setup = False
 
     monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(RouterAgent, "ainvoke", mock_ainvoke)
     monkeypatch.setattr(AsyncSQLVizAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = RouterAgent(
-        checkpointer=None,
-        logger=logger,
-    )
+    mock_agent = RouterAgent(logger=logger,)
 
-    async with AsyncSQLVizAssistant(
+    mock_assistant = AsyncSQLVizAssistant(
         model_uri=MODEL_URI,
-        pool=None,
-        checkpointer=None,
         router_agent=mock_agent,
         logger=logger
-    ) as mock_assistant:
-        yield mock_assistant
+    )
+
+    return mock_assistant
 
 @pytest.fixture
 def user_message() -> UserMessage:
