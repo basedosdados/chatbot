@@ -341,18 +341,20 @@ class VizAgent:
            chart_metadata.chart_type is None:
             return False
 
-        vars = {
+        attrs = {
             chart_metadata.x_axis,
             chart_metadata.y_axis
         }
 
         if chart_metadata.label is not None:
-            vars.add(chart_metadata.label)
+            attrs.add(chart_metadata.label)
 
-        if vars == chart_data.data.keys():
+        chart_attrs = {k for row in chart_data.data for k in row.keys()}
+
+        if attrs.issubset(chart_attrs):
            return True
         else:
-            self.logger.error(f"Chart validation error: one or more of {vars} are not in {chart_data.data.keys()}")
+            self.logger.error(f"Chart validation error: one or more of {attrs} are not in {chart_attrs}")
             return False
 
     def _call_get_answer(self, state: State, config: RunnableConfig) -> dict[str, str|Chart]:

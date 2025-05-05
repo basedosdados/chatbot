@@ -16,7 +16,7 @@ from chatbot.loguru_logging import get_logger
 
 from .prompts import ROUTER_SYSTEM_PROMPT
 from .reducers import Item
-from .structured_outputs import Chart, Route
+from .structured_outputs import Chart, ChartData, ChartMetadata, Route
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 RouterAgentOutput: TypeAlias = dict[str, Literal["sql_agent", "viz_agent"]]
@@ -139,17 +139,30 @@ class RouterAgent:
         Returns:
             VizAgentOutput: The graph state update
         """
-        response = self.viz_agent.invoke(
-            question=state["question"],
-            sql_answer=state["sql_answer"],
-            sql_queries=state["sql_queries"],
-            sql_queries_results=state["sql_queries_results"],
-            config=config
-        )
+        try:
+            response = self.viz_agent.invoke(
+                question=state["question"],
+                sql_answer=state["sql_answer"],
+                sql_queries=state["sql_queries"],
+                sql_queries_results=state["sql_queries_results"],
+                config=config
+            )
+
+            chart = response["chart"]
+            chart_answer = response["chart_answer"]
+        except Exception:
+            self.logger.exception(f"Error on calling the visualization agent:")
+            chart = Chart(
+                data=ChartData(),
+                metadata=ChartMetadata(),
+                is_valid=False
+            )
+            chart_answer = f"Ops, algo deu errado na construção do gráfico! Por favor, tente novamente. "\
+                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
 
         return {
-            "chart": response["chart"],
-            "chart_answer": response["chart_answer"],
+            "chart": chart,
+            "chart_answer": chart_answer
         }
 
     async def _acall_viz_agent(self, state: State, config: RunnableConfig) -> VizAgentOutput:
@@ -162,17 +175,30 @@ class RouterAgent:
         Returns:
             VizAgentOutput: The graph state update
         """
-        response = await self.viz_agent.ainvoke(
-            question=state["question"],
-            sql_answer=state["sql_answer"],
-            sql_queries=state["sql_queries"],
-            sql_queries_results=state["sql_queries_results"],
-            config=config
-        )
+        try:
+            response = await self.viz_agent.ainvoke(
+                question=state["question"],
+                sql_answer=state["sql_answer"],
+                sql_queries=state["sql_queries"],
+                sql_queries_results=state["sql_queries_results"],
+                config=config
+            )
+
+            chart = response["chart"]
+            chart_answer = response["chart_answer"]
+        except Exception:
+            self.logger.exception(f"Error on calling the visualization agent:")
+            chart = Chart(
+                data=ChartData(),
+                metadata=ChartMetadata(),
+                is_valid=False
+            )
+            chart_answer = f"Ops, algo deu errado na construção do gráfico! Por favor, tente novamente. "\
+                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
 
         return {
-            "chart": response["chart"],
-            "chart_answer": response["chart_answer"],
+            "chart": chart,
+            "chart_answer": chart_answer,
         }
 
     def _process_answers(self, state: State) -> dict[str, str]:
