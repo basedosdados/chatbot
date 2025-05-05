@@ -1,54 +1,11 @@
-from collections import defaultdict
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, Json, SerializeAsAny, model_validator
+from pydantic import BaseModel, Field, Json, SerializeAsAny
 
 
 class ChartData(BaseModel):
-    data: Json[Any] | None = Field(description="Preprocessed data", default=None)
+    data: Json[list[dict[str, Any]]] | None = Field(description="Preprocessed data", default=None)
     reasoning: str | None = Field(description="Brief explanation of how the query results were processed, including any assumptions made, conflicts resolved, or placeholders used", default=None)
-
-    @model_validator(mode="after")
-    def _merge_data(self) -> "ChartData":
-        """Transforms a list of dictionaries into a dictionary of lists, padding with None values
-        when the lists have different lengths
-
-        Returns:
-            ChartData: The updated ChartData object
-
-        Examples:
-            >>> list_of_dicts = [
-            ...     {"k1": "v1", "k2": "v2"}
-            ...     {"k1": "v3"}
-            ... ]
-            >>> _merge_data(list_of_dicts)
-            {"k1": ["v1", "v3"], "k2": ["v2", None]}
-        """
-        if self.data is None:
-            return self
-
-        # the validator is also called when creating the Chart object, so this check is necessary
-        # this is a pydantic bug, as stated in https://github.com/pydantic/pydantic/issues/8452
-        if isinstance(self.data, dict):
-            return self
-
-        all_columns = set()
-
-        for row in self.data:
-            all_columns.update(row.keys())
-
-        merged = defaultdict(list)
-
-        for row in self.data:
-            for column in all_columns:
-                merged[column].append(row.get(column))
-
-        # ensures we have the same number of data points for each variable
-        assert len({len(l) for l in merged.values()}) == 1
-
-        self.data = dict(merged)
-
-        return self
 
 class ChartMetadata(BaseModel):
     chart_type: Literal["bar", "horizontal_bar", "line", "pie", "scatter"] | None = Field(description="Name of the chart type", default=None)
