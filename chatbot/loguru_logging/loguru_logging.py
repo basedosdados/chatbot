@@ -1,12 +1,19 @@
 import copy
+import sys
 from pathlib import Path
 from typing import Literal
 
 from loguru import logger
 
 
-# Remove all handlers
+# Remove default handler
 logger.remove()
+
+# Create an independent empty logger
+logger_template = copy.deepcopy(logger)
+
+# Restore default handler
+logger.add(sys.stderr)
 
 # Formatting function
 def _format(record):
@@ -27,7 +34,7 @@ def get_logger(
 
     Args:
         classname (str | None, optional): The name of the class which the logger belongs to. Defaults to None.
-        sink (str | Path, optional): The file where the logger will write stuff. Defaults to _home_dir/".chatbot/log/chatbot.log".
+        sink (str | Path, optional): The file where the logger will write stuff. Defaults to "/var/log/chatbot/chatbot.log".
         level (Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"], optional): The logger severity level. Defaults to "DEBUG".
         rotation (str | None, optional): Rotation time. Defaults to "1 day".
         retention (str | None, optional): Retention time. Defaults to None.
@@ -38,7 +45,7 @@ def get_logger(
     Returns:
         Logger: A loguru logger
     """
-    logger_ = copy.deepcopy(logger)
+    logger_ = copy.deepcopy(logger_template)
 
     logger_.add(
         sink=sink,
