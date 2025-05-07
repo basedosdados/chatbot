@@ -13,7 +13,7 @@ from chatbot.exceptions import EnvironmentVariableUnset
 from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 
-from .datatypes import ModelURI, SQLAssistantMessage, UserMessage
+from .datatypes import SQLAssistantMessage, UserMessage
 
 
 class SQLAssistant:
@@ -22,9 +22,9 @@ class SQLAssistant:
     Args:
         database (Database):
             A `Database` object implementing the `Database` protocol.
-        model_uri (str | ModelURI | None, optional):
+        model_uri (str | None, optional):
             URI of the LLM to be used, in the format `<provider>/<model_name>`, e.g.,
-            `openai/gpt-4o` or `google/gemini-1.5-flash-001`. If `None`, falls back
+            `openai/gpt-4o` or `google/gemini-2.0-flash`. If `None`, falls back
             to the `MODEL_URI` environment variable. Defaults to `None`.
         checkpointer (PostgresSaver | None, optional):
             A checkpointer that will be used for persisting state across assistant's runs.
@@ -44,7 +44,7 @@ class SQLAssistant:
     def __init__(
         self,
         database: Database,
-        model_uri: str | ModelURI | None = None,
+        model_uri: str | None = None,
         checkpointer: PostgresSaver | None = None,
         vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
@@ -69,8 +69,9 @@ class SQLAssistant:
                 f"or `None`, but got `{type(vector_store)}`."
             )
 
+        model = ModelFactory.from_model_uri(model_uri)
+
         self.model_uri = model_uri
-        model = ModelFactory.from_model_uri(self.model_uri)
 
         self.sql_agent = SQLAgent(
             db=database,
