@@ -69,7 +69,7 @@ class AsyncSQLAssistant:
                 f"or `None`, but got `{type(vector_store)}`."
             )
 
-        model = ModelFactory.from_model_uri(self.model_uri)
+        model = ModelFactory.from_model_uri(model_uri)
 
         self.model_uri = model_uri
 

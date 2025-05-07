@@ -78,7 +78,7 @@ class SQLVizAssistant:
                 f"but got `sql_vector_store`: {type(sql_vector_store)}, `viz_vector_store`: {type(viz_vector_store)}."
             )
 
-        model = ModelFactory.from_model_uri(self.model_uri)
+        model = ModelFactory.from_model_uri(model_uri)
 
         self.model_uri = model_uri
 
