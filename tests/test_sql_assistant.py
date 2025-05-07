@@ -6,9 +6,8 @@ from loguru import logger
 from chatbot.agents import SQLAgent
 from chatbot.agents.reducers import Item
 from chatbot.assistants import SQLAssistant, SQLAssistantMessage, UserMessage
-from chatbot.models import ModelURI
 
-MODEL_URI = ModelURI.gpt_4o_mini
+MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest.fixture
 def assistant(monkeypatch):

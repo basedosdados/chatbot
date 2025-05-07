@@ -9,9 +9,8 @@ from chatbot.agents.reducers import Item
 from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
 from chatbot.assistants import (AsyncSQLVizAssistant, SQLVizAssistantMessage,
                                 UserMessage)
-from chatbot.models import ModelURI
 
-MODEL_URI = ModelURI.gpt_4o_mini
+MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest_asyncio.fixture
 async def assistant(monkeypatch):
