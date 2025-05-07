@@ -30,7 +30,7 @@ class ModelFactory:
         if re.fullmatch(r"^[^/]+/[^/]+$", model_uri) is None:
             raise ValueError(
                 f"Invalid model URI format: '{model_uri}'. Expected format is '<provider>/<model_name>', "
-                "e.g., 'openai/gpt-4' or 'google/gemini-2.0-flash'."
+                "e.g., 'openai/gpt-4o' or 'google/gemini-2.0-flash'."
             )
 
         model_provider, model_name = model_uri.split("/")
