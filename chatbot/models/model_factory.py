@@ -13,8 +13,8 @@ class ModelFactory:
         Create a LangChain chat model instance from a model URI.
 
         The URI must follow the format `<provider>/<model_name>`, where:
-          - `<provider>` is one of: `openai`, `google`
-          - `<model_name>` is the name of the model to use
+          - `<provider>` is one of: `openai`, `google`.
+          - `<model_name>` is the name of the model to use.
 
         Examples are `openai/gpt-4o` or `google/gemini-2.0-flash`.
 
