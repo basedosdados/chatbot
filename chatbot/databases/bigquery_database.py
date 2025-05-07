@@ -21,18 +21,17 @@ CACHE_TTL = 60*60
 Data = namedtuple("Data", ("dataset", "tables"))
 
 class BigQueryDatabase:
-    """Wrapper around BigQuery Python client,
-    for fetching and formatting data for the `SQLAgent`
+    """A BigQuery-backed database interface, for fetching and formatting data.
 
     Args:
         billing_project (str | None, optional):
             Project ID for the project which the client acts on behalf of.
             Will be used when creating a dataset/table/job. If not provided,
-            falls back to the default project inferred from the environment
+            falls back to the default project inferred from the environment.
         query_project (str | None, optional):
             Project ID for the project from which the datasets and tables
             will be fetched and in which SQL queries will be run. If not provided,
-            falls back to the default project inferred from the environment
+            falls back to the default project inferred from the environment.
         max_workers (int | None, optional):
             Maximum number of workers for `ThreadPoolExecutor` instances
             used during data fetching. Defaults to `4`.

@@ -7,19 +7,18 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.tools.base import InjectedToolCallId
 from langgraph.types import Command
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from chatbot.agents.prompts import SQL_CHECK_SYSTEM_PROMPT
 from chatbot.agents.reducers import Item
-from chatbot.databases import BigQueryDatabase
+from chatbot.databases import Database
 
 
 class BaseBigQueryTool(BaseModel):
     """Base tool for interacting with a BigQuery database"""
-    db: BigQueryDatabase = Field(exclude=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    db: Database = Field(exclude=True)
 
 class _ListDatasetsToolInput(BaseModel):
     tool_input: str = Field("", description="An empty string.")
