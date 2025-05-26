@@ -14,9 +14,9 @@ from chatbot.agents.sql_agent import SQLAgent
 from chatbot.agents.visualization_agent import VizAgent
 from chatbot.loguru_logging import get_logger
 
-from .prompts import ROUTER_SYSTEM_PROMPT
+from .prompts import ROUTER_SYSTEM_PROMPT, ROUTER2_SYSTEM_PROMPT
 from .reducers import Item
-from .structured_outputs import Chart, ChartData, ChartMetadata, Route
+from .structured_outputs import Chart, ChartData, ChartMetadata, Route, Route2
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 RouterAgentOutput: TypeAlias = dict[str, Literal["sql_agent", "viz_agent"]]
@@ -61,6 +61,12 @@ class RouterAgent:
             lambda messages: [router_system_message] + messages
         ) | model.with_structured_output(Route)
 
+        router2_system_message = SystemMessage(ROUTER2_SYSTEM_PROMPT)
+
+        self.router_2 = (
+            lambda messages: [router2_system_message] + messages
+        ) | model.with_structured_output(Route2)
+
         self.sql_agent = sql_agent
 
         self.viz_agent = viz_agent
@@ -89,6 +95,26 @@ class RouterAgent:
             RouterAgentOutput: The next node to route to
         """
         response: Route = await self.router.ainvoke(state["messages"], config)
+        return {"next": response.next}
+
+    def _call_router_2(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+        """Calls the router agent
+
+        Returns:
+            RouterAgentOutput: The next node to route to
+        """
+        message = f"User question: {state['question']}\n\nQuery results: {state['sql_queries_results']}\n\nAnswer: {state['sql_answer']}"
+        response: Route2 = self.router_2.invoke(message, config)
+        return {"next": response.next}
+
+    async def _acall_router_2(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+        """Asynchronously calls the router agent
+
+        Returns:
+            RouterAgentOutput: The next node to route to
+        """
+        message = f"User question: {state['question']}\n\nQuery results: {state['sql_queries_results']}\n\nAnswer: {state['sql_answer']}"
+        response: Route2 = await self.router_2.ainvoke(message, config)
         return {"next": response.next}
 
     def _call_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
@@ -260,6 +286,9 @@ class RouterAgent:
         graph.add_node("sql_agent", RunnableLambda(self._call_sql_agent, self._acall_sql_agent))
         graph.add_node("viz_agent", RunnableLambda(self._call_viz_agent, self._acall_viz_agent))
 
+        # router node, calls the sql_agent or the viz_agent
+        graph.add_node("check_before_viz", RunnableLambda(self._call_router_2, self._acall_router_2))
+
         # node for building the final answer
         graph.add_node("process_answers", self._process_answers)
 
@@ -267,9 +296,12 @@ class RouterAgent:
         graph.add_node("prune_messages", self._prune_messages)
 
         graph.add_edge("sql_agent", "viz_agent")
+
+        graph.add_edge("sql_agent", "check_before_viz")
         graph.add_edge("viz_agent", "process_answers")
         graph.add_edge("process_answers", "prune_messages")
         graph.add_conditional_edges("router", _route)
+        graph.add_conditional_edges("check_before_viz", _route) # check will lead to either viz_agent or to process_answers
 
         graph.set_entry_point("router")
         graph.set_finish_point("prune_messages")
@@ -361,6 +393,6 @@ class RouterAgent:
         except Exception:
             self.logger.exception(f"Error on clearing thread {thread_id}:")
 
-def _route(state: State) -> Literal["sql_agent", "viz_agent"]:
+def _route(state: State) -> Literal["sql_agent", "viz_agent", "process_answers"]:
     "Routes to the next node"
     return state["next"]

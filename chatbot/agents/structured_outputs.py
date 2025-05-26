@@ -35,3 +35,7 @@ class Rephrase(BaseModel):
 class Route(BaseModel):
     next: Literal["sql_agent", "viz_agent"] = Field(description="The worker name", default="sql_agent")
     reasoning: str = Field(description="Brief reasoning of why the worker was called")
+
+class Route2(BaseModel):
+    next: Literal["viz_agent", "process_answers"] = Field(description="The next step", default="viz_agent")
+    reasoning: str = Field(description="Brief reasoning of why the worker was called")
