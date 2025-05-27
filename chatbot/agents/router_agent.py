@@ -14,9 +14,11 @@ from chatbot.agents.sql_agent import SQLAgent
 from chatbot.agents.visualization_agent import VizAgent
 from chatbot.loguru_logging import get_logger
 
-from .prompts import ROUTER_SYSTEM_PROMPT, ROUTER2_SYSTEM_PROMPT
+from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
+                      POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import Item
-from .structured_outputs import Chart, ChartData, ChartMetadata, Route, Route2
+from .structured_outputs import (Chart, ChartData, ChartMetadata,
+                                 InitialRouting, PostSQLRouting)
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 RouterAgentOutput: TypeAlias = dict[str, Literal["sql_agent", "viz_agent"]]
@@ -25,6 +27,9 @@ VizAgentOutput: TypeAlias = dict[str, str|Chart]
 
 
 class State(TypedDict):
+    # node before routing
+    previous: str
+
     # next node to route to
     next: str
 
@@ -55,17 +60,7 @@ class RouterAgent:
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
     ):
-        router_system_message = SystemMessage(ROUTER_SYSTEM_PROMPT)
-
-        self.router = (
-            lambda messages: [router_system_message] + messages
-        ) | model.with_structured_output(Route)
-
-        router2_system_message = SystemMessage(ROUTER2_SYSTEM_PROMPT)
-
-        self.router_2 = (
-            lambda messages: [router2_system_message] + messages
-        ) | model.with_structured_output(Route2)
+        self.model = model
 
         self.sql_agent = sql_agent
 
@@ -79,43 +74,75 @@ class RouterAgent:
 
         self.graph = self._compile()
 
-    def _call_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+    def _call_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Calls the router agent
 
         Returns:
             RouterAgentOutput: The next node to route to
         """
-        response: Route = self.router.invoke(state["messages"], config)
-        return {"next": response.next}
+        router = (
+            lambda messages: [SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT)] + messages
+        ) | self.model.with_structured_output(InitialRouting)
 
-    async def _acall_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+        response: InitialRouting = router.invoke(state["messages"], config)
+
+        return {"previous": "router", "next": response.next}
+
+    async def _acall_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
 
         Returns:
             RouterAgentOutput: The next node to route to
         """
-        response: Route = await self.router.ainvoke(state["messages"], config)
-        return {"next": response.next}
+        router = (
+            lambda messages: [SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT)] + messages
+        ) | self.model.with_structured_output(InitialRouting)
 
-    def _call_router_2(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+        response: InitialRouting = await router.ainvoke(state["messages"], config)
+
+        return {"previous": "router", "next": response.next}
+
+    def _call_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Calls the router agent
 
         Returns:
             RouterAgentOutput: The next node to route to
         """
-        message = f"User question: {state['question']}\n\nQuery results: {state['sql_queries_results']}\n\nAnswer: {state['sql_answer']}"
-        response: Route2 = self.router_2.invoke(message, config)
-        return {"next": response.next}
+        router = self.model.with_structured_output(PostSQLRouting)
 
-    async def _acall_router_2(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+        messages = [
+            SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
+            HumanMessage(
+                f"User question: {state['question']}\n\n"\
+                f"Query results: {state['sql_queries_results']}\n\n"\
+                f"Answer: {state['sql_answer']}"
+            )
+        ]
+
+        response: PostSQLRouting = router.invoke(messages, config)
+
+        return {"previous": "sql_agent", "next": response.next}
+
+    async def _acall_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
 
         Returns:
             RouterAgentOutput: The next node to route to
         """
-        message = f"User question: {state['question']}\n\nQuery results: {state['sql_queries_results']}\n\nAnswer: {state['sql_answer']}"
-        response: Route2 = await self.router_2.ainvoke(message, config)
-        return {"next": response.next}
+        router = self.model.with_structured_output(PostSQLRouting)
+
+        messages = [
+            SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
+            HumanMessage(
+                f"User question: {state['question']}\n\n"\
+                f"Query results: {state['sql_queries_results']}\n\n"\
+                f"Answer: {state['sql_answer']}"
+            )
+        ]
+
+        response: PostSQLRouting = await router.ainvoke(messages, config)
+
+        return {"previous": "sql_agent", "next": response.next}
 
     def _call_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
         """Calls the `SQLAgent`
@@ -236,19 +263,29 @@ class RouterAgent:
         Returns:
             dict[str, str]: The final answer
         """
+        previous = state["previous"]
         next = state["next"]
-        sql_answer = state["sql_answer"]
-        chart_answer = state["chart_answer"]
-        chart = state["chart"]
 
-        if next == "sql_agent" and chart.is_valid:
-            answer = f"{sql_answer}\n\n{chart_answer}"
-        elif next == "sql_agent":
-            answer = sql_answer
-        elif next == "viz_agent":
-            answer = chart_answer
+        if next == "viz_agent":
+            chart = state["chart"]
+            chart_answer = state["chart_answer"]
 
-        return {"final_answer": answer}
+            # sql_agent → viz_agent and the chart is valid
+            if previous == "sql_agent" and chart.is_valid:
+                sql_answer = state["sql_answer"]
+                final_answer = f"{sql_answer}\n\n{chart_answer}"
+            # sql_agent → viz_agent and the chart is not valid
+            elif previous == "sql_agent":
+                final_answer = sql_answer
+            # viz_agent called directly
+            else:
+                final_answer = chart_answer
+
+        # sql_agent → process_answers
+        else:
+            final_answer = state["sql_answer"]
+
+        return {"final_answer": final_answer}
 
     def _prune_messages(self, state: State) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
@@ -278,16 +315,16 @@ class RouterAgent:
         """
         graph = StateGraph(State)
 
-        # router node, calls the sql_agent or the viz_agent
-        graph.add_node("router", RunnableLambda(self._call_router, self._acall_router))
+        # initial router node, calls the sql_agent or the viz_agent
+        graph.add_node("initial_router", RunnableLambda(self._call_initial_router, self._acall_initial_router))
 
         # nodes for calling the SQL and Visualization agents. These are subgraphs.
         # For more information on subgraphs, refer to https://langchain-ai.github.io/langgraph/how-tos/subgraph
         graph.add_node("sql_agent", RunnableLambda(self._call_sql_agent, self._acall_sql_agent))
         graph.add_node("viz_agent", RunnableLambda(self._call_viz_agent, self._acall_viz_agent))
 
-        # router node, calls the sql_agent or the viz_agent
-        graph.add_node("check_before_viz", RunnableLambda(self._call_router_2, self._acall_router_2))
+        # post sql router node, calls the viz_agent or process_answers
+        graph.add_node("post_sql_router", RunnableLambda(self._call_post_sql_router, self._acall_post_sql_router))
 
         # node for building the final answer
         graph.add_node("process_answers", self._process_answers)
@@ -295,15 +332,13 @@ class RouterAgent:
         # node for deleting old messages
         graph.add_node("prune_messages", self._prune_messages)
 
-        graph.add_edge("sql_agent", "viz_agent")
-
-        graph.add_edge("sql_agent", "check_before_viz")
+        graph.add_edge("sql_agent", "post_sql_router")
         graph.add_edge("viz_agent", "process_answers")
         graph.add_edge("process_answers", "prune_messages")
-        graph.add_conditional_edges("router", _route)
-        graph.add_conditional_edges("check_before_viz", _route) # check will lead to either viz_agent or to process_answers
+        graph.add_conditional_edges("initial_router", _route)
+        graph.add_conditional_edges("post_sql_router", _route) # check will lead to either viz_agent or to process_answers
 
-        graph.set_entry_point("router")
+        graph.set_entry_point("initial_router")
         graph.set_finish_point("prune_messages")
 
         # The checkpointer is ignored by default when the graph is used as a subgraph
