@@ -33,7 +33,8 @@ jobs:
           sudo mkdir -p /var/log/chatbot
           sudo chown -R $USER:$USER /var/log/chatbot
 
-      - name: Install dependencies and run tests
-        run: |
-          poetry install
-          poetry run pytest
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run tests
+        run: poetry run pytest
