@@ -61,17 +61,11 @@ class RouterAgent:
         question_limit: int | None = 5,
     ):
         self.model = model
-
         self.sql_agent = sql_agent
-
         self.viz_agent = viz_agent
-
         self.checkpointer = checkpointer
-
         self.question_limit = question_limit
-
         self.logger = get_logger(self.__class__.__name__)
-
         self.graph = self._compile()
 
     def _call_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
@@ -110,11 +104,15 @@ class RouterAgent:
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
+        query_results = [qr.content for qr in state['sql_queries_results']]
+        if len(query_results) == 1:
+            query_results = query_results[0]
+
         messages = [
             SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
             HumanMessage(
                 f"User question: {state['question']}\n\n"\
-                f"Query results: {state['sql_queries_results']}\n\n"\
+                f"Query results: {query_results}\n\n"\
                 f"Answer: {state['sql_answer']}"
             )
         ]
@@ -131,11 +129,15 @@ class RouterAgent:
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
+        query_results = [qr.content for qr in state['sql_queries_results']]
+        if len(query_results) == 1:
+            query_results = query_results[0]
+
         messages = [
             SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
             HumanMessage(
                 f"User question: {state['question']}\n\n"\
-                f"Query results: {state['sql_queries_results']}\n\n"\
+                f"Query results: {query_results}\n\n"\
                 f"Answer: {state['sql_answer']}"
             )
         ]
