@@ -383,7 +383,7 @@ class SQLAgent:
         last_message = state["messages"][-1]
         return {"final_answer": last_message.content}
 
-    def _clear_sql(self, state: State) -> dict[str, list[ItemRemove]]:
+    def _clear_sql(self, state: State) -> dict[str, str|list[ItemRemove]]:
         """Clears the SQL agent's answer and the SQL queries and SQL queries results lists
 
         Args:
