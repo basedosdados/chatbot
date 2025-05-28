@@ -28,7 +28,7 @@ VizAgentOutput: TypeAlias = dict[str, str|Chart]
 
 class State(TypedDict):
     # node before routing
-    previous: str
+    previous: str|None
 
     # next node to route to
     next: str
@@ -80,7 +80,10 @@ class RouterAgent:
 
         response: InitialRouting = router.invoke(state["messages"], config)
 
-        return {"previous": "router", "next": response.next}
+        return {
+            "previous": None,
+            "next": response.next
+        }
 
     async def _acall_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
@@ -94,7 +97,10 @@ class RouterAgent:
 
         response: InitialRouting = await router.ainvoke(state["messages"], config)
 
-        return {"previous": "router", "next": response.next}
+        return {
+            "previous": None,
+            "next": response.next
+        }
 
     def _call_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Calls the router agent
@@ -119,7 +125,10 @@ class RouterAgent:
 
         response: PostSQLRouting = router.invoke(messages, config)
 
-        return {"previous": "sql_agent", "next": response.next}
+        return {
+            "previous": "sql_agent",
+            "next": response.next
+        }
 
     async def _acall_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
@@ -144,7 +153,10 @@ class RouterAgent:
 
         response: PostSQLRouting = await router.ainvoke(messages, config)
 
-        return {"previous": "sql_agent", "next": response.next}
+        return {
+            "previous": "sql_agent",
+            "next": response.next
+        }
 
     def _call_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
         """Calls the `SQLAgent`
@@ -278,7 +290,7 @@ class RouterAgent:
                 final_answer = f"{sql_answer}\n\n{chart_answer}"
             # sql_agent → viz_agent and the chart is not valid
             elif previous == "sql_agent":
-                final_answer = sql_answer
+                final_answer = state["sql_answer"]
             # viz_agent called directly
             else:
                 final_answer = chart_answer
