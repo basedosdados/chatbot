@@ -277,6 +277,8 @@ class RouterAgent:
         Returns:
             dict[str, str]: The final answer
         """
+        state_update = {}
+
         previous = state["previous"]
         next = state["next"]
 
@@ -297,9 +299,17 @@ class RouterAgent:
 
         # sql_agent → process_answers
         else:
+            chart = Chart(
+                data=ChartData(),
+                metadata=ChartMetadata(),
+                is_valid=False
+            )
+            state_update["chart"] = chart
             final_answer = state["sql_answer"]
 
-        return {"final_answer": final_answer}
+        state_update["final_answer"] = final_answer
+
+        return state_update
 
     def _prune_messages(self, state: State) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
@@ -350,7 +360,7 @@ class RouterAgent:
         graph.add_edge("viz_agent", "process_answers")
         graph.add_edge("process_answers", "prune_messages")
         graph.add_conditional_edges("initial_router", _route)
-        graph.add_conditional_edges("post_sql_router", _route) # check will lead to either viz_agent or to process_answers
+        graph.add_conditional_edges("post_sql_router", _post_sql_route)
 
         graph.set_entry_point("initial_router")
         graph.set_finish_point("prune_messages")
@@ -443,5 +453,9 @@ class RouterAgent:
             self.logger.exception(f"Error on clearing thread {thread_id}:")
 
 def _route(state: State) -> Literal["sql_agent", "viz_agent", "process_answers"]:
+    "Routes to the next node"
+    return state["next"]
+
+def _post_sql_route(state: State) -> Literal["viz_agent", "process_answers"]:
     "Routes to the next node"
     return state["next"]
