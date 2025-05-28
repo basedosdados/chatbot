@@ -1,9 +1,9 @@
 [project]
 name = "chatbot"
-version = "0.4.2"
+version = "0.4.3"
 description = ""
 authors = [
-    {name = "vrtornisiello",email = "vrtornisiello@gmail.com"}
+    {name = "vrtornisiello", email = "vrtornisiello@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
