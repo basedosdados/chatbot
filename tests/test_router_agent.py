@@ -163,7 +163,7 @@ def test_build_final_answer_previous_sql_invalid_chart(agent: RouterAgent, inval
 
     assert response == expected
 
-def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent, valid_chart: Chart):
+def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent, invalid_chart: Chart):
     state = {
         "previous": "sql_agent",
         "next": "process_answers",
@@ -174,7 +174,10 @@ def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent
 
     response = agent._process_answers(state)
 
-    expected = {"final_answer": state['sql_answer']}
+    expected = {
+        "chart": invalid_chart,
+        "final_answer": state['sql_answer']
+    }
 
     assert response == expected
 
