@@ -99,7 +99,7 @@ class AsyncSQLAssistant:
 
         sql_queries = []
 
-        for item in response["sql_queries"]:
+        for item in response.get("sql_queries", []):
             sql_query = sqlparse.format(
                 item.content,
                 reindent=True,

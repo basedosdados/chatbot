@@ -23,11 +23,19 @@ def messages() -> list[BaseMessage]:
     ]
 
 @pytest.fixture()
-def chart() -> Chart:
+def valid_chart() -> Chart:
     return Chart(
         data=ChartData(),
         metadata=ChartMetadata(),
         is_valid=True
+    )
+
+@pytest.fixture()
+def invalid_chart() -> Chart:
+    return Chart(
+        data=ChartData(),
+        metadata=ChartMetadata(),
+        is_valid=False
     )
 
 def test_prune_messages_not_delete(
@@ -123,12 +131,13 @@ def test_prune_messages_question_limit_none(
     expected = {"messages": []}
     assert response == expected
 
-def test_build_final_answer_next_sql_valid_chart(agent: RouterAgent, chart: Chart):
+def test_build_final_answer_previous_sql_valid_chart(agent: RouterAgent, valid_chart: Chart):
     state = {
-        "next": "sql_agent",
+        "previous": "sql_agent",
+        "next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
-        "chart": chart
+        "chart": valid_chart
     }
 
     response = agent._process_answers(state)
@@ -139,14 +148,13 @@ def test_build_final_answer_next_sql_valid_chart(agent: RouterAgent, chart: Char
 
     assert response == expected
 
-def test_build_final_answer_next_sql_invalid_chart(agent: RouterAgent, chart: Chart):
-    chart.is_valid = False
-
+def test_build_final_answer_previous_sql_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
     state = {
-        "next": "sql_agent",
+        "previous": "sql_agent",
+        "next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
-        "chart": chart
+        "chart": invalid_chart
     }
 
     response = agent._process_answers(state)
@@ -155,12 +163,31 @@ def test_build_final_answer_next_sql_invalid_chart(agent: RouterAgent, chart: Ch
 
     assert response == expected
 
-def test_build_final_answer_next_viz_valid_chart(agent: RouterAgent, chart: Chart):
+def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent, invalid_chart: Chart):
     state = {
+        "previous": "sql_agent",
+        "next": "process_answers",
+        "sql_answer": "mock sql answer",
+        "chart_answer": "mock_chart_answer",
+        "chart": valid_chart
+    }
+
+    response = agent._process_answers(state)
+
+    expected = {
+        "chart": invalid_chart,
+        "final_answer": state['sql_answer']
+    }
+
+    assert response == expected
+
+def test_build_final_answer_previous_initial_router_valid_chart(agent: RouterAgent, valid_chart: Chart):
+    state = {
+        "previous": "initial_router",
         "next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
-        "chart": chart
+        "chart": valid_chart
     }
 
     response = agent._process_answers(state)
@@ -169,14 +196,13 @@ def test_build_final_answer_next_viz_valid_chart(agent: RouterAgent, chart: Char
 
     assert response == expected
 
-def test_build_final_answer_next_viz_invalid_chart(agent: RouterAgent, chart: Chart):
-    chart.is_valid = False
-
+def test_build_final_answer_previous_initial_router_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
     state = {
+        "previous": "initial_router",
         "next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
-        "chart": chart
+        "chart": invalid_chart
     }
 
     response = agent._process_answers(state)

@@ -123,7 +123,7 @@ class SQLVizAssistant:
 
         sql_queries = []
 
-        for item in response["sql_queries"]:
+        for item in response.get("sql_queries", []):
             sql_query = sqlparse.format(
                 item.content,
                 reindent=True,
@@ -134,7 +134,7 @@ class SQLVizAssistant:
         formatted_response = {
             "content": answer,
             "sql_queries": sql_queries or None,
-            "chart": response["chart"],
+            "chart": response.get("chart"),
         }
 
         return formatted_response
