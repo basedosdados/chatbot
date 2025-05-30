@@ -13,8 +13,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
-
-from chatbot.loguru_logging import get_logger
+from loguru import logger
 
 from .prompts import (CHART_METADATA_SYSTEM_PROMPT,
                       CHART_PREPROCESS_BASE_SYSTEM_PROMPT,
@@ -97,7 +96,7 @@ class VizAgent:
 
         self.question_limit = question_limit
 
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = logger.bind(classname=self.__class__.__name__)
 
         self.graph = self._compile()
 

@@ -9,10 +9,10 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
+from loguru import logger
 
 from chatbot.agents.sql_agent import SQLAgent
 from chatbot.agents.visualization_agent import VizAgent
-from chatbot.loguru_logging import get_logger
 
 from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
                       POST_SQL_ROUTING_SYSTEM_PROMPT)
@@ -65,7 +65,7 @@ class RouterAgent:
         self.viz_agent = viz_agent
         self.checkpointer = checkpointer
         self.question_limit = question_limit
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = logger.bind(classname=self.__class__.__name__)
         self.graph = self._compile()
 
     def _call_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:

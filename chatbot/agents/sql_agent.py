@@ -15,9 +15,9 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
+from loguru import logger
 
 from chatbot.databases import Database
-from chatbot.loguru_logging import get_logger
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -86,7 +86,7 @@ class SQLAgent:
 
         self.question_limit = question_limit
 
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = logger.bind(classname=self.__class__.__name__)
 
         self.graph = self._compile()
 

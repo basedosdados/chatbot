@@ -10,9 +10,9 @@ from google.cloud import bigquery as bq
 from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
+from loguru import logger
 
 from chatbot.databases.metadata_formatter import MetadataFormatterFactory
-from chatbot.loguru_logging import get_logger
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
@@ -66,7 +66,7 @@ class BigQueryDatabase:
 
         self.formatter = MetadataFormatterFactory.get_metadata_formatter(metadata_format)
 
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = logger.bind(classname=self.__class__.__name__)
 
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()

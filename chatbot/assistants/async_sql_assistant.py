@@ -6,11 +6,11 @@ from typing import Any
 import sqlparse
 from langchain.vectorstores import VectorStore
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.databases import Database
 from chatbot.exceptions import EnvironmentVariableUnset
-from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 
 from .datatypes import SQLAssistantMessage, UserMessage
@@ -81,7 +81,7 @@ class AsyncSQLAssistant:
             question_limit=question_limit
         )
 
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = logger.bind(classname=self.__class__.__name__)
 
     @staticmethod
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
