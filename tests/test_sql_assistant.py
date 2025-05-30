@@ -1,7 +1,6 @@
 import uuid
 
 import pytest
-from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.agents.reducers import Item
@@ -11,12 +10,9 @@ MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest.fixture
 def assistant(monkeypatch):
-    """Mocks SQLAssistant, as it makes calls to external APIs and logs activities"""
-    def mock_logger_info(self):
+    """Mock SQLAssistant"""
+    def mock_agent_init(self):
         ...
-
-    def mock_agent_init(self, logger):
-        self.logger = logger
 
     def mock_invoke(self, question, config):
         return {
@@ -29,22 +25,19 @@ def assistant(monkeypatch):
             "is_last_step": False
         }
 
-    def mock_assistant_init(self, model_uri, sql_agent, logger):
+    def mock_assistant_init(self, model_uri, sql_agent):
         self.model_uri = model_uri
         self.sql_agent = sql_agent
-        self.logger = logger
 
-    monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(SQLAgent, "invoke", mock_invoke)
     monkeypatch.setattr(SQLAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = SQLAgent(logger=logger)
+    mock_agent = SQLAgent()
 
     mock_assistant = SQLAssistant(
         model_uri=MODEL_URI,
         sql_agent=mock_agent,
-        logger=logger
     )
 
     return mock_assistant

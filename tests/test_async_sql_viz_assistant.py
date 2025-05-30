@@ -2,7 +2,6 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from loguru import logger
 
 from chatbot.agents import RouterAgent
 from chatbot.agents.reducers import Item
@@ -14,12 +13,9 @@ MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest_asyncio.fixture
 async def assistant(monkeypatch):
-    """Mocks AsyncSQLVizAssistant, as it makes calls to external APIs and logs activities"""
-    def mock_logger_info(self):
+    """Mock AsyncSQLVizAssistant"""
+    def mock_agent_init(self):
         ...
-
-    def mock_agent_init(self, logger):
-        self.logger = logger
 
     async def mock_ainvoke(self, question, config):
         chart_data = ChartData()
@@ -41,22 +37,19 @@ async def assistant(monkeypatch):
             "messages": [],
         }
 
-    def mock_assistant_init(self, model_uri, router_agent, logger):
+    def mock_assistant_init(self, model_uri, router_agent):
         self.model_uri = model_uri
         self.router_agent = router_agent
-        self.logger = logger
 
-    monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(RouterAgent, "ainvoke", mock_ainvoke)
     monkeypatch.setattr(AsyncSQLVizAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = RouterAgent(logger=logger,)
+    mock_agent = RouterAgent()
 
     mock_assistant = AsyncSQLVizAssistant(
         model_uri=MODEL_URI,
         router_agent=mock_agent,
-        logger=logger
     )
 
     return mock_assistant

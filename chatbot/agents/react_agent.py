@@ -12,8 +12,7 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
-
-from chatbot.loguru_logging import get_logger
+from loguru import logger
 
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
@@ -72,8 +71,6 @@ class ReActAgent:
         self.checkpointer = checkpointer
 
         self.question_limit = question_limit
-
-        self.logger = get_logger(self.__class__.__name__)
 
         self.graph = self._compile()
 
@@ -223,12 +220,12 @@ class ReActAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -238,9 +235,9 @@ class ReActAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 await async_delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")

@@ -6,11 +6,11 @@ from typing import Any
 import sqlparse
 from langchain.vectorstores import VectorStore
 from langgraph.checkpoint.postgres import PostgresSaver
+from loguru import logger
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.databases import Database
 from chatbot.exceptions import EnvironmentVariableUnset
-from chatbot.loguru_logging import get_logger
 from chatbot.models import ModelFactory
 
 from .datatypes import SQLVizAssistantMessage, UserMessage
@@ -105,8 +105,6 @@ class SQLVizAssistant:
             question_limit=question_limit
         )
 
-        self.logger = get_logger(self.__class__.__name__)
-
     @staticmethod
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
         """Formats the response that will be presented to the user
@@ -149,7 +147,7 @@ class SQLVizAssistant:
         Returns:
             SQLVizAssistantMessage: The generated response
         """
-        self.logger.info(f"Received message {message.id}: {message.content}")
+        logger.info(f"Received message {message.id}: {message.content}")
 
         run_id = str(uuid.uuid4())
 
@@ -167,7 +165,7 @@ class SQLVizAssistant:
             response = self.router_agent.invoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error on responding message {message.id}:")
+            logger.exception(f"Error on responding message {message.id}:")
             response = {
                 "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
                     "Se o problema persistir, avise-nos. Obrigado pela paciência!",
@@ -178,7 +176,7 @@ class SQLVizAssistant:
             "model_uri": self.model_uri
         })
 
-        self.logger.info(f"Returning response for message {message.id}")
+        logger.info(f"Returning response for message {message.id}")
 
         return SQLVizAssistantMessage(**response)
 
@@ -188,5 +186,5 @@ class SQLVizAssistant:
         Args:
             thread_id (str): The thread unique identifier
         """
-        self.logger.info(f"Clearing memory for thread {thread_id}")
+        logger.info(f"Clearing memory for thread {thread_id}")
         self.router_agent.clear_thread(thread_id)

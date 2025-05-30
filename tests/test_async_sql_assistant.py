@@ -2,7 +2,6 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.agents.reducers import Item
@@ -13,12 +12,9 @@ MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest_asyncio.fixture
 async def assistant(monkeypatch):
-    """Mocks AsyncSQLAssistant, as it makes calls to external APIs and logs activities"""
-    def mock_logger_info(self):
+    """Mock AsyncSQLAssistant"""
+    def mock_agent_init(self):
         ...
-
-    def mock_agent_init(self, logger):
-        self.logger = logger
 
     async def mock_ainvoke(self, question, config):
         return {
@@ -31,22 +27,19 @@ async def assistant(monkeypatch):
             "is_last_step": False
         }
 
-    def mock_assistant_init(self, model_uri, sql_agent, logger):
+    def mock_assistant_init(self, model_uri, sql_agent):
         self.model_uri = model_uri
         self.sql_agent = sql_agent
-        self.logger = logger
 
-    monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(SQLAgent, "ainvoke", mock_ainvoke)
     monkeypatch.setattr(AsyncSQLAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = SQLAgent(logger=logger)
+    mock_agent = SQLAgent()
 
     mock_assistant = AsyncSQLAssistant(
         model_uri=MODEL_URI,
         sql_agent=mock_agent,
-        logger=logger
     )
 
     return mock_assistant

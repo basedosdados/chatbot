@@ -15,9 +15,9 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
+from loguru import logger
 
 from chatbot.databases import Database
-from chatbot.loguru_logging import get_logger
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -85,8 +85,6 @@ class SQLAgent:
         self.top_k = top_k
 
         self.question_limit = question_limit
-
-        self.logger = get_logger(self.__class__.__name__)
 
         self.graph = self._compile()
 
@@ -537,12 +535,12 @@ class SQLAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -552,12 +550,12 @@ class SQLAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 await async_delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
 def _check_tables_info(state: State) -> Literal["call_select_datasets", "similarity_search"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the
