@@ -1,7 +1,6 @@
 import uuid
 
 import pytest
-from loguru import logger
 
 from chatbot.agents import RouterAgent
 from chatbot.agents.reducers import Item
@@ -13,12 +12,10 @@ MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest.fixture
 def assistant(monkeypatch):
-    """Mocks SQLVizAssistant, as it makes calls to external APIs and logs activities"""
-    def mock_logger_info(self):
-        ...
+    """Mock SQLVizAssistant"""
 
-    def mock_agent_init(self, logger):
-        self.logger = logger
+    def mock_agent_init(self):
+        ...
 
     def mock_invoke(self, question, config):
         chart_data = ChartData()
@@ -40,24 +37,19 @@ def assistant(monkeypatch):
             "messages": [],
         }
 
-    def mock_assistant_init(self, model_uri, pool, checkpointer, router_agent, logger):
+    def mock_assistant_init(self, model_uri, router_agent):
         self.model_uri = model_uri
         self.router_agent = router_agent
-        self.logger = logger
 
-    monkeypatch.setattr(logger, "info", mock_logger_info)
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(RouterAgent, "invoke", mock_invoke)
     monkeypatch.setattr(SQLVizAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = RouterAgent(logger=logger,)
+    mock_agent = RouterAgent()
 
     mock_assistant = SQLVizAssistant(
         model_uri=MODEL_URI,
-        pool=None,
-        checkpointer=None,
-        router_agent=mock_agent,
-        logger=logger
+        router_agent=mock_agent
     )
 
     return mock_assistant
