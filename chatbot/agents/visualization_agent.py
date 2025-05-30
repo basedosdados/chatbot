@@ -96,8 +96,6 @@ class VizAgent:
 
         self.question_limit = question_limit
 
-        self.logger = logger.bind(classname=self.__class__.__name__)
-
         self.graph = self._compile()
 
     def _call_rephrase_question(self, state: State, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
@@ -240,7 +238,7 @@ class VizAgent:
         try:
             chart_data: ChartData = preprocess_runnable.invoke(messages, config)
         except pydantic.ValidationError:
-            self.logger.exception("Error on data preprocessing:")
+            logger.exception("Error on data preprocessing:")
             chart_data = ChartData()
 
         return {
@@ -268,7 +266,7 @@ class VizAgent:
         try:
             chart_data: ChartData = await preprocess_runnable.ainvoke(messages, config)
         except pydantic.ValidationError:
-            self.logger.exception("Error on data preprocessing:")
+            logger.exception("Error on data preprocessing:")
             chart_data = ChartData()
 
         return {
@@ -296,7 +294,7 @@ class VizAgent:
         try:
             chart_metadata: ChartMetadata = self.chart_metadata_runnable.invoke(messages, config)
         except pydantic.ValidationError:
-            self.logger.exception("Error on metadata extraction:")
+            logger.exception("Error on metadata extraction:")
             chart_metadata = ChartMetadata()
 
         return {"chart_metadata": chart_metadata}
@@ -321,7 +319,7 @@ class VizAgent:
         try:
             chart_metadata: ChartMetadata = await self.chart_metadata_runnable.ainvoke(messages, config)
         except pydantic.ValidationError:
-            self.logger.exception("Error on metadata extraction:")
+            logger.exception("Error on metadata extraction:")
             chart_metadata = ChartMetadata()
 
         return {"chart_metadata": chart_metadata}
@@ -353,7 +351,7 @@ class VizAgent:
         if attrs.issubset(chart_attrs):
            return True
         else:
-            self.logger.error(f"Chart validation error: one or more of {attrs} are not in {chart_attrs}")
+            logger.error(f"Chart validation error: one or more of {attrs} are not in {chart_attrs}")
             return False
 
     def _call_get_answer(self, state: State, config: RunnableConfig) -> dict[str, str|Chart]:
@@ -566,12 +564,12 @@ class VizAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -581,9 +579,9 @@ class VizAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 await async_delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")

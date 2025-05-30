@@ -66,8 +66,6 @@ class BigQueryDatabase:
 
         self.formatter = MetadataFormatterFactory.get_metadata_formatter(metadata_format)
 
-        self.logger = logger.bind(classname=self.__class__.__name__)
-
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()
         self._cache_thread = Thread(target=self._run_cache_data, daemon=True)
@@ -86,7 +84,7 @@ class BigQueryDatabase:
             try:
                 self._cache_data()
             except Exception as e:
-                self.logger.exception(f"Error on data caching:")
+                logger.exception(f"Error on data caching:")
                 raise e
 
     def _fetch_dataset(
@@ -174,7 +172,7 @@ class BigQueryDatabase:
     def _cache_data(self):
         """Caches all BigQuery datasets and its tables in memory
         """
-        self.logger.info(f"Caching data")
+        logger.info(f"Caching data")
 
         datasets = self._fetch_datasets()
 
@@ -189,7 +187,7 @@ class BigQueryDatabase:
         with self._cache_lock:
             self._cache = data
 
-        self.logger.success(f"Data successfully cached")
+        logger.success(f"Data successfully cached")
 
     def _format_table_metadata(self, table: Table) -> str:
         """Formats the metadata of a BigQuery table
@@ -223,7 +221,7 @@ class BigQueryDatabase:
                 ).result()
             sample_rows = [dict(row) for row in sample_rows]
         except Exception as query_exception:
-            self.logger.exception("Error on getting table info:")
+            logger.exception("Error on getting table info:")
             raise query_exception
 
         return self.formatter.format_table_metadata(table, sample_rows)
@@ -299,5 +297,5 @@ class BigQueryDatabase:
                 return json.dumps(results, ensure_ascii=False, default=str)
             return ""
         except Exception as query_exception:
-            self.logger.exception("Error on querying table:")
+            logger.exception("Error on querying table:")
             raise query_exception

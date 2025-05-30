@@ -65,7 +65,6 @@ class RouterAgent:
         self.viz_agent = viz_agent
         self.checkpointer = checkpointer
         self.question_limit = question_limit
-        self.logger = logger.bind(classname=self.__class__.__name__)
         self.graph = self._compile()
 
     def _call_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
@@ -218,7 +217,7 @@ class RouterAgent:
             chart = response["chart"]
             chart_answer = response["chart_answer"]
         except Exception:
-            self.logger.exception(f"Error on calling the visualization agent:")
+            logger.exception(f"Error on calling the visualization agent:")
             chart = Chart(
                 data=ChartData(),
                 metadata=ChartMetadata(),
@@ -254,7 +253,7 @@ class RouterAgent:
             chart = response["chart"]
             chart_answer = response["chart_answer"]
         except Exception:
-            self.logger.exception(f"Error on calling the visualization agent:")
+            logger.exception(f"Error on calling the visualization agent:")
             chart = Chart(
                 data=ChartData(),
                 metadata=ChartMetadata(),
@@ -430,12 +429,12 @@ class RouterAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -445,12 +444,12 @@ class RouterAgent:
         """
         try:
             if self.checkpointer is None:
-                self.logger.info("Checkpointer is None, ignoring...")
+                logger.info("Checkpointer is None, ignoring...")
             else:
                 await async_delete_checkpoints(self.checkpointer, thread_id)
-                self.logger.info(f"Deleted checkpoints for thread {thread_id}")
+                logger.info(f"Deleted checkpoints for thread {thread_id}")
         except Exception:
-            self.logger.exception(f"Error on clearing thread {thread_id}:")
+            logger.exception(f"Error on clearing thread {thread_id}:")
 
 def _route(state: State) -> Literal["sql_agent", "viz_agent", "process_answers"]:
     "Routes to the next node"

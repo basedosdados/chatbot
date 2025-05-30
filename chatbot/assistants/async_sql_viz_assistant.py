@@ -105,8 +105,6 @@ class AsyncSQLVizAssistant:
             question_limit=question_limit
         )
 
-        self.logger = logger.bind(classname=self.__class__.__name__)
-
     @staticmethod
     def _format_response(response: dict[str, Any]) -> dict[str, Any]:
         """Formats the response that will be presented to the user
@@ -149,7 +147,7 @@ class AsyncSQLVizAssistant:
         Returns:
             SQLVizAssistantMessage: The generated response
         """
-        self.logger.info(f"Received message {message.id}: {message.content}")
+        logger.info(f"Received message {message.id}: {message.content}")
 
         run_id = str(uuid.uuid4())
 
@@ -167,7 +165,7 @@ class AsyncSQLVizAssistant:
             response = await self.router_agent.ainvoke(message.content, config)
             response = self._format_response(response)
         except Exception:
-            self.logger.exception(f"Error on responding message {message.id}:")
+            logger.exception(f"Error on responding message {message.id}:")
             response = {
                 "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
                     "Se o problema persistir, avise-nos. Obrigado pela paciência!",
@@ -178,7 +176,7 @@ class AsyncSQLVizAssistant:
             "model_uri": self.model_uri
         })
 
-        self.logger.info(f"Returning response for message {message.id}")
+        logger.info(f"Returning response for message {message.id}")
 
         return SQLVizAssistantMessage(**response)
 
@@ -188,5 +186,5 @@ class AsyncSQLVizAssistant:
         Args:
             thread_id (str): The thread unique identifier
         """
-        self.logger.info(f"Clearing memory for thread {thread_id}")
+        logger.info(f"Clearing memory for thread {thread_id}")
         await self.router_agent.aclear_thread(thread_id)
