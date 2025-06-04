@@ -6,7 +6,7 @@
 > This library is **still under active development**. Expect breaking changes, incomplete features, and limited documentation.
 
 ## Installation
-Clone the repository and install it using pip (you can also use [poetry](https://python-poetry.org/) or [uv](https://docs.astral.sh/uv/)).
+Clone the repository and install it (you can also use [poetry](https://python-poetry.org/) or [uv](https://docs.astral.sh/uv/) instead of pip).
 ```bash
 git clone https://github.com/basedosdados/chatbot.git
 cd chatbot
