@@ -1,17 +1,15 @@
 import codecs
-import os
 import uuid
 from typing import Any
 
 import sqlparse
 from langchain.vectorstores import VectorStore
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 
 from chatbot.agents import SQLAgent
 from chatbot.databases import Database
-from chatbot.exceptions import EnvironmentVariableUnset
-from chatbot.models import ModelFactory
 
 from .datatypes import SQLAssistantMessage, UserMessage
 
@@ -22,10 +20,8 @@ class AsyncSQLAssistant:
     Args:
         database (Database):
             A `Database` object implementing the `Database` protocol.
-        model_uri (str | None, optional):
-            URI of the LLM to be used, in the format `<provider>/<model_name>`, e.g.,
-            `openai/gpt-4o` or `google/gemini-2.0-flash`. If `None`, falls back
-            to the `MODEL_URI` environment variable. Defaults to `None`.
+        model (BaseChatModel):
+            A LangChain `ChatModel` with support to structured outputs and tool calling.
         checkpointer (AsyncPostgresSaver | None, optional):
             A checkpointer that will be used for persisting state across assistant's runs.
             If set to `None`, the assistant will not retain memory of previous messages.
@@ -44,19 +40,11 @@ class AsyncSQLAssistant:
     def __init__(
         self,
         database: Database,
-        model_uri: str | None = None,
+        model: BaseChatModel,
         checkpointer: AsyncPostgresSaver | None = None,
         vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
-        model_uri = model_uri or os.getenv("MODEL_URI")
-
-        if model_uri is None:
-            raise EnvironmentVariableUnset(
-                "The model URI was not passed and could not be inferred from the environment. "
-                "Please pass a valid model URI or set the `MODEL_URI` environment variable."
-            )
-
         if checkpointer is not None and not isinstance(checkpointer, AsyncPostgresSaver):
             raise TypeError(
                 "`checkpointer` must be an instance of langgraph `AsyncPostgresSaver` "
@@ -68,10 +56,6 @@ class AsyncSQLAssistant:
                 "`vector_store` must be an instance of langchain `VectorStore` "
                 f"or `None`, but got `{type(vector_store)}`."
             )
-
-        model = ModelFactory.from_model_uri(model_uri)
-
-        self.model_uri = model_uri
 
         self.sql_agent = SQLAgent(
             db=database,
@@ -146,10 +130,7 @@ class AsyncSQLAssistant:
                     "Se o problema persistir, avise-nos. Obrigado pela paciência!",
             }
 
-        response.update({
-            "id": run_id,
-            "model_uri": self.model_uri
-        })
+        response["id"] = run_id
 
         logger.info(f"Returning response for message {message.id}")
 
