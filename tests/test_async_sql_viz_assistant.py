@@ -9,7 +9,6 @@ from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
 from chatbot.assistants import (AsyncSQLVizAssistant, SQLVizAssistantMessage,
                                 UserMessage)
 
-MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest_asyncio.fixture
 async def assistant(monkeypatch):
@@ -37,8 +36,7 @@ async def assistant(monkeypatch):
             "messages": [],
         }
 
-    def mock_assistant_init(self, model_uri, router_agent):
-        self.model_uri = model_uri
+    def mock_assistant_init(self, router_agent):
         self.router_agent = router_agent
 
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
@@ -48,7 +46,6 @@ async def assistant(monkeypatch):
     mock_agent = RouterAgent()
 
     mock_assistant = AsyncSQLVizAssistant(
-        model_uri=MODEL_URI,
         router_agent=mock_agent,
     )
 
@@ -145,7 +142,6 @@ async def test_invoke(assistant: AsyncSQLVizAssistant, user_message: UserMessage
 
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
-        model_uri=MODEL_URI,
         sql_queries=None,
         chart=Chart(
             data=ChartData(),
@@ -155,7 +151,6 @@ async def test_invoke(assistant: AsyncSQLVizAssistant, user_message: UserMessage
     )
 
     assert response.content == expected_response.content
-    assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart
 

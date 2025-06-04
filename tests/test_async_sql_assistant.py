@@ -8,7 +8,6 @@ from chatbot.agents.reducers import Item
 from chatbot.assistants import (AsyncSQLAssistant, SQLAssistantMessage,
                                 UserMessage)
 
-MODEL_URI = "openai/gpt-4o-mini"
 
 @pytest_asyncio.fixture
 async def assistant(monkeypatch):
@@ -27,8 +26,7 @@ async def assistant(monkeypatch):
             "is_last_step": False
         }
 
-    def mock_assistant_init(self, model_uri, sql_agent):
-        self.model_uri = model_uri
+    def mock_assistant_init(self, sql_agent):
         self.sql_agent = sql_agent
 
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
@@ -38,7 +36,6 @@ async def assistant(monkeypatch):
     mock_agent = SQLAgent()
 
     mock_assistant = AsyncSQLAssistant(
-        model_uri=MODEL_URI,
         sql_agent=mock_agent,
     )
 
@@ -105,12 +102,10 @@ async def test_invoke(assistant: AsyncSQLAssistant, user_message: UserMessage):
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
-        model_uri=MODEL_URI,
         sql_queries=None,
     )
 
     assert response.content == expected_response.content
-    assert response.model_uri == expected_response.model_uri
     assert response.sql_queries == expected_response.sql_queries
 
 @pytest.mark.asyncio
