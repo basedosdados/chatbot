@@ -111,7 +111,7 @@ message = UserMessage(content="your question")
 response = assistant.invoke(message)
 ```
 
-You can also optionally use a PostgresSaver checkpointer and provide separate vector stores to enhance few-shot prompting for both SQL generation and visualization reasoning:
+You can also optionally use a PostgresSaver checkpointer and provide separate vector stores for few-shot prompting on both SQL generation and visualization reasoning:
 ```python
 import os
 
