@@ -28,10 +28,10 @@ VizAgentOutput: TypeAlias = dict[str, str|Chart]
 
 class State(TypedDict):
     # node before routing
-    previous: str|None
+    _previous: str|None
 
     # next node to route to
-    next: str
+    _next: str
 
     # input question
     question: str
@@ -80,8 +80,8 @@ class RouterAgent:
         response: InitialRouting = router.invoke(state["messages"], config)
 
         return {
-            "previous": None,
-            "next": response.next
+            "_previous": None,
+            "_next": response.next
         }
 
     async def _acall_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
@@ -97,8 +97,8 @@ class RouterAgent:
         response: InitialRouting = await router.ainvoke(state["messages"], config)
 
         return {
-            "previous": None,
-            "next": response.next
+            "_previous": None,
+            "_next": response.next
         }
 
     def _call_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
@@ -125,8 +125,8 @@ class RouterAgent:
         response: PostSQLRouting = router.invoke(messages, config)
 
         return {
-            "previous": "sql_agent",
-            "next": response.next
+            "_previous": "sql_agent",
+            "_next": response.next
         }
 
     async def _acall_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
@@ -153,8 +153,8 @@ class RouterAgent:
         response: PostSQLRouting = await router.ainvoke(messages, config)
 
         return {
-            "previous": "sql_agent",
-            "next": response.next
+            "_previous": "sql_agent",
+            "_next": response.next
         }
 
     def _call_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
@@ -278,8 +278,8 @@ class RouterAgent:
         """
         state_update = {}
 
-        previous = state["previous"]
-        next = state["next"]
+        previous = state["_previous"]
+        next = state["_next"]
 
         if next == "viz_agent":
             chart = state["chart"]
@@ -392,6 +392,9 @@ class RouterAgent:
             config=config,
         )
 
+        response.pop("_previous")
+        response.pop("_next")
+
         return response
 
     async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
@@ -416,6 +419,9 @@ class RouterAgent:
             config=config,
         )
 
+        response.pop("_previous")
+        response.pop("_next")
+
         return response
 
     # Unfortunately, there is no clean way to delete an agent's memory
@@ -427,14 +433,11 @@ class RouterAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -442,19 +445,16 @@ class RouterAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                await async_delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            await async_delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
 
 def _route(state: State) -> Literal["sql_agent", "viz_agent", "process_answers"]:
     "Routes to the next node"
-    return state["next"]
+    return state["_next"]
 
 def _post_sql_route(state: State) -> Literal["viz_agent", "process_answers"]:
     "Routes to the next node"
-    return state["next"]
+    return state["_next"]

@@ -96,7 +96,7 @@ class AsyncSQLAssistant:
 
         return formatted_response
 
-    async def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLAssistantMessage:
+    async def invoke(self, message: str, config: dict|None) -> SQLAssistantMessage:
         """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
@@ -106,33 +106,13 @@ class AsyncSQLAssistant:
         Returns:
             SQLAssistantMessage: The generated response
         """
-        logger.info(f"Received message {message.id}: {message.content}")
+        if "run_id" not in config:
+            config["run_id"] = str(uuid.uuid4())
 
-        run_id = str(uuid.uuid4())
+        response = await self.sql_agent.ainvoke(message, config)
+        response = self._format_response(response)
 
-        config = {
-            "run_id": run_id,
-            "recursion_limit": 32
-        }
-
-        if thread_id is not None:
-            config["configurable"] = {
-                "thread_id": thread_id
-            }
-
-        try:
-            response = await self.sql_agent.ainvoke(message.content, config)
-            response = self._format_response(response)
-        except Exception:
-            logger.exception(f"Error on responding message {message.id}:")
-            response = {
-                "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
-                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
-            }
-
-        response["id"] = run_id
-
-        logger.info(f"Returning response for message {message.id}")
+        response["id"] = config["run_id"]
 
         return SQLAssistantMessage(**response)
 

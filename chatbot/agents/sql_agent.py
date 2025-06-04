@@ -533,14 +533,11 @@ class SQLAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -548,14 +545,11 @@ class SQLAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                await async_delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            await async_delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
 
 def _check_tables_info(state: State) -> Literal["call_select_datasets", "similarity_search"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the

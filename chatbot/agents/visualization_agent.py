@@ -69,16 +69,16 @@ class VizAgent:
         top_k: int = 4,
         question_limit: int | None = 5,
     ):
-        rephraser_sytem_message = SystemMessage(REPHRASER_VIZ_SYSTEM_PROMPT)
+        rephraser_system_message = SystemMessage(REPHRASER_VIZ_SYSTEM_PROMPT)
 
         self.rephraser_runnable = (
-            lambda question: [rephraser_sytem_message] + [question]
+            lambda question: [rephraser_system_message] + [question]
         ) | model.with_structured_output(Rephrase)
 
-        chart_metadata_sytem_message = SystemMessage(CHART_METADATA_SYSTEM_PROMPT)
+        chart_metadata_system_message = SystemMessage(CHART_METADATA_SYSTEM_PROMPT)
 
         self.chart_metadata_runnable = (
-            lambda messages: [chart_metadata_sytem_message] + messages
+            lambda messages: [chart_metadata_system_message] + messages
         ) | model.with_structured_output(ChartMetadata)
 
         validation_system_message = SystemMessage(VALIDATION_VIZ_SYSTEM_PROMPT)
@@ -235,11 +235,7 @@ class VizAgent:
 
         preprocess_runnable = self._get_preprocess_runnable(documents)
 
-        try:
-            chart_data: ChartData = preprocess_runnable.invoke(messages, config)
-        except pydantic.ValidationError:
-            logger.exception("Error on data preprocessing:")
-            chart_data = ChartData()
+        chart_data: ChartData = preprocess_runnable.invoke(messages, config)
 
         return {
             "chart_data": chart_data,
@@ -263,11 +259,7 @@ class VizAgent:
 
         preprocess_runnable = self._get_preprocess_runnable(documents)
 
-        try:
-            chart_data: ChartData = await preprocess_runnable.ainvoke(messages, config)
-        except pydantic.ValidationError:
-            logger.exception("Error on data preprocessing:")
-            chart_data = ChartData()
+        chart_data: ChartData = await preprocess_runnable.ainvoke(messages, config)
 
         return {
             "chart_data": chart_data,
@@ -291,11 +283,7 @@ class VizAgent:
             f"User question: {question}\n\nQuery results: {chart_data.data}"
         )]
 
-        try:
-            chart_metadata: ChartMetadata = self.chart_metadata_runnable.invoke(messages, config)
-        except pydantic.ValidationError:
-            logger.exception("Error on metadata extraction:")
-            chart_metadata = ChartMetadata()
+        chart_metadata: ChartMetadata = self.chart_metadata_runnable.invoke(messages, config)
 
         return {"chart_metadata": chart_metadata}
 
@@ -316,11 +304,7 @@ class VizAgent:
             f"User question: {question}\n\nQuery results: {chart_data.data}"
         )]
 
-        try:
-            chart_metadata: ChartMetadata = await self.chart_metadata_runnable.ainvoke(messages, config)
-        except pydantic.ValidationError:
-            logger.exception("Error on metadata extraction:")
-            chart_metadata = ChartMetadata()
+        chart_metadata: ChartMetadata = await self.chart_metadata_runnable.ainvoke(messages, config)
 
         return {"chart_metadata": chart_metadata}
 
@@ -562,14 +546,11 @@ class VizAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
         """Asynchronously clears a thread
@@ -577,11 +558,8 @@ class VizAgent:
         Args:
             thread_id (str): The thread unique identifier
         """
-        try:
-            if self.checkpointer is None:
-                logger.info("Checkpointer is None, ignoring...")
-            else:
-                await async_delete_checkpoints(self.checkpointer, thread_id)
-                logger.info(f"Deleted checkpoints for thread {thread_id}")
-        except Exception:
-            logger.exception(f"Error on clearing thread {thread_id}:")
+        if self.checkpointer is None:
+            logger.info("Checkpointer is None, ignoring...")
+        else:
+            await async_delete_checkpoints(self.checkpointer, thread_id)
+            logger.info(f"Deleted checkpoints for thread {thread_id}")
