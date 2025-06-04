@@ -10,7 +10,6 @@ class UserMessage(BaseModel):
     content: str
 
 class SQLAssistantMessage(UserMessage):
-    model_uri: str
     sql_queries: list[str] | None = Field(default=None)
 
 class SQLVizAssistantMessage(SQLAssistantMessage):
