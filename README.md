@@ -16,11 +16,13 @@ pip install .
 ## Assistants
 
 ### SQLAssistant
-The `SQLAssistant` allows LLMs to interact with your database so you can ask questions about it. All it needs is a [Database](https://github.com/basedosdados/chatbot/blob/fc1269826229e4daad5c6cc7678ab55dc4739c08/chatbot/databases/database.py) object:
+The `SQLAssistant` allows LLMs to interact with your database so you can ask questions about it. All it needs is a LangChain [ChatModel](https://python.langchain.com/docs/integrations/chat/) and a [Database](https://github.com/basedosdados/chatbot/blob/fc1269826229e4daad5c6cc7678ab55dc4739c08/chatbot/databases/database.py)-like object:
 ```python
 import os
 
-from chatbot.assistants import SQLAssistant, UserMessage
+from langchain.chat_models import init_chat_model
+
+from chatbot.assistants import SQLAssistant
 from chatbot.databases import BigQueryDatabase
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "path to your google cloud service account"
@@ -30,22 +32,24 @@ db = BigQueryDatabase(
     query_project="your query project", # you could also set the "QUERY_PROJECT_ID" env variable
 )
 
-assistant = SQLAssistant(db, model_uri="openai/gpt-4o") # you could also set the "MODEL_URI" env variable
+model = init_chat_model("gpt-4o", temperature=0)
 
-message = UserMessage(content="your question")
+assistant = SQLAssistant(db, model)
 
-response = assistant.invoke(message)
+response = assistant.invoke("hello! what can you tell me about our database?")
 ```
 
-Optionally, you can use a [PostgresSaver](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add persistence to your assistant and a [VectorStore](https://python.langchain.com/docs/integrations/vectorstores/) for few-shot prompting during SQL queries generation:
+You can optionally use a [PostgresSaver](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant and a [VectorStore](https://python.langchain.com/docs/integrations/vectorstores/) for few-shot prompting during SQL queries generation:
 ```python
 import os
+
+from langchain.chat_models import init_chat_model
 
 from langchain_chroma import Chroma
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
-from chatbot.assistants import SQLAssistant, UserMessage
+from chatbot.assistants import SQLAssistant
 from chatbot.databases import BigQueryDatabase
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "path to your google cloud service account"
@@ -55,6 +59,9 @@ db = BigQueryDatabase(
     query_project="your query project", # you could also set the "QUERY_PROJECT_ID" env variable
 )
 
+model = init_chat_model("gpt-4o", temperature=0)
+
+# it could be any vector store
 vector_store = Chroma(
     collection_name="example_collection",
     embedding_function=OpenAIEmbeddings(
@@ -62,39 +69,34 @@ vector_store = Chroma(
     ),
 )
 
-conn_kwargs = {
-    "autocommit": True,
-    "prepare_threshold": 0
-}
+DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres
 
-with ConnectionPool(
-    conninfo=db_url,
-    max_size=8,
-    kwargs=conn_kwargs
-) as pool:
-    checkpointer = PostgresSaver(pool)
+with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
     checkpointer.setup()
 
     assistant = SQLAssistant(
         database=db,
-        model_uri="openai/gpt-4o", # you could also set the "MODEL_URI" env variable
+        model=model,
         checkpointer=checkpointer,
         vector_store=vector_store,
     )
 
-    message = UserMessage(content="your question")
-
-    response = assistant.invoke(message, thread_id="your_thread_id")
+    response = assistant.invoke(
+        message="hello! what can you tell me about our database?",
+        thread_id="uuid"
+    )
 ```
 
 An async version is also available: `AsyncSQLAssistant`.
 
 ### SQLVizAssistant
-`SQLVizAssistant` extends `SQLAssistant`, by not only retrieving data but also preparing it for visualization. It identifies which variables should be plotted on each axis, suggests appropriate chart types, and defines metadata such as titles, labels, and legends, without rendering the chart itself. Again, all it needs is a [Database](https://github.com/basedosdados/chatbot/blob/fc1269826229e4daad5c6cc7678ab55dc4739c08/chatbot/databases/database.py) object:
+`SQLVizAssistant` extends `SQLAssistant` by not only retrieving data but also **preparing it for visualization**. It identifies which variables should be plotted on each axis, suggests appropriate chart types, and defines metadata such as titles, labels, and legends, without rendering the chart itself. Again, all it needs is a LangChain [ChatModel](https://python.langchain.com/docs/integrations/chat/) and a [Database](https://github.com/basedosdados/chatbot/blob/fc1269826229e4daad5c6cc7678ab55dc4739c08/chatbot/databases/database.py)-like object:
 ```python
 import os
 
-from chatbot.assistants import SQLVizAssistant, UserMessage
+from langchain.chat_models import init_chat_model
+
+from chatbot.assistants import SQLVizAssistant
 from chatbot.databases import BigQueryDatabase
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "path to your google cloud service account"
@@ -104,16 +106,18 @@ db = BigQueryDatabase(
     query_project="your query project", # you could also set the "QUERY_PROJECT_ID" env variable
 )
 
-assistant = SQLVizAssistant(db, model_uri="openai/gpt-4o") # you could also set the "MODEL_URI" env variable
+model = init_chat_model("gpt-4o", temperature=0)
 
-message = UserMessage(content="your question")
+assistant = SQLVizAssistant(db, model)
 
-response = assistant.invoke(message)
+response = assistant.invoke("hello! what can you tell me about our database?")
 ```
 
-You can also optionally use a PostgresSaver checkpointer and provide separate vector stores for few-shot prompting on both SQL generation and visualization reasoning:
+You can also optionally use a PostgresSaver checkpointer to add short-term memory to your assistant, and provide separate vector stores for few-shot prompting in both SQL generation and visualization reasoning:
 ```python
 import os
+
+from langchain.chat_models import init_chat_model
 
 from langchain_chroma import Chroma
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -129,6 +133,7 @@ db = BigQueryDatabase(
     query_project="your query project", # you could also set the "QUERY_PROJECT_ID" env variable
 )
 
+# it could be any vector store
 sql_vector_store = Chroma(
     collection_name="example_sql_collection",
     embedding_function=OpenAIEmbeddings(
@@ -136,6 +141,7 @@ sql_vector_store = Chroma(
     ),
 )
 
+# it could also be any vector store!
 viz_vector_store = Chroma(
     collection_name="example_viz_collection",
     embedding_function=OpenAIEmbeddings(
@@ -143,30 +149,23 @@ viz_vector_store = Chroma(
     ),
 )
 
-conn_kwargs = {
-    "autocommit": True,
-    "prepare_threshold": 0
-}
+DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres
 
-with ConnectionPool(
-    conninfo=db_url,
-    max_size=8,
-    kwargs=conn_kwargs
-) as pool:
-    checkpointer = PostgresSaver(pool)
+with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
     checkpointer.setup()
 
     assistant = SQLVizAssistant(
         database=db,
-        model_uri="openai/gpt-4o", # you could also set the "MODEL_URI" env variable
+        model=model,
         checkpointer=checkpointer,
         sql_vector_store=sql_vector_store,
         viz_vector_store=viz_vector_store
     )
 
-    message = UserMessage(content="your question")
-
-    response = assistant.invoke(message, thread_id="your_thread_id")
+    response = assistant.invoke(
+        message="hello! what can you tell me about our database?",
+        thread_id="uuid"
+    )
 ```
 An async version is also available: `AsyncSQLVizAssistant`.
 
@@ -175,6 +174,6 @@ Under the hood, both assistants rely on composable agents:
 
 - `SQLAgent` – Handles database metadata retrieval, query generation and execution.
 - `VizAgent` – Handles visualization reasoning.
-- `RouterAgent` – Routes between SQLAgent and VizAgent depending on the user message.
+- `RouterAgent` – Routes between `SQLAgent` and `VizAgent` depending on the user message.
 
 You can directly use these agents or use them to create your own workflows.
