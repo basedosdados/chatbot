@@ -2,19 +2,17 @@ import uuid
 
 import pytest
 
-from chatbot.agents import RouterAgent
-from chatbot.agents.reducers import Item
+from chatbot.agents.router_agent import RouterAgent, RouterAgentState
 from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
-from chatbot.assistants import (SQLVizAssistant, SQLVizAssistantMessage,
-                                UserMessage)
+from chatbot.assistants import SQLVizAssistant, SQLVizAssistantMessage
 
 
 @pytest.fixture
 def assistant(monkeypatch):
     """Mock SQLVizAssistant"""
 
-    def mock_agent_init(self):
-        ...
+    def mock_agent_init(self, checkpointer):
+        self.checkpointer = checkpointer
 
     def mock_invoke(self, question, config):
         chart_data = ChartData()
@@ -24,17 +22,18 @@ def assistant(monkeypatch):
             metadata=chart_metadata,
             is_valid=False
         )
-        return {
-            "next": "mock next",
-            "question": "mock question",
-            "sql_answer": "mock sql answer",
-            "chart_answer": "mock chart answer",
-            "final_answer": "mock final answer",
-            "sql_queries": [],
-            "sql_queries_results": [],
-            "chart": chart,
-            "messages": [],
-        }
+        return RouterAgentState(
+            _previous="mock previous",
+            _next="mock next",
+            question=question,
+            sql_answer="mock sql answer",
+            chart_answer="mock chart answer",
+            final_answer="mock final answer",
+            sql_queries=[],
+            sql_queries_results=[],
+            chart=chart,
+            messages=[],
+        )
 
     def mock_assistant_init(self, router_agent):
         self.router_agent = router_agent
@@ -43,101 +42,14 @@ def assistant(monkeypatch):
     monkeypatch.setattr(RouterAgent, "invoke", mock_invoke)
     monkeypatch.setattr(SQLVizAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = RouterAgent()
+    mock_agent = RouterAgent(checkpointer=None)
 
-    mock_assistant = SQLVizAssistant(
-        router_agent=mock_agent
-    )
+    mock_assistant = SQLVizAssistant(router_agent=mock_agent)
 
     return mock_assistant
 
-@pytest.fixture
-def user_message() -> UserMessage:
-    return UserMessage(content="mock question")
-
-def test_format_response(assistant: SQLVizAssistant):
-    response = {
-        "final_answer": "hello world!",
-        "sql_queries": [
-            Item(content="select * from table_1"),
-            Item(content="select * from table_2")
-        ],
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    expected_formatted_response = {
-        "content": "hello world!",
-        "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_format_response_with_special_characters(assistant: SQLVizAssistant):
-    response = {
-        "final_answer": "\n\\xc4\\xa7&\\xc5\\x82\\xc5\\x82\\xc3\\xb8 w\\xc3\\xb8\\xc2\\xae\\xc5\\x82\\xc3\\xb0!\n",
-        "sql_queries": [
-            Item(content="select * from table_1"),
-            Item(content="select * from table_2")
-        ],
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    expected_formatted_response = {
-        "content": "ħ&łłø wø®łð!",
-        "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_format_response_with_no_sql_queries(assistant: SQLVizAssistant):
-    response = {
-        "final_answer": "hello world!",
-        "sql_queries": [],
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    expected_formatted_response = {
-        "content": "hello world!",
-        "sql_queries": None,
-        "chart": Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
-    response = assistant.invoke(user_message)
+def test_invoke(assistant: SQLVizAssistant):
+    response = assistant.invoke("mock question")
 
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
@@ -149,6 +61,27 @@ def test_invoke(assistant: SQLVizAssistant, user_message: UserMessage):
         ),
     )
 
+    assert response.content == expected_response.content
+    assert response.sql_queries == expected_response.sql_queries
+    assert response.chart == expected_response.chart
+
+def test_invoke_with_config(assistant: SQLVizAssistant):
+    run_id = str(uuid.uuid4())
+
+    response = assistant.invoke("mock question", {"run_id": run_id})
+
+    expected_response = SQLVizAssistantMessage(
+        id=run_id,
+        content="mock final answer",
+        sql_queries=None,
+        chart=Chart(
+            data=ChartData(),
+            metadata=ChartMetadata(),
+            is_valid=False
+        ),
+    )
+
+    assert response.id == expected_response.id
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart
