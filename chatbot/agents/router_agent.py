@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Literal, TypeAlias, TypedDict
+from typing import Annotated, Literal, TypeAlias, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -21,7 +21,7 @@ from .structured_outputs import (Chart, ChartData, ChartMetadata,
                                  InitialRouting, PostSQLRouting)
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
-RouterAgentOutput: TypeAlias = dict[str, Literal["sql_agent", "viz_agent"]]
+RouterAgentOutput: TypeAlias = dict[str, str|None]
 SQLAgentOutput: TypeAlias = dict[str, str|list[Item]|list[AIMessage]]
 VizAgentOutput: TypeAlias = dict[str, str|Chart]
 
@@ -68,10 +68,14 @@ class RouterAgent:
         self.graph = self._compile()
 
     def _call_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
-        """Calls the router agent
+        """Calls the router agent.
+
+        Args:
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            RouterAgentOutput: The next node to route to
+            RouterAgentOutput: The graph state update.
         """
         router = (
             lambda messages: [SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT)] + messages
@@ -85,10 +89,14 @@ class RouterAgent:
         }
 
     async def _acall_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
-        """Asynchronously calls the router agent
+        """Asynchronously calls the router agent.
+
+        Args:
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            RouterAgentOutput: The next node to route to
+            RouterAgentOutput: The graph state update.
         """
         router = (
             lambda messages: [SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT)] + messages
@@ -102,10 +110,14 @@ class RouterAgent:
         }
 
     def _call_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
-        """Calls the router agent
+        """Calls the router agent after the `sql_agent` node.
+
+        Args:
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            RouterAgentOutput: The next node to route to
+            RouterAgentOutput: The graph state update.
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
@@ -130,10 +142,14 @@ class RouterAgent:
         }
 
     async def _acall_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
-        """Asynchronously calls the router agent
+        """Asynchronously calls the router agent after the `sql_agent` node.
+
+        Args:
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            RouterAgentOutput: The next node to route to
+            RouterAgentOutput: The graph state update.
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
@@ -158,14 +174,14 @@ class RouterAgent:
         }
 
     def _call_sql_agent(self, state: RouterAgentState, config: RunnableConfig) -> SQLAgentOutput:
-        """Calls the `SQLAgent`
+        """Calls the `SQLAgent`.
 
         Args:
-            state (RouterAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the agent
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            SQLAgentOutput: The graph state update
+            SQLAgentOutput: The graph state update.
         """
         response = self.sql_agent.invoke(state["question"], config)
 
@@ -177,14 +193,14 @@ class RouterAgent:
         }
 
     async def _acall_sql_agent(self, state: RouterAgentState, config: RunnableConfig) -> SQLAgentOutput:
-        """Asynchronously calls the `SQLAgent`
+        """Asynchronously calls the `SQLAgent`.
 
         Args:
-            state (RouterAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the agent
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            SQLAgentOutput: The graph state update
+            SQLAgentOutput: The graph state update.
         """
         response = await self.sql_agent.ainvoke(state["question"], config)
 
@@ -196,14 +212,14 @@ class RouterAgent:
         }
 
     def _call_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> VizAgentOutput:
-        """Calls the `VizAgent`
+        """Calls the `VizAgent`.
 
         Args:
-            state (RouterAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the agent
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            VizAgentOutput: The graph state update
+            VizAgentOutput: The graph state update.
         """
         try:
             response = self.viz_agent.invoke(
@@ -232,14 +248,14 @@ class RouterAgent:
         }
 
     async def _acall_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> VizAgentOutput:
-        """Asynchronously calls the `VizAgent`
+        """Asynchronously calls the `VizAgent`.
 
         Args:
-            state (RouterAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the agent
+            state (RouterAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            VizAgentOutput: The graph state update
+            VizAgentOutput: The graph state update.
         """
         try:
             response = await self.viz_agent.ainvoke(
@@ -268,13 +284,13 @@ class RouterAgent:
         }
 
     def _process_answers(self, state: RouterAgentState) -> dict[str, str]:
-        """Builds the final answer that will be presented to the user
+        """Builds the final answer that will be presented to the user.
 
         Args:
-            state (RouterAgentState): The graph state
+            state (RouterAgentState): The graph state.
 
         Returns:
-            dict[str, str]: The final answer
+            dict[str, str]: The final answer state update.
         """
         state_update = {}
 
@@ -315,10 +331,10 @@ class RouterAgent:
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (RouterAgentState): The graph state containing the message list
+            state (RouterAgentState): The graph state containing the message list.
 
         Returns:
-            dict[str, list[RemoveMessage]]: The pruned message list
+            dict[str, list[RemoveMessage]]: The pruned message list.
         """
         if self.question_limit is None:
             return {"messages": []}
@@ -331,10 +347,10 @@ class RouterAgent:
         }
 
     def _compile(self) -> CompiledGraph:
-        """Compiles the state graph into a LangChain Runnable
+        """Compiles the state graph into a LangChain Runnable.
 
         Returns:
-            CompiledGraph: The compiled state graph
+            CompiledGraph: The compiled state graph.
         """
         graph = StateGraph(RouterAgentState)
 
@@ -370,15 +386,15 @@ class RouterAgent:
         # For more information, visit https://github.com/langchain-ai/langgraph/issues/3020
         return graph.compile(self.checkpointer)
 
-    def invoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
-        """Runs the compiled graph with a question and an optional configuration
+    def invoke(self, question: str, config: RunnableConfig | None = None) -> RouterAgentState:
+        """Runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            RouterAgentState: The output of the agent execution.
         """
         question = question.strip()
 
@@ -394,15 +410,15 @@ class RouterAgent:
 
         return response
 
-    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
-        """Asynchronously runs the compiled graph with a question and an optional configuration
+    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> RouterAgentState:
+        """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            RouterAgentState: The output of the agent execution.
         """
         question = question.strip()
 
@@ -422,10 +438,10 @@ class RouterAgent:
     # except by deleting its checkpoints, as noted in this github discussion:
     # https://github.com/langchain-ai/langgraph/discussions/912
     def clear_thread(self, thread_id: str):
-        """Clears a thread
+        """Deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
@@ -434,10 +450,10 @@ class RouterAgent:
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
-        """Asynchronously clears a thread
+        """Asynchronously deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
@@ -446,9 +462,9 @@ class RouterAgent:
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
 def _route(state: RouterAgentState) -> Literal["sql_agent", "viz_agent", "process_answers"]:
-    "Routes to the next node"
+    "Routes to the next node."
     return state["_next"]
 
 def _post_sql_route(state: RouterAgentState) -> Literal["viz_agent", "process_answers"]:
-    "Routes to the next node"
+    "Routes to the next node."
     return state["_next"]

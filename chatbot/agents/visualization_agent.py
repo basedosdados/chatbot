@@ -1,4 +1,4 @@
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, TypedDict
 
 import pydantic
 from langchain_core.documents import Document
@@ -99,41 +99,41 @@ class VizAgent:
         self.graph = self._compile()
 
     def _call_rephrase_question(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
-        """Calls the model for rephrasing the user's question
+        """Calls the model for rephrasing the user's question.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|HumanMessage]: The state update containing the rephrased question
+            dict[str, str|HumanMessage]: The state update containing the rephrased question.
         """
         question = state["question"]
         response: Rephrase = self.rephraser_runnable.invoke(question, config)
         return {"question_rephrased": response.rephrased}
 
     async def _acall_rephrase_question(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
-        """Asynchronously calls the model for rephrasing the user's question
+        """Asynchronously calls the model for rephrasing the user's question.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|HumanMessage]: The state update containing the rephrased question
+            dict[str, str|HumanMessage]: The state update containing the rephrased question.
         """
         question = state["question"]
         response: Rephrase = await self.rephraser_runnable.ainvoke(question, config)
         return {"question_rephrased": response.rephrased}
 
     def _get_queries_and_results(self, state: VizAgentState) -> dict[str, list[HumanMessage]]:
-        """Builds the message list from the SQL queries and SQL queries restuls lists
+        """Builds the message list from the SQL queries and SQL queries restuls lists.
 
         Args:
-            state (VizAgentState): The graph state
+            state (VizAgentState): The graph state.
 
         Returns:
-            dict[str, list[HumanMessage]]: A dictionary containing the message list
+            dict[str, list[HumanMessage]]: A dictionary containing the message list.
         """
         question = state["question_rephrased"]
 
@@ -160,13 +160,13 @@ class VizAgent:
         return {"messages": [message]}
 
     def _similarity_search(self, question: str) -> list[Document]:
-        """Searches for the top-k most similar examples to the input question
+        """Searches for the top-k most similar examples to the input question.
 
         Args:
-            question (str): The input question
+            question (str): The input question.
 
         Returns:
-            list[Document]: A list of the top-k most similar examples
+            list[Document]: A list of the top-k most similar examples.
         """
         if self.vector_store is not None:
             return self.vector_store.similarity_search(
@@ -176,13 +176,13 @@ class VizAgent:
         return []
 
     async def _asimilarity_search(self, question: str) -> list[Document]:
-        """Asynchronously searches for the top-k most similar examples to the input question
+        """Asynchronously searches for the top-k most similar examples to the input question.
 
         Args:
-            question (str): The input question
+            question (str): The input question.
 
         Returns:
-            list[Document]: A list of the top-k most similar examples
+            list[Document]: A list of the top-k most similar examples.
         """
         if self.vector_store is not None:
             return await self.vector_store.asimilarity_search(
@@ -192,13 +192,13 @@ class VizAgent:
         return []
 
     def _get_preprocess_runnable(self, documents: list[Document]) -> RunnableSequence:
-        """Dynamically builds a model runnable with a few-shot system prompt and the preprocessing model
+        """Dynamically builds a model runnable with a few-shot system prompt and the preprocessing model.
 
         Args:
-            documents (list[Document]): A list of documents
+            documents (list[Document]): A list of documents.
 
         Returns:
-            RunnableSequence: The model runnable
+            RunnableSequence: The model runnable.
         """
         examples = "\n\n".join(
             EXAMPLE_TEMPLATE.format(
@@ -219,14 +219,14 @@ class VizAgent:
         return (lambda messages: [system_message] + messages) | self.preprocess_model
 
     def _call_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
-        """Calls the model for preprocessing the queries results
+        """Calls the model for preprocessing the queries results.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, list]: A dictionary containing the processed queries results
+            dict[str, list]: A dictionary containing the processed queries results.
         """
         question = state["question_rephrased"]
         messages = state["messages"]
@@ -243,14 +243,14 @@ class VizAgent:
         }
 
     async def _acall_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
-        """Asynchronously calls the model for preprocessing the queries results
+        """Asynchronously calls the model for preprocessing the queries results.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, list]: A dictionary containing the processed queries results
+            dict[str, list]: A dictionary containing the processed queries results.
         """
         question = state["question_rephrased"]
         messages = state["messages"]
@@ -267,14 +267,14 @@ class VizAgent:
         }
 
     def _call_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
-        """Calls the model for generating chart metadata
+        """Calls the model for generating chart metadata.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata
+            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata.
         """
         question = state["question_rephrased"]
         chart_data = state["chart_data"]
@@ -288,14 +288,14 @@ class VizAgent:
         return {"chart_metadata": chart_metadata}
 
     async def _acall_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
-        """Asynchronously calls the model for generating chart metadata
+        """Asynchronously calls the model for generating chart metadata.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata
+            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata.
         """
         question = state["question_rephrased"]
         chart_data = state["chart_data"]
@@ -309,14 +309,14 @@ class VizAgent:
         return {"chart_metadata": chart_metadata}
 
     def _validate_chart(self, chart_data: ChartData, chart_metadata: ChartMetadata) -> bool:
-        """Checks if the recommended chart can be plotted using Plotly
+        """Checks if the recommended chart can be plotted using Plotly.
 
         Args:
-            chart_data (ChartData): The chart data
-            chart_metadata (ChartMetadata): The chart metadata
+            chart_data (ChartData): The chart data.
+            chart_metadata (ChartMetadata): The chart metadata.
 
         Returns:
-            bool: Whether the chart can be plotted or not
+            bool: Whether the chart can be plotted or not.
         """
         if chart_data.data is None or \
            chart_metadata.chart_type is None:
@@ -339,14 +339,14 @@ class VizAgent:
             return False
 
     def _call_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
-        """Builds the Chart object and generates an answer to introduce it
+        """Builds the Chart object and generates an answer to introduce it.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer
+            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer.
         """
         question = state["question"]
         sql_answer = state["sql_answer"]
@@ -377,14 +377,14 @@ class VizAgent:
         }
 
     async def _acall_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
-        """Builds the Chart object and generates an answer to introduce it
+        """Builds the Chart object and generates an answer to introduce it.
 
         Args:
-            state (VizAgentState): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (VizAgentState): The graph state.
+            config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer
+            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer.
         """
         question = state["question"]
         sql_answer = state["sql_answer"]
@@ -419,10 +419,10 @@ class VizAgent:
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (VizAgentState): The graph state containing the message list
+            state (VizAgentState): The graph state containing the message list.
 
         Returns:
-            dict[str, list[RemoveMessage]]: The pruned message list
+            dict[str, list[RemoveMessage]]: The pruned message list.
         """
         if self.question_limit is None:
             return {"messages": []}
@@ -435,10 +435,10 @@ class VizAgent:
         }
 
     def _compile(self) -> CompiledGraph:
-        """Compiles the state graph into a LangChain Runnable
+        """Compiles the state graph into a LangChain Runnable.
 
         Returns:
-            CompiledGraph: The compiled state graph
+            CompiledGraph: The compiled state graph.
         """
         graph = StateGraph(VizAgentState)
 
@@ -482,15 +482,15 @@ class VizAgent:
         sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None
-    ) -> dict[str, Any] | Any:
-        """Runs the compiled graph with a question and an optional configuration
+    ) -> VizAgentState:
+        """Runs the compiled graph with a question and an optional configuration.
 
         Args:
-            question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            question (str): The question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            VizAgentState: The output of the agent execution.
         """
         question = question.strip()
 
@@ -513,15 +513,15 @@ class VizAgent:
         sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None
-    ) -> dict[str, Any] | Any:
-        """Asynchronously runs the compiled graph with a question and an optional configuration
+    ) -> VizAgentState:
+        """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
-            question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            question (str): The question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            VizAgentState: The output of the agent execution.
         """
         question = question.strip()
 
@@ -541,10 +541,10 @@ class VizAgent:
     # except by deleting its checkpoints, as noted in this github discussion:
     # https://github.com/langchain-ai/langgraph/discussions/912
     def clear_thread(self, thread_id: str):
-        """Clears a thread
+        """Deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
@@ -553,10 +553,10 @@ class VizAgent:
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
-        """Asynchronously clears a thread
+        """Asynchronously deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
