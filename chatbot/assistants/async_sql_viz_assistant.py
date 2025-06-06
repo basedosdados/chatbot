@@ -1,7 +1,6 @@
 from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from loguru import logger
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.databases import Database
@@ -109,5 +108,4 @@ class AsyncSQLVizAssistant:
         Args:
             thread_id (str): The thread unique identifier
         """
-        logger.info(f"Clearing memory for thread {thread_id}")
         await self.router_agent.aclear_thread(thread_id)
