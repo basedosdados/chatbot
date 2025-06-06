@@ -35,7 +35,7 @@ Output: {output}
 </example>"""
 
 
-class State(TypedDict):
+class VizAgentState(TypedDict):
     # input question
     question: str
 
@@ -98,11 +98,11 @@ class VizAgent:
 
         self.graph = self._compile()
 
-    def _call_rephrase_question(self, state: State, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
+    def _call_rephrase_question(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
         """Calls the model for rephrasing the user's question
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -112,11 +112,11 @@ class VizAgent:
         response: Rephrase = self.rephraser_runnable.invoke(question, config)
         return {"question_rephrased": response.rephrased}
 
-    async def _acall_rephrase_question(self, state: State, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
+    async def _acall_rephrase_question(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|list[HumanMessage]]:
         """Asynchronously calls the model for rephrasing the user's question
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -126,11 +126,11 @@ class VizAgent:
         response: Rephrase = await self.rephraser_runnable.ainvoke(question, config)
         return {"question_rephrased": response.rephrased}
 
-    def _get_queries_and_results(self, state: State) -> dict[str, list[HumanMessage]]:
+    def _get_queries_and_results(self, state: VizAgentState) -> dict[str, list[HumanMessage]]:
         """Builds the message list from the SQL queries and SQL queries restuls lists
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
 
         Returns:
             dict[str, list[HumanMessage]]: A dictionary containing the message list
@@ -218,11 +218,11 @@ class VizAgent:
 
         return (lambda messages: [system_message] + messages) | self.preprocess_model
 
-    def _call_preprocess_data(self, state: State, config: RunnableConfig) -> dict[str, ChartData]:
+    def _call_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
         """Calls the model for preprocessing the queries results
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -242,11 +242,11 @@ class VizAgent:
             "messages": [AIMessage(chart_data.model_dump_json(indent=4))]
         }
 
-    async def _acall_preprocess_data(self, state: State, config: RunnableConfig) -> dict[str, ChartData]:
+    async def _acall_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
         """Asynchronously calls the model for preprocessing the queries results
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -266,11 +266,11 @@ class VizAgent:
             "messages": [AIMessage(chart_data.model_dump_json(indent=4))]
         }
 
-    def _call_chart_metadata(self, state: State, config: RunnableConfig) -> dict[str, ChartMetadata]:
+    def _call_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
         """Calls the model for generating chart metadata
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -287,11 +287,11 @@ class VizAgent:
 
         return {"chart_metadata": chart_metadata}
 
-    async def _acall_chart_metadata(self, state: State, config: RunnableConfig) -> dict[str, ChartMetadata]:
+    async def _acall_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
         """Asynchronously calls the model for generating chart metadata
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -338,11 +338,11 @@ class VizAgent:
             logger.error(f"Chart validation error: one or more of {attrs} are not in {chart_attrs}")
             return False
 
-    def _call_get_answer(self, state: State, config: RunnableConfig) -> dict[str, str|Chart]:
+    def _call_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
         """Builds the Chart object and generates an answer to introduce it
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -376,11 +376,11 @@ class VizAgent:
             "chart_answer": response.content
         }
 
-    async def _acall_get_answer(self, state: State, config: RunnableConfig) -> dict[str, str|Chart]:
+    async def _acall_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
         """Builds the Chart object and generates an answer to introduce it
 
         Args:
-            state (State): The graph state
+            state (VizAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -414,12 +414,12 @@ class VizAgent:
             "chart_answer": response.content
         }
 
-    def _prune_messages(self, state: State) -> dict[str, list[RemoveMessage]]:
+    def _prune_messages(self, state: VizAgentState) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (State): The graph state containing the message list
+            state (VizAgentState): The graph state containing the message list
 
         Returns:
             dict[str, list[RemoveMessage]]: The pruned message list
@@ -440,7 +440,7 @@ class VizAgent:
         Returns:
             CompiledGraph: The compiled state graph
         """
-        graph = StateGraph(State)
+        graph = StateGraph(VizAgentState)
 
         # user's question rephrasing node
         graph.add_node("rephrase", RunnableLambda(self._call_rephrase_question, self._acall_rephrase_question))

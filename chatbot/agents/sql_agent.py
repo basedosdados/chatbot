@@ -27,7 +27,7 @@ from .reducers import BaseItem, ItemRemove, add_item
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
-class State(TypedDict):
+class SQLAgentState(TypedDict):
     # input question and final answer
     question: str
     final_answer: str
@@ -152,11 +152,11 @@ class SQLAgent:
 
         return {"messages": [response]}
 
-    def _call_list_datasets(self, state: State) -> dict[str, list[AIMessage]]:
+    def _call_list_datasets(self, state: SQLAgentState) -> dict[str, list[AIMessage]]:
         """Forces the dataset listing tool call
 
         Args:
-            state (State): The graph state. It's unused in this function
+            state (SQLAgentState): The graph state. It's unused in this function
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message
@@ -174,11 +174,11 @@ class SQLAgent:
 
         return {"messages": [message]}
 
-    async def _acall_list_datasets(self, state: State) -> dict[str, list[AIMessage]]:
+    async def _acall_list_datasets(self, state: SQLAgentState) -> dict[str, list[AIMessage]]:
         """Asynchronously forces the dataset listing tool call
 
         Args:
-            state (State): The graph state. It's unused in this function
+            state (SQLAgentState): The graph state. It's unused in this function
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message
@@ -196,11 +196,11 @@ class SQLAgent:
 
         return {"messages": [message]}
 
-    def _call_select_datasets(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    def _call_select_datasets(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
         """Calls the model responsible for choosing the table and for calling the tables info tool
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -220,11 +220,11 @@ class SQLAgent:
 
         return self._call_model(filtered_messages, is_last_step, config, self.select_datasets_runnable)
 
-    async def _acall_select_datasets(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    async def _acall_select_datasets(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
         """Asynchronously calls the model responsible for choosing the table and for calling the tables info tool
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -274,11 +274,11 @@ class SQLAgent:
 
         return filter
 
-    def _similarity_search(self, state: State) -> dict[str, list[Document]]:
+    def _similarity_search(self, state: SQLAgentState) -> dict[str, list[Document]]:
         """Searches for the top-k most similar examples to the input question
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
 
         Returns:
             dict[str, list[Document]]: A list of the top-k most similar examples
@@ -299,11 +299,11 @@ class SQLAgent:
 
         return {"similar_examples": documents}
 
-    async def _asimilarity_search(self, state: State) -> dict[str, list[Document]]:
+    async def _asimilarity_search(self, state: SQLAgentState) -> dict[str, list[Document]]:
         """Asynchronously searches for the top-k most similar examples to the input question
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
 
         Returns:
             dict[str, list[Document]]: A list of the top-k most similar examples
@@ -347,11 +347,11 @@ class SQLAgent:
 
         return (lambda messages: [system_message] + messages) | self.query_model
 
-    def _call_query_agent(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    def _call_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
         """Calls the model responsible for the query generation
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -362,11 +362,11 @@ class SQLAgent:
         query_model_runnable = self._get_query_model_runnable(state["similar_examples"])
         return self._call_model(messages, is_last_step, config, query_model_runnable)
 
-    async def _acall_query_agent(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    async def _acall_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
         """Asynchronously calls the model responsible for the query generation
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
             config (RunnableConfig): A config to use when calling the LLM
 
         Returns:
@@ -377,15 +377,15 @@ class SQLAgent:
         query_model_runnable = self._get_query_model_runnable(state["similar_examples"])
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
 
-    def _get_answer(self, state: State) -> dict[str, str]:
+    def _get_answer(self, state: SQLAgentState) -> dict[str, str]:
         last_message = state["messages"][-1]
         return {"final_answer": last_message.content}
 
-    def _clear_sql(self, state: State) -> dict[str, str|list[ItemRemove]]:
+    def _clear_sql(self, state: SQLAgentState) -> dict[str, str|list[ItemRemove]]:
         """Clears the SQL agent's answer and the SQL queries and SQL queries results lists
 
         Args:
-            state (State): The graph state
+            state (SQLAgentState): The graph state
 
         Returns:
             dict[str, list[ItemRemove]]: An empty SQL agent's answer
@@ -405,12 +405,12 @@ class SQLAgent:
             "sql_queries_results": sql_queries_results
         }
 
-    def _prune_messages(self, state: State) -> dict[str, list[RemoveMessage]]:
+    def _prune_messages(self, state: SQLAgentState) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (State): The graph state containing the message list
+            state (SQLAgentState): The graph state containing the message list
 
         Returns:
             dict[str, list[RemoveMessage]]: The pruned message list
@@ -431,7 +431,7 @@ class SQLAgent:
         Returns:
             CompiledGraph: The compiled state graph
         """
-        graph = StateGraph(State)
+        graph = StateGraph(SQLAgentState)
 
         # node for clearing previous sql answer, queries, and results
         graph.add_node("clear_sql", self._clear_sql)
@@ -476,7 +476,7 @@ class SQLAgent:
         # For more information, visit https://github.com/langchain-ai/langgraph/issues/3020
         return graph.compile(self.checkpointer)
 
-    def invoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
+    def invoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
         """Runs the compiled graph with a question and an optional configuration
 
         Args:
@@ -484,7 +484,7 @@ class SQLAgent:
             config (RunnableConfig | None, optional): The configuration. Defaults to None.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            SQLAgentState: The last output of the graph run
         """
         question = question.strip()
 
@@ -500,7 +500,7 @@ class SQLAgent:
 
         return response
 
-    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
+    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
         """Asynchronously runs the compiled graph with a question and an optional configuration
 
         Args:
@@ -508,7 +508,7 @@ class SQLAgent:
             config (RunnableConfig | None, optional): The configuration. Defaults to None.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            SQLAgentState: The last output of the graph run
         """
         question = question.strip()
 
@@ -551,7 +551,7 @@ class SQLAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _check_tables_info(state: State) -> Literal["call_select_datasets", "similarity_search"]:
+def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", "similarity_search"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the
     call_select_datasets node if it did. Otherwise, proceeds
 
@@ -563,12 +563,12 @@ def _check_tables_info(state: State) -> Literal["call_select_datasets", "similar
         return "call_select_datasets"
     return "similarity_search"
 
-def _should_continue(state: State) -> Literal["tools", "get_answer"]:
+def _should_continue(state: SQLAgentState) -> Literal["tools", "get_answer"]:
     """Routes to the tools node if the last message has any tool calls.
     Otherwise, routes to the end node
 
     Args:
-        state (State): The graph state
+        state (SQLAgentState): The graph state
 
     Returns:
         str: The next node to route to

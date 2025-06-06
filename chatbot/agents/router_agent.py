@@ -26,7 +26,7 @@ SQLAgentOutput: TypeAlias = dict[str, str|list[Item]|list[AIMessage]]
 VizAgentOutput: TypeAlias = dict[str, str|Chart]
 
 
-class State(TypedDict):
+class RouterAgentState(TypedDict):
     # node before routing
     _previous: str|None
 
@@ -67,7 +67,7 @@ class RouterAgent:
         self.question_limit = question_limit
         self.graph = self._compile()
 
-    def _call_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+    def _call_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
         """Calls the router agent
 
         Returns:
@@ -84,7 +84,7 @@ class RouterAgent:
             "_next": response.next
         }
 
-    async def _acall_initial_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+    async def _acall_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
 
         Returns:
@@ -101,7 +101,7 @@ class RouterAgent:
             "_next": response.next
         }
 
-    def _call_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+    def _call_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
         """Calls the router agent
 
         Returns:
@@ -129,7 +129,7 @@ class RouterAgent:
             "_next": response.next
         }
 
-    async def _acall_post_sql_router(self, state: State, config: RunnableConfig) -> RouterAgentOutput:
+    async def _acall_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> RouterAgentOutput:
         """Asynchronously calls the router agent
 
         Returns:
@@ -157,11 +157,11 @@ class RouterAgent:
             "_next": response.next
         }
 
-    def _call_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
+    def _call_sql_agent(self, state: RouterAgentState, config: RunnableConfig) -> SQLAgentOutput:
         """Calls the `SQLAgent`
 
         Args:
-            state (State): The graph state
+            state (RouterAgentState): The graph state
             config (RunnableConfig): A config to use when calling the agent
 
         Returns:
@@ -176,11 +176,11 @@ class RouterAgent:
             "messages": [AIMessage(response["final_answer"])]
         }
 
-    async def _acall_sql_agent(self, state: State, config: RunnableConfig) -> SQLAgentOutput:
+    async def _acall_sql_agent(self, state: RouterAgentState, config: RunnableConfig) -> SQLAgentOutput:
         """Asynchronously calls the `SQLAgent`
 
         Args:
-            state (State): The graph state
+            state (RouterAgentState): The graph state
             config (RunnableConfig): A config to use when calling the agent
 
         Returns:
@@ -195,11 +195,11 @@ class RouterAgent:
             "messages": [AIMessage(response["final_answer"])]
         }
 
-    def _call_viz_agent(self, state: State, config: RunnableConfig) -> VizAgentOutput:
+    def _call_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> VizAgentOutput:
         """Calls the `VizAgent`
 
         Args:
-            state (State): The graph state
+            state (RouterAgentState): The graph state
             config (RunnableConfig): A config to use when calling the agent
 
         Returns:
@@ -231,11 +231,11 @@ class RouterAgent:
             "chart_answer": chart_answer
         }
 
-    async def _acall_viz_agent(self, state: State, config: RunnableConfig) -> VizAgentOutput:
+    async def _acall_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> VizAgentOutput:
         """Asynchronously calls the `VizAgent`
 
         Args:
-            state (State): The graph state
+            state (RouterAgentState): The graph state
             config (RunnableConfig): A config to use when calling the agent
 
         Returns:
@@ -267,11 +267,11 @@ class RouterAgent:
             "chart_answer": chart_answer,
         }
 
-    def _process_answers(self, state: State) -> dict[str, str]:
+    def _process_answers(self, state: RouterAgentState) -> dict[str, str]:
         """Builds the final answer that will be presented to the user
 
         Args:
-            state (State): The graph state
+            state (RouterAgentState): The graph state
 
         Returns:
             dict[str, str]: The final answer
@@ -310,12 +310,12 @@ class RouterAgent:
 
         return state_update
 
-    def _prune_messages(self, state: State) -> dict[str, list[RemoveMessage]]:
+    def _prune_messages(self, state: RouterAgentState) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (State): The graph state containing the message list
+            state (RouterAgentState): The graph state containing the message list
 
         Returns:
             dict[str, list[RemoveMessage]]: The pruned message list
@@ -336,7 +336,7 @@ class RouterAgent:
         Returns:
             CompiledGraph: The compiled state graph
         """
-        graph = StateGraph(State)
+        graph = StateGraph(RouterAgentState)
 
         # initial router node, calls the sql_agent or the viz_agent
         graph.add_node("initial_router", RunnableLambda(self._call_initial_router, self._acall_initial_router))
@@ -392,9 +392,6 @@ class RouterAgent:
             config=config,
         )
 
-        response.pop("_previous")
-        response.pop("_next")
-
         return response
 
     async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
@@ -418,9 +415,6 @@ class RouterAgent:
             },
             config=config,
         )
-
-        response.pop("_previous")
-        response.pop("_next")
 
         return response
 
@@ -451,10 +445,10 @@ class RouterAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _route(state: State) -> Literal["sql_agent", "viz_agent", "process_answers"]:
+def _route(state: RouterAgentState) -> Literal["sql_agent", "viz_agent", "process_answers"]:
     "Routes to the next node"
     return state["_next"]
 
-def _post_sql_route(state: State) -> Literal["viz_agent", "process_answers"]:
+def _post_sql_route(state: RouterAgentState) -> Literal["viz_agent", "process_answers"]:
     "Routes to the next node"
     return state["_next"]
