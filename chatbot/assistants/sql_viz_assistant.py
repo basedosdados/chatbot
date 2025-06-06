@@ -1,8 +1,3 @@
-import codecs
-import uuid
-from typing import Any
-
-import sqlparse
 from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -11,7 +6,8 @@ from loguru import logger
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.databases import Database
 
-from .datatypes import SQLVizAssistantMessage, UserMessage
+from .formatting import format_router_agent_response
+from .messages import SQLVizAssistantMessage
 
 
 class SQLVizAssistant:
@@ -89,75 +85,21 @@ class SQLVizAssistant:
             question_limit=question_limit
         )
 
-    @staticmethod
-    def _format_response(response: dict[str, Any]) -> dict[str, Any]:
-        """Formats the response that will be presented to the user
-
-        Args:
-            response (dict[str, list]): The model's response
-
-        Returns:
-            tuple[str, str|None]: The final answer and the generated sql queries if any
-        """
-        answer = response["final_answer"]
-        answer = codecs.escape_decode(answer)[0]
-        answer = answer.decode("utf-8").strip()
-
-        sql_queries = []
-
-        for item in response.get("sql_queries", []):
-            sql_query = sqlparse.format(
-                item.content,
-                reindent=True,
-                keyword_case="upper"
-            )
-            sql_queries.append(sql_query)
-
-        formatted_response = {
-            "content": answer,
-            "sql_queries": sql_queries or None,
-            "chart": response.get("chart"),
-        }
-
-        return formatted_response
-
-    def invoke(self, message: UserMessage, thread_id: str|None=None) -> SQLVizAssistantMessage:
+    def invoke(self, message: str, config: dict|None=None) -> SQLVizAssistantMessage:
         """Sends a user message to the `RouterAgent` and returns its response
 
         Args:
-            message (UserMessage): The user message
+            message (str): The user message
             thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
             SQLVizAssistantMessage: The generated response
         """
-        logger.info(f"Received message {message.id}: {message.content}")
+        response = self.router_agent.invoke(message, config)
+        response = format_router_agent_response(response)
 
-        run_id = str(uuid.uuid4())
-
-        config = {
-            "run_id": run_id,
-            "recursion_limit": 32
-        }
-
-        if thread_id is not None:
-            config["configurable"] = {
-                "thread_id": thread_id
-            }
-
-        try:
-            response = self.router_agent.invoke(message.content, config)
-            response = self._format_response(response)
-        except Exception:
-            logger.exception(f"Error on responding message {message.id}:")
-            response = {
-                "content": f"Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "\
-                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
-            }
-
-        response["id"] = run_id
-
-        logger.info(f"Returning response for message {message.id}")
+        if "run_id" in config:
+            response["id"] = config["run_id"]
 
         return SQLVizAssistantMessage(**response)
 

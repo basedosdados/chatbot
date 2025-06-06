@@ -1,8 +1,3 @@
-import codecs
-import uuid
-from typing import Any
-
-import sqlparse
 from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -11,7 +6,8 @@ from loguru import logger
 from chatbot.agents import SQLAgent
 from chatbot.databases import Database
 
-from .datatypes import SQLAssistantMessage, UserMessage
+from .formatting import format_sql_agent_response
+from .messages import SQLAssistantMessage
 
 
 class AsyncSQLAssistant:
@@ -65,54 +61,21 @@ class AsyncSQLAssistant:
             question_limit=question_limit
         )
 
-    @staticmethod
-    def _format_response(response: dict[str, Any]) -> dict[str, Any]:
-        """Formats the response that will be presented to the user
-
-        Args:
-            response (dict[str, list]): The model's response
-
-        Returns:
-            tuple[str, str|None]: The final answer and the generated sql queries if any
-        """
-        answer = response["final_answer"]
-        answer = codecs.escape_decode(answer)[0]
-        answer = answer.decode("utf-8").strip()
-
-        sql_queries = []
-
-        for item in response.get("sql_queries", []):
-            sql_query = sqlparse.format(
-                item.content,
-                reindent=True,
-                keyword_case="upper"
-            )
-            sql_queries.append(sql_query)
-
-        formatted_response = {
-            "content": answer,
-            "sql_queries": sql_queries or None,
-        }
-
-        return formatted_response
-
     async def invoke(self, message: str, config: dict|None) -> SQLAssistantMessage:
         """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
-            message (UserMessage): The user message
+            message (str): The user message
             thread_id (str | None, optional): The thread unique identifier. Defaults to None.
 
         Returns:
             SQLAssistantMessage: The generated response
         """
-        if "run_id" not in config:
-            config["run_id"] = str(uuid.uuid4())
-
         response = await self.sql_agent.ainvoke(message, config)
-        response = self._format_response(response)
+        response = format_sql_agent_response(response)
 
-        response["id"] = config["run_id"]
+        if "run_id" in config:
+            response["id"] = config["run_id"]
 
         return SQLAssistantMessage(**response)
 
