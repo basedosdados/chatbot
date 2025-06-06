@@ -60,7 +60,7 @@ class AsyncSQLAssistant:
             question_limit=question_limit
         )
 
-    async def invoke(self, message: str, config: dict|None) -> SQLAssistantMessage:
+    async def invoke(self, message: str, config: dict|None=None) -> SQLAssistantMessage:
         """Asynchronously sends a user message to the `SQLAgent` and returns its response
 
         Args:
@@ -73,7 +73,7 @@ class AsyncSQLAssistant:
         response = await self.sql_agent.ainvoke(message, config)
         response = format_sql_agent_response(response)
 
-        if "run_id" in config:
+        if config is not None and "run_id" in config:
             response["id"] = config["run_id"]
 
         return SQLAssistantMessage(**response)

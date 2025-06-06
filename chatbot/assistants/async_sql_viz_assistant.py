@@ -97,7 +97,7 @@ class AsyncSQLVizAssistant:
         response = await self.router_agent.ainvoke(message, config)
         response = format_router_agent_response(response)
 
-        if "run_id" in config:
+        if config is not None and "run_id" in config:
             response["id"] = config["run_id"]
 
         return SQLVizAssistantMessage(**response)
