@@ -2,7 +2,7 @@ import pytest
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      RemoveMessage)
 
-from chatbot.agents import RouterAgent
+from chatbot.agents.router_agent import RouterAgent
 from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
 
 
@@ -133,8 +133,8 @@ def test_prune_messages_question_limit_none(
 
 def test_build_final_answer_previous_sql_valid_chart(agent: RouterAgent, valid_chart: Chart):
     state = {
-        "previous": "sql_agent",
-        "next": "viz_agent",
+        "_previous": "sql_agent",
+        "_next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
         "chart": valid_chart
@@ -150,8 +150,8 @@ def test_build_final_answer_previous_sql_valid_chart(agent: RouterAgent, valid_c
 
 def test_build_final_answer_previous_sql_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
     state = {
-        "previous": "sql_agent",
-        "next": "viz_agent",
+        "_previous": "sql_agent",
+        "_next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
         "chart": invalid_chart
@@ -165,8 +165,8 @@ def test_build_final_answer_previous_sql_invalid_chart(agent: RouterAgent, inval
 
 def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent, invalid_chart: Chart):
     state = {
-        "previous": "sql_agent",
-        "next": "process_answers",
+        "_previous": "sql_agent",
+        "_next": "process_answers",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
         "chart": valid_chart
@@ -183,8 +183,8 @@ def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent
 
 def test_build_final_answer_previous_initial_router_valid_chart(agent: RouterAgent, valid_chart: Chart):
     state = {
-        "previous": "initial_router",
-        "next": "viz_agent",
+        "_previous": "initial_router",
+        "_next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
         "chart": valid_chart
@@ -198,8 +198,8 @@ def test_build_final_answer_previous_initial_router_valid_chart(agent: RouterAge
 
 def test_build_final_answer_previous_initial_router_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
     state = {
-        "previous": "initial_router",
-        "next": "viz_agent",
+        "_previous": "initial_router",
+        "_next": "viz_agent",
         "sql_answer": "mock sql answer",
         "chart_answer": "mock_chart_answer",
         "chart": invalid_chart

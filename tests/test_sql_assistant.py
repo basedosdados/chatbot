@@ -2,27 +2,26 @@ import uuid
 
 import pytest
 
-from chatbot.agents import SQLAgent
-from chatbot.agents.reducers import Item
-from chatbot.assistants import SQLAssistant, SQLAssistantMessage, UserMessage
+from chatbot.agents.sql_agent import SQLAgent, SQLAgentState
+from chatbot.assistants import SQLAssistant, SQLAssistantMessage
 
 
 @pytest.fixture
 def assistant(monkeypatch):
     """Mock SQLAssistant"""
-    def mock_agent_init(self):
-        ...
+    def mock_agent_init(self, checkpointer):
+        self.checkpointer = checkpointer
 
     def mock_invoke(self, question, config):
-        return {
-            "question": "mock question",
-            "final_answer": "mock final answer",
-            "sql_queries": [],
-            "sql_queries_results": [],
-            "similar_examples": [],
-            "messages": [],
-            "is_last_step": False
-        }
+        return SQLAgentState(
+            question=question,
+            final_answer="mock final answer",
+            sql_queries=[],
+            sql_queries_results=[],
+            similar_examples=[],
+            messages=[],
+            is_last_step=False
+        )
 
     def mock_assistant_init(self, sql_agent):
         self.sql_agent = sql_agent
@@ -31,77 +30,35 @@ def assistant(monkeypatch):
     monkeypatch.setattr(SQLAgent, "invoke", mock_invoke)
     monkeypatch.setattr(SQLAssistant, "__init__", mock_assistant_init)
 
-    mock_agent = SQLAgent()
+    mock_agent = SQLAgent(checkpointer=None)
 
-    mock_assistant = SQLAssistant(
-        sql_agent=mock_agent,
-    )
+    mock_assistant = SQLAssistant(sql_agent=mock_agent)
 
     return mock_assistant
 
-@pytest.fixture
-def user_message() -> UserMessage:
-    return UserMessage(content="mock question")
-
-def test_format_response(assistant: SQLAssistant):
-    response = {
-        "final_answer": "hello world!",
-        "sql_queries": [
-            Item(content="select * from table_1"),
-            Item(content="select * from table_2")
-        ]
-    }
-
-    expected_formatted_response = {
-        "content": "hello world!",
-        "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_format_response_with_special_characters(assistant: SQLAssistant):
-    response = {
-        "final_answer": "\n\\xc4\\xa7&\\xc5\\x82\\xc5\\x82\\xc3\\xb8 w\\xc3\\xb8\\xc2\\xae\\xc5\\x82\\xc3\\xb0!\n",
-        "sql_queries": [
-            Item(content="select * from table_1"),
-            Item(content="select * from table_2")
-        ],
-    }
-
-    expected_formatted_response = {
-        "content": "ħ&łłø wø®łð!",
-        "sql_queries": ["SELECT *\nFROM table_1", "SELECT *\nFROM table_2"],
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_format_response_with_no_sql_queries(assistant: SQLAssistant):
-    response = {
-        "final_answer": "hello world!",
-        "sql_queries": [],
-    }
-
-    expected_formatted_response = {
-        "content": "hello world!",
-        "sql_queries": None,
-    }
-
-    formatted_response = assistant._format_response(response)
-
-    assert formatted_response == expected_formatted_response
-
-def test_invoke(assistant: SQLAssistant, user_message: UserMessage):
-    response = assistant.invoke(user_message)
+def test_invoke(assistant: SQLAssistant):
+    response = assistant.invoke("mock question")
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
         sql_queries=None,
     )
 
+    assert response.content == expected_response.content
+    assert response.sql_queries == expected_response.sql_queries
+
+def test_invoke_with_config(assistant: SQLAssistant):
+    run_id = str(uuid.uuid4())
+
+    response = assistant.invoke("mock question", {"run_id": run_id})
+
+    expected_response = SQLAssistantMessage(
+        id=run_id,
+        content="mock final answer",
+        sql_queries=None,
+    )
+
+    assert response.id == expected_response.id
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
 
