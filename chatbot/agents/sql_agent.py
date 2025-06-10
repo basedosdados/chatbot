@@ -1,7 +1,6 @@
 import uuid
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Callable, Literal, TypedDict
 
-from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      RemoveMessage, SystemMessage, ToolMessage)
@@ -17,7 +16,7 @@ from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from chatbot.databases import Database
+from chatbot.databases import ContextProvider, SQLExample
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -37,7 +36,7 @@ class SQLAgentState(TypedDict):
     sql_queries_results: Annotated[list[BaseItem], add_item]
 
     # examples similar to the input question, for few-shot prompting
-    similar_examples: list[Document]
+    few_shot_sql_examples: list[SQLExample]
 
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
@@ -45,23 +44,38 @@ class SQLAgentState(TypedDict):
     # flag for indicating recursion limit has been reached
     is_last_step: IsLastStep
 
+def default_prompt_formatter(examples: list[SQLExample]) -> str:
+    """The default function to format examples into a system prompt."""
+    if not examples:
+        return SQL_AGENT_BASE_SYSTEM_PROMPT
+
+    few_shot_examples = "\n\n".join(
+        f"Question: {ex.question}\nSQL Query:\n```sql\n{ex.query}\n```"
+        for ex in examples
+    )
+    return SQL_AGENT_SYSTEM_PROMPT.format(examples=few_shot_examples)
+
+PromptFormatter = Callable[[list[SQLExample]], str]
+
 class SQLAgent:
     def __init__(
         self,
-        db: Database,
         model: BaseChatModel,
+        context_provider: ContextProvider,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
-        vector_store: VectorStore | None = None,
-        top_k: int = 5,
+        prompt_formatter: PromptFormatter = default_prompt_formatter,
         question_limit: int | None = 5,
     ):
+        self.context_provider = context_provider
+        self.prompt_formatter = prompt_formatter
+
         # datasets and tables selection tools
-        self.list_datasets_tool = ListDatasetsTool(db=db)
-        self.tables_info_tool = DatasetsTablesInfoTool(db=db)
+        self.list_datasets_tool = ListDatasetsTool(db=self.context_provider)
+        self.tables_info_tool = DatasetsTablesInfoTool(db=self.context_provider)
 
         # query checking and execution tools
         self.query_check_tool = QueryCheckTool(llm=model)
-        self.query_table_tool = QueryTableTool(db=db)
+        self.query_table_tool = QueryTableTool(db=self.context_provider)
 
         select_datasets_system_message = SystemMessage(SELECT_DATASETS_SYSTEM_PROMPT)
 
@@ -80,9 +94,6 @@ class SQLAgent:
         ])
 
         self.checkpointer = checkpointer
-
-        self.vector_store = vector_store
-        self.top_k = top_k
 
         self.question_limit = question_limit
 
@@ -244,107 +255,25 @@ class SQLAgent:
 
         return await self._acall_model(filtered_messages, is_last_step, config, self.select_datasets_runnable)
 
-    def _get_filter_for_similarity_search(self, messages: list[BaseMessage]) -> dict | None:
-        """Gets a filter to be applied in the similarity search.
+    def _get_few_shot_examples(self, state: SQLAgentState) -> dict[str, list[SQLExample]]:
+        examples = self.context_provider.get_sql_examples(state["question"])
+        return {"few_shot_examples": examples}
 
-        Args:
-            messages (list[BaseMessage]): The message list.
+    async def _aget_few_shot_examples(self, state: SQLAgentState) -> dict[str, list[SQLExample]]:
+        examples = await self.context_provider.aget_sql_examples(state["question"])
+        return {"few_shot_examples": examples}
 
-        Returns:
-            dict | None: The filter.
-        """
-        dataset_names = []
-        filter = None
-        stop = False
-
-        for message in reversed(messages):
-            if not isinstance(message, AIMessage) or not message.tool_calls:
-                continue
-            for tool_call in message.tool_calls:
-                if tool_call["name"] == self.tables_info_tool.name:
-                    names = tool_call["args"]["dataset_names"]
-                    names = [name.strip() for name in names.split(",")]
-                    dataset_names.extend(names)
-                    stop = True
-            if stop:
-                break
-
-        if dataset_names:
-            filter = {"dataset_name": {"$in": dataset_names}}
-
-        return filter
-
-    def _similarity_search(self, state: SQLAgentState) -> dict[str, list[Document]]:
-        """Searches for the top-k most similar examples to the input question.
-
-        Args:
-            state (SQLAgentState): The graph state.
-
-        Returns:
-            dict[str, list[Document]]: A list of the top-k most similar examples.
-        """
-        if self.vector_store is None:
-            return {"similar_examples": []}
-
-        messages = state["messages"]
-        question = state["question"]
-
-        filter = self._get_filter_for_similarity_search(messages)
-
-        documents = self.vector_store.similarity_search(
-            query=question,
-            k=self.top_k,
-            filter=filter
-        )
-
-        return {"similar_examples": documents}
-
-    async def _asimilarity_search(self, state: SQLAgentState) -> dict[str, list[Document]]:
-        """Asynchronously searches for the top-k most similar examples to the input question.
-
-        Args:
-            state (SQLAgentState): The graph state.
-
-        Returns:
-            dict[str, list[Document]]: A list of the top-k most similar examples.
-        """
-        if self.vector_store is None:
-            return {"similar_examples": []}
-
-        messages = state["messages"]
-        question = state["question"]
-
-        filter = self._get_filter_for_similarity_search(messages)
-
-        documents = await self.vector_store.asimilarity_search(
-            query=question,
-            k=self.top_k,
-            filter=filter
-        )
-
-        return {"similar_examples": documents}
-
-    def _get_query_model_runnable(self, documents: list[Document]) -> RunnableSequence:
+    def _get_query_model_runnable(self, few_shot_examples: list[SQLExample]) -> RunnableSequence:
         """Dynamically builds a model runnable with a few-shot system prompt and the query model.
 
         Args:
-            documents (list[Document]): A list of similar examples.
+            few_shot_examples (list[SQLExample]): A list of few-shot SQL examples.
 
         Returns:
             RunnableSequence: The model runnable.
         """
-        similar_examples = "\n\n".join(
-            f"Question: {doc.page_content}\nSQL Query:\n```sql\n{doc.metadata['query']}\n```"
-            for doc in documents
-        )
-
-        if similar_examples:
-            system_message = SystemMessage(
-                content=SQL_AGENT_SYSTEM_PROMPT.format(examples=similar_examples)
-            )
-        else:
-            system_message = SystemMessage(content=SQL_AGENT_BASE_SYSTEM_PROMPT)
-
+        system_prompt = self.prompt_formatter(few_shot_examples)
+        system_message = SystemMessage(content=system_prompt)
         return (lambda messages: [system_message] + messages) | self.query_model
 
     def _call_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
@@ -359,7 +288,7 @@ class SQLAgent:
         """
         messages = state["messages"]
         is_last_step = state["is_last_step"]
-        query_model_runnable = self._get_query_model_runnable(state["similar_examples"])
+        query_model_runnable = self._get_query_model_runnable(state["few_shot_examples"])
         return self._call_model(messages, is_last_step, config, query_model_runnable)
 
     async def _acall_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
@@ -374,7 +303,7 @@ class SQLAgent:
         """
         messages = state["messages"]
         is_last_step = state["is_last_step"]
-        query_model_runnable = self._get_query_model_runnable(state["similar_examples"])
+        query_model_runnable = self._get_query_model_runnable(state["few_shot_examples"])
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
 
     def _get_answer(self, state: SQLAgentState) -> dict[str, str]:
@@ -445,7 +374,7 @@ class SQLAgent:
         graph.add_node("tables_info", ToolNode([self.tables_info_tool]))
 
         # similarity search node
-        graph.add_node("similarity_search", RunnableLambda(self._similarity_search, self._asimilarity_search))
+        graph.add_node("get_sql_examples", RunnableLambda(self._get_few_shot_examples, self._aget_few_shot_examples))
 
         # ReAct nodes
         graph.add_node("query_agent", RunnableLambda(self._call_query_agent, self._acall_query_agent))
@@ -462,7 +391,7 @@ class SQLAgent:
         graph.add_edge("list_datasets", "call_select_datasets")
         graph.add_edge("call_select_datasets", "tables_info")
         graph.add_conditional_edges("tables_info", _check_tables_info)
-        graph.add_edge("similarity_search", "query_agent")
+        graph.add_edge("get_sql_examples", "query_agent")
         graph.add_conditional_edges("query_agent", _should_continue)
         graph.add_edge("tools", "query_agent")
         graph.add_edge("get_answer", "prune_messages")
@@ -551,7 +480,7 @@ class SQLAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", "similarity_search"]:
+def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", "get_sql_examples"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the
     call_select_datasets node if it did. Otherwise, proceeds.
 
@@ -561,7 +490,7 @@ def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", 
     last_message = state["messages"][-1]
     if isinstance(last_message, ToolMessage) and "Error: " in last_message.content:
         return "call_select_datasets"
-    return "similarity_search"
+    return "get_sql_examples"
 
 def _should_continue(state: SQLAgentState) -> Literal["tools", "get_answer"]:
     """Routes to the tools node if the last message has any tool calls.

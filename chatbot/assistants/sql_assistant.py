@@ -3,7 +3,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.agents import SQLAgent
-from chatbot.databases import Database
+from chatbot.databases import ContextProvider
 
 from .formatting import format_sql_agent_response
 from .messages import SQLAssistantMessage
@@ -34,10 +34,9 @@ class SQLAssistant:
 
     def __init__(
         self,
-        database: Database,
         model: BaseChatModel,
+        context_provider: ContextProvider,
         checkpointer: PostgresSaver | None = None,
-        vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         if checkpointer is not None and not isinstance(checkpointer, PostgresSaver):
@@ -46,17 +45,10 @@ class SQLAssistant:
                 f"or `None`, but got `{type(checkpointer)}`."
             )
 
-        if vector_store is not None and not isinstance(vector_store, VectorStore):
-            raise TypeError(
-                "`vector_store` must be an instance of langchain `VectorStore` "
-                f"or `None`, but got `{type(vector_store)}`."
-            )
-
         self.sql_agent = SQLAgent(
-            db=database,
             model=model,
+            context_provider=context_provider,
             checkpointer=checkpointer,
-            vector_store=vector_store,
             question_limit=question_limit
         )
 

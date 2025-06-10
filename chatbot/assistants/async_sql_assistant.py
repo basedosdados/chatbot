@@ -3,7 +3,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from chatbot.agents import SQLAgent
-from chatbot.databases import Database
+from chatbot.databases import ContextProvider
 
 from .formatting import format_sql_agent_response
 from .messages import SQLAssistantMessage
@@ -34,7 +34,7 @@ class AsyncSQLAssistant:
 
     def __init__(
         self,
-        database: Database,
+        context_provider: ContextProvider,
         model: BaseChatModel,
         checkpointer: AsyncPostgresSaver | None = None,
         vector_store: VectorStore | None = None,
@@ -53,10 +53,9 @@ class AsyncSQLAssistant:
             )
 
         self.sql_agent = SQLAgent(
-            db=database,
             model=model,
+            context_provider=context_provider,
             checkpointer=checkpointer,
-            vector_store=vector_store,
             question_limit=question_limit
         )
 

@@ -10,9 +10,12 @@ from google.cloud import bigquery as bq
 from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
+from langchain_core.vectorstores import VectorStore
 from loguru import logger
 
 from chatbot.databases.metadata_formatter import MetadataFormatterFactory
+
+from .database import SQLExample
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
@@ -53,7 +56,8 @@ class BigQueryDatabase:
         max_workers: int | None = 4,
         max_results: int | None = 1000,
         timeout: float | None = 30.0,
-        metadata_format: Literal["markdown", "xml"] = "markdown"
+        vector_store: VectorStore | None = None,
+        metadata_format: Literal["markdown", "xml"] = "markdown",
     ):
         billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
         query_project = query_project or os.getenv('QUERY_PROJECT_ID')
@@ -63,6 +67,8 @@ class BigQueryDatabase:
         self._max_workers = max_workers
         self._max_results = max_results
         self._timeout = timeout
+
+        self._vector_store = vector_store
 
         self.formatter = MetadataFormatterFactory.get_metadata_formatter(metadata_format)
 
@@ -299,3 +305,25 @@ class BigQueryDatabase:
         except Exception as query_exception:
             logger.exception("Error on querying table:")
             raise query_exception
+
+    def get_sql_examples(self, query: str) -> list[SQLExample]:
+        examples = self._vector_store.similarity_search(query)
+
+        return [
+            SQLExample(
+                question=ex.metadata["query"],
+                query=ex.page_content,
+            )
+            for ex in examples
+        ]
+
+    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
+        examples = await self._vector_store.asimilarity_search(query)
+
+        return [
+            SQLExample(
+                question=e.metadata["query"],
+                query=e.page_content,
+            )
+            for ex in examples
+        ]

@@ -26,17 +26,17 @@ class _ListDatasetsToolInput(BaseModel):
 class ListDatasetsTool(BaseBigQueryTool, BaseTool):
     """Tool for getting dataset names from a BigQuery project"""
     name: str = "list_datasets"
-    description: str = "Input to this tool is an empty string. Output is a list of datasets and its descriptions in the project"
+    description: str = "Input to this tool is an empty string. Output is the metadata of all datasets and its tables in the project"
     args_schema: Type[BaseModel] = _ListDatasetsToolInput
 
     def _run(self, tool_input: str="") -> str:
-        """Get the full dataset names from a BigQuery project
+        """Get metadata of all datasets and its tables from a BigQuery project.
 
         Args:
             tool_input (str, optional): Does nothing. Defaults to "".
 
         Returns:
-            str: List of dataset names and descriptions
+            str: Metadata of all datasets and its tables.
         """
         return self.db.get_datasets_info()
 
@@ -44,7 +44,7 @@ class _DatasetsTablesInfoToolInput(BaseModel):
     dataset_names: str = Field(
         ...,
         description=(
-            "A comma-separated list of the dataset names for which to return the tables' metadata. Example input: 'dataset1, dataset2, dataset3'"
+            "A comma-separated list of the dataset names for which to return the tables metadata. Example input: 'dataset1, dataset2, dataset3'"
         ),
     )
 
