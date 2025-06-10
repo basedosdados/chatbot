@@ -1,9 +1,9 @@
-from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from chatbot.agents import SQLAgent
-from chatbot.databases import ContextProvider
+from chatbot.agents.sql_agent import (PromptFormatter, SQLAgent,
+                                      default_prompt_formatter)
+from chatbot.contexts import ContextProvider
 
 from .formatting import format_sql_agent_response
 from .messages import SQLAssistantMessage
@@ -13,20 +13,25 @@ class AsyncSQLAssistant:
     """Async LLM-powered assistant for querying databases.
 
     Args:
-        database (Database):
-            A `Database` object implementing the `Database` protocol.
         model (BaseChatModel):
-            A langchain `ChatModel` with support to structured outputs and tool calling.
+            A langchain `ChatModel` instance with tool-calling support.
+        context_provider (ContextProvider):
+            An implementation of the `ContextProvider` protocol. Supplies all metadata
+            needed by the `SQLagent`. By supplying your own ContextProvider, you can plug
+            in any metadata source (BigQuery, Postgres, hard-coded examples, etc.) without
+            changing agent's orchestration logic.
+        prompt_formatter (Callable[[list[SQLExample]], str], optional):
+            A callable that takes a list of `SQLExample` instances and returns a single
+            string to be used as the system prompt during SQL generation. If not empty, the
+            examples list is used to build a few-shot system prompt. Supply your own function
+            to change how examples are formatted or to use your own entire prompt structure.
         checkpointer (AsyncPostgresSaver | None, optional):
-            A checkpointer that will be used for persisting state across assistant's runs.
-            If set to `None`, the assistant will not retain memory of previous messages.
-            Defaults to `None`.
-        vector_store (VectorStore | None, optional):
-            A vector store that contains examples for the `SQLAgent` LLM calls.
-            If set to `None`, no examples will be used. Defaults to `None`.
+            A checkpointer that will be used for persisting per-thread state across
+            assistant's runs. If set to `None`, the assistant will not retain memory
+            of previous messages. Defaults to `None`.
         question_limit (int | None, optional):
-            Maximum number of previous questions to keep in memory.
-            If `None`, all questions are kept. Defaults to `5`.
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.
 
     Raises:
         TypeError: If the provided checkpointer or vector store are of the wrong type.
@@ -34,10 +39,10 @@ class AsyncSQLAssistant:
 
     def __init__(
         self,
-        context_provider: ContextProvider,
         model: BaseChatModel,
+        context_provider: ContextProvider,
+        prompt_formatter: PromptFormatter = default_prompt_formatter,
         checkpointer: AsyncPostgresSaver | None = None,
-        vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         if checkpointer is not None and not isinstance(checkpointer, AsyncPostgresSaver):
@@ -46,15 +51,10 @@ class AsyncSQLAssistant:
                 f"or `None`, but got `{type(checkpointer)}`."
             )
 
-        if vector_store is not None and not isinstance(vector_store, VectorStore):
-            raise TypeError(
-                "`vector_store` must be an instance of langchain `VectorStore` "
-                f"or `None`, but got `{type(vector_store)}`."
-            )
-
         self.sql_agent = SQLAgent(
             model=model,
             context_provider=context_provider,
+            prompt_formatter=prompt_formatter,
             checkpointer=checkpointer,
             question_limit=question_limit
         )

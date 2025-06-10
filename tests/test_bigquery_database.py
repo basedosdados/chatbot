@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from google.cloud.bigquery.table import Row
 
-from chatbot.databases import BigQueryDatabase
+from chatbot.contexts import BigQueryContextProvider
 
 # constants for the number of datasets and tables created
 # in the `list_datasets` and `list_tables` mock functions
@@ -108,7 +108,7 @@ def db(mock_bigquery_client, monkeypatch):
         "google.cloud.bigquery.Client", lambda _: mock_bigquery_client
     )
 
-    return BigQueryDatabase()
+    return BigQueryContextProvider()
 
 @pytest.fixture
 def dataset_list_item():
@@ -128,19 +128,19 @@ def table_list_item():
     return table_list_item
 
 # ============================== test cases ==============================
-def test_fetch_dataset(db: BigQueryDatabase, dataset_list_item: MagicMock):
+def test_fetch_dataset(db: BigQueryContextProvider, dataset_list_item: MagicMock):
     dataset = db._fetch_dataset(dataset_list_item)
     assert dataset.dataset_id == dataset_list_item.dataset_id
     assert dataset.description == dataset_list_item.description
 
-def test_fetch_datasets(db: BigQueryDatabase):
+def test_fetch_datasets(db: BigQueryContextProvider):
     datasets = db._fetch_datasets()
     assert isinstance(datasets, list)
     for dataset in datasets:
         assert hasattr(dataset, "dataset_id")
         assert hasattr(dataset, "description")
 
-def test_fetch_table(db: BigQueryDatabase, table_list_item: MagicMock):
+def test_fetch_table(db: BigQueryContextProvider, table_list_item: MagicMock):
     table = db._fetch_table(table_list_item)
     assert table.dataset_id == table_list_item.dataset_id
     assert table.full_table_id == table_list_item.full_table_id
@@ -148,7 +148,7 @@ def test_fetch_table(db: BigQueryDatabase, table_list_item: MagicMock):
     assert hasattr(table, "description")
     assert hasattr(table, "schema")
 
-def test_fetch_tables(db: BigQueryDatabase):
+def test_fetch_tables(db: BigQueryContextProvider):
     tables = db._fetch_tables("mock_dataset_id")
     assert isinstance(tables, list)
     for table in tables:
@@ -158,7 +158,7 @@ def test_fetch_tables(db: BigQueryDatabase):
         assert hasattr(table, "description")
         assert hasattr(table, "schema")
 
-def test_cache_data(db: BigQueryDatabase):
+def test_cache_data(db: BigQueryContextProvider):
     db._cache_data()
 
     assert isinstance(db._cache, dict)
@@ -179,7 +179,7 @@ def test_cache_data(db: BigQueryDatabase):
             assert hasattr(table, "description")
             assert hasattr(table, "schema")
 
-def test_query(db: BigQueryDatabase):
+def test_query(db: BigQueryContextProvider):
     expected = '[{"field_1": "value_1", "field_2": "value_2", "field_3": "value_3"}]'
     query_results = db.query("mock_query")
     assert query_results == expected

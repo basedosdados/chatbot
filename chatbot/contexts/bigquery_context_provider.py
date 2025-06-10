@@ -13,9 +13,9 @@ from google.cloud.bigquery.table import Table, TableListItem, TableReference
 from langchain_core.vectorstores import VectorStore
 from loguru import logger
 
-from chatbot.databases.metadata_formatter import MetadataFormatterFactory
+from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
 
-from .database import SQLExample
+from .context_provider import SQLExample
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
@@ -23,7 +23,7 @@ CACHE_TTL = 60*60
 # using a named tuple for clarity
 Data = namedtuple("Data", ("dataset", "tables"))
 
-class BigQueryDatabase:
+class BigQueryContextProvider:
     """A BigQuery-backed database interface, for fetching and formatting data.
 
     Args:
@@ -47,6 +47,10 @@ class BigQueryDatabase:
         metadata_format (Literal["markdown", "xml"], optional):
             The format in which fetched metadata should be returned. Accepted
             values are `"markdown"` and `"xml"`. Defaults to `"markdown"`.
+        sql_vector_store (VectorStore | None, optional):
+            A vector database containing examples of user messages and their corresponding
+            SQL queries for few-shot prompting during SQL query generation. If set to `None`,
+            no examples are fetched. Defaults to `None`.
     """
 
     def __init__(
@@ -56,8 +60,8 @@ class BigQueryDatabase:
         max_workers: int | None = 4,
         max_results: int | None = 1000,
         timeout: float | None = 30.0,
-        vector_store: VectorStore | None = None,
         metadata_format: Literal["markdown", "xml"] = "markdown",
+        sql_vector_store: VectorStore | None = None,
     ):
         billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
         query_project = query_project or os.getenv('QUERY_PROJECT_ID')
@@ -68,9 +72,11 @@ class BigQueryDatabase:
         self._max_results = max_results
         self._timeout = timeout
 
-        self._vector_store = vector_store
+        self.formatter = MetadataFormatterFactory.get_metadata_formatter(
+            format=metadata_format
+        )
 
-        self.formatter = MetadataFormatterFactory.get_metadata_formatter(metadata_format)
+        self._sql_vector_store = sql_vector_store
 
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()
@@ -282,20 +288,62 @@ class BigQueryDatabase:
 
         return "\n\n---\n\n".join(tables_info)
 
-    def query(self, query: str) -> str:
-        """Runs a SQL query in BigQuery
+    def get_sql_examples(self, query: str) -> list[SQLExample]:
+        """Fetch example SQL queries relevant to a given user message
+        for few-shot prompting building.
 
         Args:
-            query (str): A SQL query
-
-        Raises:
-            query_exception: If the query failed for any reason
+            query (str): A natural language user message.
 
         Returns:
-            str: The SQL query results
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        examples = self._sql_vector_store.similarity_search(query)
+
+        return [
+            SQLExample(
+                question=ex.page_content,
+                query=ex.metadata["query"],
+            )
+            for ex in examples
+        ]
+
+    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
+        """Asynchronously fetch example SQL queries relevant to a given user message
+        for few-shot prompting building.
+
+        Args:
+            query (str): A natural language user message.
+
+        Returns:
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        examples = await self._sql_vector_store.asimilarity_search(query)
+
+        return [
+            SQLExample(
+                question=ex.page_content,
+                query=ex.metadata["query"],
+            )
+            for ex in examples
+        ]
+
+    def query(self, sql_query: str) -> str:
+        """Run a SQL query in BigQuery.
+
+        Args:
+            query (sql_query): A valid GoogleSQL query statement.
+
+        Raises:
+            query_exception: If the query failed for any reason.
+
+        Returns:
+            str: The execution results, formatted as a string.
         """
         try:
-            rows = self._client.query(query, project=self._project).result()
+            rows = self._client.query(sql_query, project=self._project).result()
 
             results = [dict(row) for row in rows]
 
@@ -305,25 +353,3 @@ class BigQueryDatabase:
         except Exception as query_exception:
             logger.exception("Error on querying table:")
             raise query_exception
-
-    def get_sql_examples(self, query: str) -> list[SQLExample]:
-        examples = self._vector_store.similarity_search(query)
-
-        return [
-            SQLExample(
-                question=ex.metadata["query"],
-                query=ex.page_content,
-            )
-            for ex in examples
-        ]
-
-    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
-        examples = await self._vector_store.asimilarity_search(query)
-
-        return [
-            SQLExample(
-                question=e.metadata["query"],
-                query=e.page_content,
-            )
-            for ex in examples
-        ]

@@ -1,12 +1,12 @@
 import uuid
-from typing import Annotated, Callable, Literal, TypedDict
+from collections.abc import Callable
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      RemoveMessage, SystemMessage, ToolMessage)
 from langchain_core.runnables import (RunnableConfig, RunnableLambda,
                                       RunnableSequence)
-from langchain_core.vectorstores import VectorStore
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
@@ -16,7 +16,7 @@ from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from chatbot.databases import ContextProvider, SQLExample
+from chatbot.contexts import ContextProvider, SQLExample
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -25,6 +25,7 @@ from .prompts import (SELECT_DATASETS_SYSTEM_PROMPT,
 from .reducers import BaseItem, ItemRemove, add_item
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
+PromptFormatter = Callable[[list[SQLExample]], str]
 
 class SQLAgentState(TypedDict):
     # input question and final answer
@@ -36,7 +37,7 @@ class SQLAgentState(TypedDict):
     sql_queries_results: Annotated[list[BaseItem], add_item]
 
     # examples similar to the input question, for few-shot prompting
-    few_shot_sql_examples: list[SQLExample]
+    few_shot_examples: list[SQLExample]
 
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
@@ -53,31 +54,65 @@ def default_prompt_formatter(examples: list[SQLExample]) -> str:
         f"Question: {ex.question}\nSQL Query:\n```sql\n{ex.query}\n```"
         for ex in examples
     )
+
     return SQL_AGENT_SYSTEM_PROMPT.format(examples=few_shot_examples)
 
-PromptFormatter = Callable[[list[SQLExample]], str]
-
 class SQLAgent:
+    """LLM-powered SQL Agent for interacting with a SQL database.
+
+    Args:
+        model (BaseChatModel):
+            A langchain `ChatModel` instance with tool-calling support. Used to
+            select datasets/tables and to generate SQL queries and the final answer.
+        context_provider (ContextProvider):
+            An implementation of the `ContextProvider` protocol. Supplies all metadata
+            needed by the agent. By supplying your own ContextProvider, you can plug in
+            any metadata source (BigQuery, Postgres, hard-coded examples, etc.) without
+            changing agent's orchestration logic.
+        checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
+            PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
+            runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
+            no state will be persisted across runs. Defaults to `None`.
+        prompt_formatter (Callable[[list[SQLExample]], str], optional):
+            A callable that takes a list of `SQLExample` instances and returns a single
+            string to be used as the system prompt during SQL generation. If not empty, the
+            examples list is used to build a few-shot system prompt. Supply your own function
+            to change how examples are formatted or to use your own entire prompt structure.
+        question_limit (int | None, optional):
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.
+    """
+
     def __init__(
         self,
         model: BaseChatModel,
         context_provider: ContextProvider,
-        checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         prompt_formatter: PromptFormatter = default_prompt_formatter,
+        checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
     ):
         self.context_provider = context_provider
         self.prompt_formatter = prompt_formatter
+        self.checkpointer = checkpointer
+        self.question_limit = question_limit
 
         # datasets and tables selection tools
-        self.list_datasets_tool = ListDatasetsTool(db=self.context_provider)
-        self.tables_info_tool = DatasetsTablesInfoTool(db=self.context_provider)
+        self.list_datasets_tool = ListDatasetsTool(
+            context_provider=self.context_provider
+        )
+        self.tables_info_tool = DatasetsTablesInfoTool(
+            context_provider=self.context_provider
+        )
 
         # query checking and execution tools
         self.query_check_tool = QueryCheckTool(llm=model)
-        self.query_table_tool = QueryTableTool(db=self.context_provider)
+        self.query_table_tool = QueryTableTool(
+            context_provider=self.context_provider
+        )
 
-        select_datasets_system_message = SystemMessage(SELECT_DATASETS_SYSTEM_PROMPT)
+        select_datasets_system_message = SystemMessage(
+            content=SELECT_DATASETS_SYSTEM_PROMPT
+        )
 
         select_datasets_model = model.bind_tools(
             [self.tables_info_tool],
@@ -92,10 +127,6 @@ class SQLAgent:
             self.query_check_tool,
             self.query_table_tool
         ])
-
-        self.checkpointer = checkpointer
-
-        self.question_limit = question_limit
 
         self.graph = self._compile()
 
