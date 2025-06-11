@@ -11,34 +11,35 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chatbot.agents.prompts import SQL_CHECK_SYSTEM_PROMPT
 from chatbot.agents.reducers import Item
-from chatbot.contexts import ContextProvider
+from chatbot.contexts import BaseContextProvider
 
 
 class BaseBigQueryTool(BaseModel):
     """Base tool for interacting with a BigQuery database"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    context_provider: ContextProvider = Field(exclude=True)
+    context_provider: BaseContextProvider = Field(exclude=True)
 
 class _ListDatasetsToolInput(BaseModel):
-    tool_input: str = Field("", description="An empty string.")
+    query: str = Field("", description="User-provided query")
 
 class ListDatasetsTool(BaseBigQueryTool, BaseTool):
     """Tool for getting dataset names from a BigQuery project"""
     name: str = "list_datasets"
-    description: str = "Input to this tool is an empty string. Output is the metadata of all datasets and its tables in the project"
+    description: str = "Input to this tool is a user-provided query. Output is relevant metadata about datasets and their associated tables"
     args_schema: Type[BaseModel] = _ListDatasetsToolInput
 
-    def _run(self, tool_input: str="") -> str:
-        """Get metadata of all datasets and its tables from a BigQuery project.
+    def _run(self, query: str) -> str:
+        """Retrieve relevant metadata about datasets and their associated tables
+        from a BigQuery project based on a user-provided query.
 
         Args:
-            tool_input (str, optional): Does nothing. Defaults to "".
+            query (str, optional): User-provided query.
 
         Returns:
             str: Metadata of all datasets and its tables.
         """
-        return self.context_provider.get_datasets_info()
+        return self.context_provider.get_datasets_info(query)
 
 class _DatasetsTablesInfoToolInput(BaseModel):
     dataset_names: str = Field(
@@ -127,7 +128,7 @@ class QueryTableTool(BaseBigQueryTool, BaseTool):
         Returns:
             str: SQL query output results
         """
-        query_results = self.context_provider.query(query)
+        query_results = self.context_provider.get_query_results(query)
 
         return Command(
             update={

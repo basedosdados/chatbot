@@ -16,7 +16,7 @@ from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from chatbot.contexts import ContextProvider, SQLExample
+from chatbot.contexts import BaseContextProvider, SQLExample
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -62,13 +62,13 @@ class SQLAgent:
 
     Args:
         model (BaseChatModel):
-            A langchain `ChatModel` instance with tool-calling support. Used to
+            A langchain `BaseChatModel` instance with tool-calling support. Used to
             select datasets/tables and to generate SQL queries and the final answer.
-        context_provider (ContextProvider):
-            An implementation of the `ContextProvider` protocol. Supplies all metadata
-            needed by the agent. By supplying your own ContextProvider, you can plug in
-            any metadata source (BigQuery, Postgres, hard-coded examples, etc.) without
-            changing agent's orchestration logic.
+        context_provider (BaseContextProvider):
+            An instance of `BaseContextProvider`. Supplies all metadata needed by the agent.
+            By supplying your own implementationf of a context provider, you can plug in any
+            metadata source(BigQuery, Postgres, hard-coded examples, etc.) without changing
+            agent's orchestration logic.
         checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
             PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
             runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
@@ -86,7 +86,7 @@ class SQLAgent:
     def __init__(
         self,
         model: BaseChatModel,
-        context_provider: ContextProvider,
+        context_provider: BaseContextProvider,
         prompt_formatter: PromptFormatter = default_prompt_formatter,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
@@ -209,7 +209,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {}
+                    "args": {"query": state["question"]}
                 }
             ]
         )
@@ -231,7 +231,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {}
+                    "args": {"query": state["question"]}
                 }
             ]
         )

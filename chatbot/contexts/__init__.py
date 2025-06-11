@@ -1,3 +1,3 @@
 from .bigquery_context_provider import BigQueryContextProvider
-from .context_provider import ContextProvider, SQLExample
+from .context_provider import BaseContextProvider, SQLExample
 from .metadata_formatter import MetadataFormatterFactory

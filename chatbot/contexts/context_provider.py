@@ -1,4 +1,4 @@
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
@@ -13,13 +13,12 @@ class SQLExample(BaseModel):
     question: str
     query: str
 
-
-@runtime_checkable
-class ContextProvider(Protocol):
-    """Protocol defining methods for providing contextual information and examples
+class BaseContextProvider(ABC):
+    """Base class defining methods for providing contextual information
     to support SQL generation and execution based on a user query.
     """
 
+    @abstractmethod
     def get_datasets_info(self, query: str) -> str:
         """Retrieve metadata about datasets relevant to a given user query.
 
@@ -32,6 +31,7 @@ class ContextProvider(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_tables_info(self, dataset_names: str) -> str:
         """Retrieve metadata about tables within specified datasets.
 
@@ -44,33 +44,8 @@ class ContextProvider(Protocol):
         """
         ...
 
-    def get_sql_examples(self, query: str) -> list[SQLExample]:
-        """Fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        ...
-
-    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
-        """Asynchronously fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        ...
-
-    def query(self, sql_query: str) -> str:
+    @abstractmethod
+    def get_query_results(self, sql_query: str) -> str:
         """Execute a raw SQL statement.
 
         Args:
@@ -80,3 +55,29 @@ class ContextProvider(Protocol):
             str: The execution results, formatted as a string.
         """
         ...
+
+    def get_sql_examples(self, query: str) -> list[SQLExample]:
+        """Fetch example SQL queries relevant to a given user message.
+        Optionally overrides for few-shot prompt building.
+
+        Args:
+            query (str): A natural language user message.
+
+        Returns:
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        return []
+
+    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
+        """Asynchronously fetch example SQL queries relevant to a given user message
+        Optionally overrides for few-shot prompt building.
+
+        Args:
+            query (str): A natural language user message.
+
+        Returns:
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        return []

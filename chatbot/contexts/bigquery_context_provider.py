@@ -15,7 +15,7 @@ from loguru import logger
 
 from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
 
-from .context_provider import SQLExample
+from .context_provider import BaseContextProvider, SQLExample
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
@@ -23,7 +23,7 @@ CACHE_TTL = 60*60
 # using a named tuple for clarity
 Data = namedtuple("Data", ("dataset", "tables"))
 
-class BigQueryContextProvider:
+class BigQueryContextProvider(BaseContextProvider):
     """A BigQuery-backed database interface, for fetching and formatting data.
 
     Args:
@@ -51,6 +51,8 @@ class BigQueryContextProvider:
             A vector database containing examples of user messages and their corresponding
             SQL queries for few-shot prompting during SQL query generation. If set to `None`,
             no examples are fetched. Defaults to `None`.
+        top_k (int, optional):
+            Number of examples to fetch from the vector database. Defaults to `4`.
     """
 
     def __init__(
@@ -62,6 +64,7 @@ class BigQueryContextProvider:
         timeout: float | None = 30.0,
         metadata_format: Literal["markdown", "xml"] = "markdown",
         sql_vector_store: VectorStore | None = None,
+        top_k: int = 4,
     ):
         billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
         query_project = query_project or os.getenv('QUERY_PROJECT_ID')
@@ -72,11 +75,12 @@ class BigQueryContextProvider:
         self._max_results = max_results
         self._timeout = timeout
 
-        self.formatter = MetadataFormatterFactory.get_metadata_formatter(
+        self._formatter = MetadataFormatterFactory.get_metadata_formatter(
             format=metadata_format
         )
 
         self._sql_vector_store = sql_vector_store
+        self._top_k = top_k
 
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()
@@ -236,7 +240,7 @@ class BigQueryContextProvider:
             logger.exception("Error on getting table info:")
             raise query_exception
 
-        return self.formatter.format_table_metadata(table, sample_rows)
+        return self._formatter.format_table_metadata(table, sample_rows)
 
     def _get_tables_metadata(self, dataset_name: str) -> str:
         """Gets the formatted metadata of all the tables of a single BigQuery dataset
@@ -255,15 +259,18 @@ class BigQueryContextProvider:
 
         return "\n\n".join(tables_metadata)
 
-    def get_datasets_info(self) -> str:
+    def get_datasets_info(self, query: str) -> str:
         """Gets the formatted metadata of all the datasets of a BigQuery project
+
+        Args:
+            query (str): A natural language user message. It is unused in this implementation.
 
         Returns:
             str: The formatted metadata
         """
         with self._cache_lock:
             datasets_info = [
-                self.formatter.format_dataset_metadata(data.dataset, data.tables)
+                self._formatter.format_dataset_metadata(data.dataset, data.tables)
                 for data in self._cache.values()
             ]
 
@@ -288,49 +295,7 @@ class BigQueryContextProvider:
 
         return "\n\n---\n\n".join(tables_info)
 
-    def get_sql_examples(self, query: str) -> list[SQLExample]:
-        """Fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        examples = self._sql_vector_store.similarity_search(query)
-
-        return [
-            SQLExample(
-                question=ex.page_content,
-                query=ex.metadata["query"],
-            )
-            for ex in examples
-        ]
-
-    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
-        """Asynchronously fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        examples = await self._sql_vector_store.asimilarity_search(query)
-
-        return [
-            SQLExample(
-                question=ex.page_content,
-                query=ex.metadata["query"],
-            )
-            for ex in examples
-        ]
-
-    def query(self, sql_query: str) -> str:
+    def get_query_results(self, sql_query: str) -> str:
         """Run a SQL query in BigQuery.
 
         Args:
@@ -353,3 +318,45 @@ class BigQueryContextProvider:
         except Exception as query_exception:
             logger.exception("Error on querying table:")
             raise query_exception
+
+    def _get_sql_examples(self, query: str) -> list[SQLExample]:
+        """Fetch example SQL queries relevant to a given user message
+        for few-shot prompting building.
+
+        Args:
+            query (str): A natural language user message.
+
+        Returns:
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        examples = self._sql_vector_store.similarity_search(query, self._top_k)
+
+        return [
+            SQLExample(
+                question=ex.page_content,
+                query=ex.metadata["query"],
+            )
+            for ex in examples
+        ]
+
+    async def _aget_sql_examples(self, query: str) -> list[SQLExample]:
+        """Asynchronously fetch example SQL queries relevant to a given user message
+        for few-shot prompting building.
+
+        Args:
+            query (str): A natural language user message.
+
+        Returns:
+            list[SQLExample]: A list of `SQLExample` instances,
+                              each containing a sample question and its SQL query.
+        """
+        examples = await self._sql_vector_store.asimilarity_search(query, self._top_k)
+
+        return [
+            SQLExample(
+                question=ex.page_content,
+                query=ex.metadata["query"],
+            )
+            for ex in examples
+        ]

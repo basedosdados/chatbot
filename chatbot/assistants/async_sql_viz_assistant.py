@@ -5,7 +5,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from chatbot.agents import RouterAgent, VizAgent
 from chatbot.agents.sql_agent import (PromptFormatter, SQLAgent,
                                       default_prompt_formatter)
-from chatbot.contexts import ContextProvider
+from chatbot.contexts import BaseContextProvider
 
 from .formatting import format_router_agent_response
 from .messages import SQLVizAssistantMessage
@@ -17,11 +17,11 @@ class AsyncSQLVizAssistant:
     Args:
         model (BaseChatModel):
             A langchain `ChatModel` instance with tool-calling support.
-        context_provider (ContextProvider):
-            An implementation of the `ContextProvider` protocol. Supplies all metadata
-            needed by the `SQLagent`. By supplying your own ContextProvider, you can plug
-            in any metadata source (BigQuery, Postgres, hard-coded examples, etc.) without
-            changing agent's orchestration logic.
+        context_provider (BaseContextProvider):
+            An instance of `BaseContextProvider`. Supplies all metadata needed by the agent.
+            By supplying your own implementationf of a context provider, you can plug in any
+            metadata source(BigQuery, Postgres, hard-coded examples, etc.) without changing
+            agent's orchestration logic.
         prompt_formatter (Callable[[list[SQLExample]], str], optional):
             A callable that takes a list of `SQLExample` instances and returns a single
             string to be used as the system prompt during SQL generation. If not empty, the
@@ -45,7 +45,7 @@ class AsyncSQLVizAssistant:
     def __init__(
         self,
         model: BaseChatModel,
-        context_provider: ContextProvider,
+        context_provider: BaseContextProvider,
         prompt_formatter: PromptFormatter = default_prompt_formatter,
         checkpointer: AsyncPostgresSaver | None = None,
         viz_vector_store: VectorStore | None = None,
