@@ -16,7 +16,7 @@ from langgraph.prebuilt import ToolNode
 from loguru import logger
 
 from chatbot.contexts import BaseContextProvider
-from chatbot.formatters import BasePromptFormatter
+from chatbot.formatters import SQLPromptContext, SQLPromptFormatter
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
@@ -70,7 +70,7 @@ class SQLAgent:
         self,
         model: BaseChatModel,
         context_provider: BaseContextProvider,
-        prompt_formatter: BasePromptFormatter,
+        prompt_formatter: SQLPromptFormatter,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
     ):
@@ -311,7 +311,12 @@ class SQLAgent:
 
         selected_datasets = self._get_selected_datasets(messages)
 
-        system_prompt = self.prompt_formatter.build_system_prompt(question, selected_datasets)
+        context = SQLPromptContext(
+            query=question,
+            selected_datasets=selected_datasets
+        )
+
+        system_prompt = self.prompt_formatter.build_system_prompt(context)
         system_message = SystemMessage(content=system_prompt)
 
         query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model
@@ -334,7 +339,12 @@ class SQLAgent:
 
         selected_datasets = self._get_selected_datasets(messages)
 
-        system_prompt = await self.prompt_formatter.abuild_system_prompt(question, selected_datasets)
+        context = SQLPromptContext(
+            query=question,
+            selected_datasets=selected_datasets
+        )
+
+        system_prompt = await self.prompt_formatter.abuild_system_prompt(context)
         system_message = SystemMessage(content=system_prompt)
 
         query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model

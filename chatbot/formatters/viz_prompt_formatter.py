@@ -1,27 +1,37 @@
 from langchain_core.vectorstores import VectorStore
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from chatbot.agents.prompts import (SQL_AGENT_BASE_SYSTEM_PROMPT,
-                                    SQL_AGENT_SYSTEM_PROMPT)
+from chatbot.agents.prompts import (CHART_PREPROCESS_BASE_SYSTEM_PROMPT,
+                                    CHART_PREPROCESS_SYSTEM_PROMPT)
 
 from .prompt_formatter import BasePromptFormatter
 
+EXAMPLE_TEMPLATE = """<example>
+User question: {user_question}
 
-class SQLExample(BaseModel):
+<query_results>
+{query_results}
+</query_results>
+
+Output: {output}
+</example>"""
+
+class PreProcessingExample(BaseModel):
     """A single example pairing a natural language question with its corresponding SQL query.
 
     Attributes:
         question (str): The natural language question.
-        query (str): The SQL query that answers the question.
+        query_results (str): The query results that asnwers the question.
+        output (str): The preprocessed query results ready for visualization.
     """
-    question: str
+    question: str = Field(description="The natural language question.")
+    query_results: str = Field(description="The query results that asnwers the question.")
+    output: str = Field(description="The preprocessed query results ready for visualization.")
+
+class VizPromptContext(BaseModel):
     query: str
 
-class SQLPromptContext(BaseModel):
-    query: str
-    selected_datasets: list[str]
-
-class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
+class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
     """Default prompt formatter that retrieves few-shot SQL examples
     from a vector store and builds system prompts for SQL query generation.
 
@@ -37,14 +47,12 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         self.vector_store = vector_store
         self.top_k = top_k
 
-    def _get_sql_examples(self, context: SQLPromptContext) -> list[SQLExample]:
+    def _get_examples(self, context: VizPromptContext) -> list[PreProcessingExample]:
         """Retrive example SQL queries relevant
         to a given user question from a vector database.
 
         Args:
             query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
 
         Returns:
             list[SQLExample]: A list of `SQLExample` instances, each containing
@@ -53,31 +61,22 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         if self.vector_store is None:
             return []
 
-        if context.selected_datasets:
-            query_filter = {"dataset_name": {"$in": context.selected_datasets}}
-        else:
-            query_filter = None
-
-        examples = self.vector_store.similarity_search(
-            context.query, self.top_k, filter=query_filter
-        )
+        examples = self.vector_store.similarity_search(context.query, self.top_k)
 
         return [
-            SQLExample(
+            PreProcessingExample(
                 question=ex.page_content,
                 query=ex.metadata["query"],
             )
             for ex in examples
         ]
 
-    async def _aget_sql_examples(self, context: SQLPromptContext) -> list[SQLExample]:
+    async def _aget_examples(self, context: VizPromptContext) -> list[PreProcessingExample]:
         """Asynchronously retrive example SQL queries relevant
         to a given user question from a vector database.
 
         Args:
             query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
 
         Returns:
             list[SQLExample]: A list of `SQLExample` instances, each containing
@@ -86,69 +85,67 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         if self.vector_store is None:
             return []
 
-        if context.selected_datasets:
-            query_filter = {"dataset_name": {"$in": context.selected_datasets}}
-        else:
-            query_filter = None
-
-        examples = await self.vector_store.asimilarity_search(
-            context.query, self.top_k, filter=query_filter
-        )
+        examples = await self.vector_store.asimilarity_search(context.query, self.top_k)
 
         return [
-            SQLExample(
+            PreProcessingExample(
                 question=ex.page_content,
-                query=ex.metadata["query"],
+                query_results=ex.metadata["query_results"],
+                output=ex.metadata["query_results_preprocessed"]
             )
             for ex in examples
         ]
 
-    def build_system_prompt(self, context: SQLPromptContext) -> str:
+    def build_system_prompt(self, context: VizPromptContext) -> str:
         """Build a system prompt for SQL query generation.
 
         Args:
             query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,
                  returns the base system prompt. Otherwise, returns the few‑shot prompt template
                  populated with formatted examples.
         """
-        examples = self._get_sql_examples(context)
+        examples = self._get_examples(context)
 
-        if not examples:
-            return SQL_AGENT_BASE_SYSTEM_PROMPT
-
-        few_shot_examples = "\n\n".join(
-            f"Question: {ex.question}\nSQL Query:\n```sql\n{ex.query}\n```"
-            for ex in examples
+        examples = "\n\n".join(
+            EXAMPLE_TEMPLATE.format(
+                user_question=e.question,
+                query_results=e.query_results,
+                output=e.output
+            )
+            for e in examples
         )
 
-        return SQL_AGENT_SYSTEM_PROMPT.format(examples=few_shot_examples)
+        if examples:
+            return CHART_PREPROCESS_SYSTEM_PROMPT.format(examples=examples)
 
-    async def abuild_system_prompt(self, context: SQLPromptContext) -> str:
+        return CHART_PREPROCESS_BASE_SYSTEM_PROMPT
+
+    async def abuild_system_prompt(self, context: VizPromptContext) -> str:
         """Asynchronously build a system prompt for SQL query generation.
 
         Args:
             query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,
                  returns the base system prompt. Otherwise, returns the few‑shot prompt template
                  populated with formatted examples.
         """
-        examples = await self._aget_sql_examples(context)
+        examples = await self._aget_examples(context)
 
-        if not examples:
-            return SQL_AGENT_BASE_SYSTEM_PROMPT
-
-        few_shot_examples = "\n\n".join(
-            f"Question: {ex.question}\nSQL Query:\n```sql\n{ex.query}\n```"
-            for ex in examples
+        examples = "\n\n".join(
+            EXAMPLE_TEMPLATE.format(
+                user_question=e.question,
+                query_results=e.query_results,
+                output=e.output
+            )
+            for e in examples
         )
 
-        return SQL_AGENT_SYSTEM_PROMPT.format(examples=few_shot_examples)
+        if examples:
+            return CHART_PREPROCESS_SYSTEM_PROMPT.format(examples=examples)
+
+        return CHART_PREPROCESS_BASE_SYSTEM_PROMPT
