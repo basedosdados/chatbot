@@ -3,7 +3,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.agents import SQLAgent
 from chatbot.contexts import BaseContextProvider
-from chatbot.formatters import BasePromptFormatter
+from chatbot.formatters import SQLPromptFormatter
 
 from .formatting import format_sql_agent_response
 from .messages import SQLAssistantMessage
@@ -19,7 +19,7 @@ class SQLAssistant:
             A context provider that supplies all metadata needed by the agent. Implement
             this abstract base to plug in any data source (BigQuery, Postgres, etc.)
             without changing the agent's orchestration logic.
-        prompt_formatter (BasePromptFormatter):
+        prompt_formatter (SQLPromptFormatter):
             A formatter responsible for constructing the LLM system prompt during SQL generation step,
             based on the user's question and optional few-shot examples. Must implement how examples
             are retrieved and how the prompt template is composed.
@@ -39,7 +39,7 @@ class SQLAssistant:
         self,
         model: BaseChatModel,
         context_provider: BaseContextProvider,
-        prompt_formatter: BasePromptFormatter,
+        prompt_formatter: SQLPromptFormatter,
         checkpointer: PostgresSaver | None = None,
         question_limit: int | None = 5,
     ):

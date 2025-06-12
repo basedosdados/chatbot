@@ -1,10 +1,9 @@
-from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.contexts import BaseContextProvider
-from chatbot.formatters import BasePromptFormatter
+from chatbot.formatters import SQLPromptFormatter, VizPromptFormatter
 
 from .formatting import format_router_agent_response
 from .messages import SQLVizAssistantMessage
@@ -43,9 +42,9 @@ class SQLVizAssistant:
         self,
         model: BaseChatModel,
         context_provider: BaseContextProvider,
-        prompt_formatter: BasePromptFormatter,
+        sql_prompt_formatter: SQLPromptFormatter,
+        viz_prompt_formatter: VizPromptFormatter,
         checkpointer: PostgresSaver | None = None,
-        viz_vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         if checkpointer is None:
@@ -61,15 +60,15 @@ class SQLVizAssistant:
         sql_agent = SQLAgent(
             model=model,
             context_provider=context_provider,
-            prompt_formatter=prompt_formatter,
+            prompt_formatter=sql_prompt_formatter,
             checkpointer=subgraph_checkpointer,
             question_limit=question_limit
         )
 
         viz_agent = VizAgent(
             model=model,
+            prompt_formatter=viz_prompt_formatter,
             checkpointer=subgraph_checkpointer,
-            vector_store=viz_vector_store,
             question_limit=question_limit
         )
 
