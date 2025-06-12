@@ -48,7 +48,7 @@ class SQLPromptFormatter(BasePromptFormatter):
             return []
 
         if selected_datasets:
-            query_filter = {"dataset_name": {"$in": [selected_datasets]}}
+            query_filter = {"dataset_name": {"$in": selected_datasets}}
         else:
             query_filter = None
 
@@ -79,11 +79,11 @@ class SQLPromptFormatter(BasePromptFormatter):
             return []
 
         if selected_datasets:
-            query_filter = {"dataset_name": {"$in": [selected_datasets]}}
+            query_filter = {"dataset_name": {"$in": selected_datasets}}
         else:
             query_filter = None
 
-        examples = self.vector_store.similarity_search(
+        examples = await self.vector_store.asimilarity_search(
             query, self.top_k, filter=query_filter
         )
 
