@@ -17,23 +17,24 @@ Output: {output}
 </example>"""
 
 class PreProcessingExample(BaseModel):
-    """A single example pairing a natural language question with its corresponding SQL query.
+    """A single example containing a natural language question, its corresponding
+    SQL query results and the preprocessed query results.
 
     Attributes:
-        question (str): The natural language question.
+        question (str): A natural language question.
         query_results (str): The query results that asnwers the question.
         output (str): The preprocessed query results ready for visualization.
     """
-    question: str = Field(description="The natural language question.")
+    question: str = Field(description="A natural language question.")
     query_results: str = Field(description="The query results that asnwers the question.")
     output: str = Field(description="The preprocessed query results ready for visualization.")
 
 class VizPromptContext(BaseModel):
-    query: str
+    query: str = Field(description="The user's question")
 
 class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
-    """Default prompt formatter that retrieves few-shot SQL examples
-    from a vector store and builds system prompts for SQL query generation.
+    """Default prompt formatter that retrieves few-shot examples from a vector store
+    and builds system prompts to guide data preprocessing for visualization.
 
     Args:
         vector_store (VectorStore | None, optional):
@@ -48,15 +49,14 @@ class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
         self.top_k = top_k
 
     def _get_examples(self, context: VizPromptContext) -> list[PreProcessingExample]:
-        """Retrive example SQL queries relevant
-        to a given user question from a vector database.
+        """Retrieve example preprocessed data relevant to a given user question.
 
         Args:
-            query (str): The user's natural language question.
+            context (VizPromptContext): A `VizPromptContext` instance, containing
+                                        the user's question, the query results and
+                                        the preprocessed query results.
 
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances, each containing
-                              a sample question and its corresponding SQL query.
+        Returns: list[PreProcessingExample]: A list of `PreProcessingExample` instances.
         """
         if self.vector_store is None:
             return []
@@ -72,15 +72,14 @@ class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
         ]
 
     async def _aget_examples(self, context: VizPromptContext) -> list[PreProcessingExample]:
-        """Asynchronously retrive example SQL queries relevant
-        to a given user question from a vector database.
+        """Asynchronously retrieve example preprocessed data relevant to a given user question.
 
         Args:
-            query (str): The user's natural language question.
+            context (VizPromptContext): A `VizPromptContext` instance, containing
+                                        the user's question, the query results and
+                                        the preprocessed query results.
 
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances, each containing
-                              a sample question and its corresponding SQL query.
+        Returns: list[PreProcessingExample]: A list of `PreProcessingExample` instances.
         """
         if self.vector_store is None:
             return []
@@ -100,7 +99,9 @@ class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
         """Build a system prompt for SQL query generation.
 
         Args:
-            query (str): The user's natural language question.
+            context (VizPromptContext): A `VizPromptContext` instance, containing
+                                        the user's question, the query results and
+                                        the preprocessed query results.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,
@@ -127,7 +128,9 @@ class VizPromptFormatter(BasePromptFormatter[VizPromptContext]):
         """Asynchronously build a system prompt for SQL query generation.
 
         Args:
-            query (str): The user's natural language question.
+            context (VizPromptContext): A `VizPromptContext` instance, containing
+                                        the user's question, the query results and
+                                        the preprocessed query results.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,

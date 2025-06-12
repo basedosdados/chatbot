@@ -46,14 +46,14 @@ class SQLAgent:
 
     Args:
         model (BaseChatModel):
-            A LangChain `BaseChatModel` instance with tool-calling support. Used to:
+            A LangChain chat model with tool-calling support. Used to:
                 1. Select datasets and tables via the provided context provider.
                 2. Generate SQL queries and produce the final answer messages.
         context_provider (BaseContextProvider):
             A context provider that supplies all metadata needed by the agent. Implement
             this abstract base to plug in any data source (BigQuery, Postgres, etc.)
             without changing the agent's orchestration logic.
-        prompt_formatter (BasePromptFormatter):
+        prompt_formatter (SQLPromptFormatter):
             A formatter responsible for constructing the LLM system prompt during SQL generation step,
             based on the user's question and optional few-shot examples. Must implement how examples
             are retrieved and how the prompt template is composed.

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 class BaseContextProvider(ABC):
     """Base class defining methods for providing contextual information
-    to support SQL generation and execution based on a user query.
+    to support SQL query generation and execution based on a user query.
     """
 
     @abstractmethod

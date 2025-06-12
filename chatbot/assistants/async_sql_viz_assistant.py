@@ -19,17 +19,18 @@ class AsyncSQLVizAssistant:
             A context provider that supplies all metadata needed by the agent. Implement
             this abstract base to plug in any data source (BigQuery, Postgres, etc.)
             without changing the agent's orchestration logic.
-        prompt_formatter (BasePromptFormatter):
+        sql_prompt_formatter (SQLPromptFormatter):
             A formatter responsible for constructing the LLM system prompt during SQL generation step,
             based on the user's question and optional few-shot examples. Must implement how examples
             are retrieved and how the prompt template is composed.
+        viz_prompt_formatter (VizPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during data preprocessing
+            step, based on the user's question and optional few-shot examples. Must implement how
+            examples are retrieved and how the prompt template is composed.
         checkpointer (AsyncPostgresSaver | None, optional):
             A checkpointer that will be used for persisting per-thread state across
             assistant's runs. If set to `None`, the assistant will not retain memory
             of previous messages. Defaults to `None`.
-        viz_vector_store (VectorStore | None, optional):
-            A vector database containing examples for the `VizAgent` LLM calls.
-            If set to `None`, no examples will be used. Defaults to `None`.
         question_limit (int | None, optional):
             Maximum number of Q&A turns to retain in the conversation history
             sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.

@@ -47,6 +47,24 @@ class VizAgentState(TypedDict):
     chart_metadata: ChartMetadata
 
 class VizAgent:
+    """LLM-powered Visualization Agent for visualization recommendations.
+
+    Args:
+        model (BaseChatModel):
+            A LangChain chat model with structured output support.
+        prompt_formatter (VizPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during data preprocessing
+            step, based on the user's question and optional few-shot examples. Must implement how
+            examples are retrieved and how the prompt template is composed.
+        checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
+            PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
+            runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
+            no state is persisted. Defaults to `None`.
+        question_limit (int | None, optional):
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the LLM. If `None`, the context is unlimited. Defaults to `5`.
+    """
+
     def __init__(
         self,
         model: BaseChatModel,

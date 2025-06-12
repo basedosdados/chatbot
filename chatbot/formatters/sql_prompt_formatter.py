@@ -1,5 +1,5 @@
 from langchain_core.vectorstores import VectorStore
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from chatbot.agents.prompts import (SQL_AGENT_BASE_SYSTEM_PROMPT,
                                     SQL_AGENT_SYSTEM_PROMPT)
@@ -11,18 +11,18 @@ class SQLExample(BaseModel):
     """A single example pairing a natural language question with its corresponding SQL query.
 
     Attributes:
-        question (str): The natural language question.
+        question (str): A natural language question.
         query (str): The SQL query that answers the question.
     """
-    question: str
-    query: str
+    question: str = Field(description="A natural language question.")
+    query: str = Field(description="The SQL query that answers the question.")
 
 class SQLPromptContext(BaseModel):
-    query: str
-    selected_datasets: list[str]
+    query: str = Field(description="The user's question")
+    selected_datasets: list[str] = Field(description="A list of the selected dataset names")
 
 class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
-    """Default prompt formatter that retrieves few-shot SQL examples
+    """Default SQL prompt formatter that retrieves few-shot SQL examples
     from a vector store and builds system prompts for SQL query generation.
 
     Args:
@@ -37,14 +37,13 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         self.vector_store = vector_store
         self.top_k = top_k
 
-    def _get_sql_examples(self, context: SQLPromptContext) -> list[SQLExample]:
-        """Retrive example SQL queries relevant
-        to a given user question from a vector database.
+    def _get_examples(self, context: SQLPromptContext) -> list[SQLExample]:
+        """Retrieve example SQL queries relevant to a given user question.
 
         Args:
-            query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
+            context (SQLPromptContext): A `SQLPromptContext` instance, containing
+                                        the user's question and a list of the
+                                        selected datasets names.
 
         Returns:
             list[SQLExample]: A list of `SQLExample` instances, each containing
@@ -70,14 +69,13 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
             for ex in examples
         ]
 
-    async def _aget_sql_examples(self, context: SQLPromptContext) -> list[SQLExample]:
-        """Asynchronously retrive example SQL queries relevant
-        to a given user question from a vector database.
+    async def _aget_examples(self, context: SQLPromptContext) -> list[SQLExample]:
+        """Asynchronously retrieve example SQL queries relevant to a given user question.
 
         Args:
-            query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
+            context (SQLPromptContext): A `SQLPromptContext` instance, containing
+                                        the user's question and a list of the
+                                        selected datasets names.
 
         Returns:
             list[SQLExample]: A list of `SQLExample` instances, each containing
@@ -107,16 +105,16 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         """Build a system prompt for SQL query generation.
 
         Args:
-            query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
+            context (SQLPromptContext): A `SQLPromptContext` instance, containing
+                                        the user's question and a list of the
+                                        selected datasets names.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,
                  returns the base system prompt. Otherwise, returns the few‑shot prompt template
                  populated with formatted examples.
         """
-        examples = self._get_sql_examples(context)
+        examples = self._get_examples(context)
 
         if not examples:
             return SQL_AGENT_BASE_SYSTEM_PROMPT
@@ -132,16 +130,16 @@ class SQLPromptFormatter(BasePromptFormatter[SQLPromptContext]):
         """Asynchronously build a system prompt for SQL query generation.
 
         Args:
-            query (str): The user's natural language question.
-            metadata (list[str]): The selected dataset names. Use for filtering
-                                  during example objects retrieval.
+            context (SQLPromptContext): A `SQLPromptContext` instance, containing
+                                        the user's question and a list of the
+                                        selected datasets names.
 
         Returns:
             str: A system prompt string. If no few‑shot examples are retrieved from the vector store,
                  returns the base system prompt. Otherwise, returns the few‑shot prompt template
                  populated with formatted examples.
         """
-        examples = await self._aget_sql_examples(context)
+        examples = await self._aget_examples(context)
 
         if not examples:
             return SQL_AGENT_BASE_SYSTEM_PROMPT

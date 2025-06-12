@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, TypeAlias, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -48,6 +48,26 @@ class RouterAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 class RouterAgent:
+    """LLM-powered Agent that orchestrates SQL querying and data visualization via a multi-agent workflow.
+
+    Args:
+        model (BaseChatModel):
+            A LangChain chat model with structured output support. Used to:
+                1. Route incoming user queries to `SQLAgent` or `VizAgent`.
+                2. Assess whether the `SQLAgent` response would benefit from a graphical visuzalization.
+        sql_agent (SQLAgent):
+            An instance of `SQLAgent`, for interacting with the target SQL database.
+        viz_agent (VizAgent):
+            An instance of `VizAgent`, for generating visualization recommendation.
+        checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
+            PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
+            runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
+            no state is persisted. Defaults to `None`.
+        question_limit (int | None, optional):
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the LLM. If `None`, the context is unlimited. Defaults to `5`.
+    """
+
     def __init__(
         self,
         model: BaseChatModel,
