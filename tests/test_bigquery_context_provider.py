@@ -181,5 +181,5 @@ def test_cache_data(db: BigQueryContextProvider):
 
 def test_query(db: BigQueryContextProvider):
     expected = '[{"field_1": "value_1", "field_2": "value_2", "field_3": "value_3"}]'
-    query_results = db.query("mock_query")
+    query_results = db.get_query_results("mock_query")
     assert query_results == expected
