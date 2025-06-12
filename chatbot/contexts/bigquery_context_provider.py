@@ -1,7 +1,6 @@
 import json
 import os
 import time
-from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 from typing import Literal
@@ -11,6 +10,7 @@ from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
 
@@ -19,8 +19,9 @@ from .context_provider import BaseContextProvider
 # cache living time (in seconds)
 CACHE_TTL = 60*60
 
-# using a named tuple for clarity
-Data = namedtuple("Data", ("dataset", "tables"))
+class Data(BaseModel):
+    dataset: Dataset = Field(description="A BigQuery `Dataset` object.")
+    tables: list[Table] = Field(description="A list of BigQuery `Table` objects.")
 
 class BigQueryContextProvider(BaseContextProvider):
     """A BigQuery-backed database interface, for fetching and formatting data.
