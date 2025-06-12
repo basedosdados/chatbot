@@ -1,17 +1,5 @@
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel
-
-
-class SQLExample(BaseModel):
-    """A single example pairing a natural language question with its corresponding SQL query.
-
-    Attributes:
-        question (str): The natural language question.
-        query (str): The SQL query that answers the question.
-    """
-    question: str
-    query: str
 
 class BaseContextProvider(ABC):
     """Base class defining methods for providing contextual information
@@ -55,29 +43,3 @@ class BaseContextProvider(ABC):
             str: The execution results, formatted as a string.
         """
         ...
-
-    def get_sql_examples(self, query: str) -> list[SQLExample]:
-        """Fetch example SQL queries relevant to a given user message.
-        Optionally overrides for few-shot prompt building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        return []
-
-    async def aget_sql_examples(self, query: str) -> list[SQLExample]:
-        """Asynchronously fetch example SQL queries relevant to a given user message
-        Optionally overrides for few-shot prompt building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        return []

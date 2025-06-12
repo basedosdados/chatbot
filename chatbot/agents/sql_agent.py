@@ -1,5 +1,4 @@
 import uuid
-from collections.abc import Callable
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -16,16 +15,15 @@ from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from chatbot.contexts import BaseContextProvider, SQLExample
+from chatbot.contexts import BaseContextProvider
+from chatbot.formatters import BasePromptFormatter
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
-from .prompts import (SELECT_DATASETS_SYSTEM_PROMPT,
-                      SQL_AGENT_BASE_SYSTEM_PROMPT, SQL_AGENT_SYSTEM_PROMPT)
+from .prompts import SELECT_DATASETS_SYSTEM_PROMPT
 from .reducers import BaseItem, ItemRemove, add_item
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
-PromptFormatter = Callable[[list[SQLExample]], str]
 
 class SQLAgentState(TypedDict):
     # input question and final answer
@@ -36,58 +34,43 @@ class SQLAgentState(TypedDict):
     sql_queries: Annotated[list[BaseItem], add_item]
     sql_queries_results: Annotated[list[BaseItem], add_item]
 
-    # examples similar to the input question, for few-shot prompting
-    few_shot_examples: list[SQLExample]
-
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
 
     # flag for indicating recursion limit has been reached
     is_last_step: IsLastStep
 
-def default_prompt_formatter(examples: list[SQLExample]) -> str:
-    """The default function to format examples into a system prompt."""
-    if not examples:
-        return SQL_AGENT_BASE_SYSTEM_PROMPT
-
-    few_shot_examples = "\n\n".join(
-        f"Question: {ex.question}\nSQL Query:\n```sql\n{ex.query}\n```"
-        for ex in examples
-    )
-
-    return SQL_AGENT_SYSTEM_PROMPT.format(examples=few_shot_examples)
 
 class SQLAgent:
     """LLM-powered SQL Agent for interacting with a SQL database.
 
     Args:
         model (BaseChatModel):
-            A langchain `BaseChatModel` instance with tool-calling support. Used to
-            select datasets/tables and to generate SQL queries and the final answer.
+            A LangChain `BaseChatModel` instance with tool-calling support. Used to:
+                1. Select datasets and tables via the provided context provider.
+                2. Generate SQL queries and produce the final answer messages.
         context_provider (BaseContextProvider):
-            An instance of `BaseContextProvider`. Supplies all metadata needed by the agent.
-            By supplying your own implementationf of a context provider, you can plug in any
-            metadata source(BigQuery, Postgres, hard-coded examples, etc.) without changing
-            agent's orchestration logic.
+            A context provider that supplies all metadata needed by the agent. Implement
+            this abstract base to plug in any data source (BigQuery, Postgres, etc.)
+            without changing the agent's orchestration logic.
+        prompt_formatter (BasePromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during SQL generation step,
+            based on the user's question and optional few-shot examples. Must implement how examples
+            are retrieved and how the prompt template is composed.
         checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
             PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
             runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
-            no state will be persisted across runs. Defaults to `None`.
-        prompt_formatter (Callable[[list[SQLExample]], str], optional):
-            A callable that takes a list of `SQLExample` instances and returns a single
-            string to be used as the system prompt during SQL generation. If not empty, the
-            examples list is used to build a few-shot system prompt. Supply your own function
-            to change how examples are formatted or to use your own entire prompt structure.
+            no state is persisted. Defaults to `None`.
         question_limit (int | None, optional):
             Maximum number of Q&A turns to retain in the conversation history
-            sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.
+            sent to the LLM. If `None`, the context is unlimited. Defaults to `5`.
     """
 
     def __init__(
         self,
         model: BaseChatModel,
         context_provider: BaseContextProvider,
-        prompt_formatter: PromptFormatter = default_prompt_formatter,
+        prompt_formatter: BasePromptFormatter,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
     ):
@@ -286,26 +269,31 @@ class SQLAgent:
 
         return await self._acall_model(filtered_messages, is_last_step, config, self.select_datasets_runnable)
 
-    def _get_few_shot_examples(self, state: SQLAgentState) -> dict[str, list[SQLExample]]:
-        examples = self.context_provider.get_sql_examples(state["question"])
-        return {"few_shot_examples": examples}
-
-    async def _aget_few_shot_examples(self, state: SQLAgentState) -> dict[str, list[SQLExample]]:
-        examples = await self.context_provider.aget_sql_examples(state["question"])
-        return {"few_shot_examples": examples}
-
-    def _get_query_model_runnable(self, few_shot_examples: list[SQLExample]) -> RunnableSequence:
-        """Dynamically builds a model runnable with a few-shot system prompt and the query model.
+    def _get_selected_datasets(self, messages: list[BaseMessage]) -> dict | None:
+        """Gets a filter to be applied in the similarity search.
 
         Args:
-            few_shot_examples (list[SQLExample]): A list of few-shot SQL examples.
+            messages (list[BaseMessage]): The message list.
 
         Returns:
-            RunnableSequence: The model runnable.
+            dict | None: The filter.
         """
-        system_prompt = self.prompt_formatter(few_shot_examples)
-        system_message = SystemMessage(content=system_prompt)
-        return (lambda messages: [system_message] + messages) | self.query_model
+        selected_datasets = []
+        stop = False
+
+        for message in reversed(messages):
+            if not isinstance(message, AIMessage) or not message.tool_calls:
+                continue
+            for tool_call in message.tool_calls:
+                if tool_call["name"] == self.tables_info_tool.name:
+                    dataset_names: str = tool_call["args"]["dataset_names"]
+                    dataset_names = [name.strip() for name in dataset_names.split(",")]
+                    selected_datasets.extend(dataset_names)
+                    stop = True
+            if stop:
+                break
+
+        return selected_datasets
 
     def _call_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
         """Calls the model responsible for the query generation.
@@ -317,9 +305,17 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
+        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
-        query_model_runnable = self._get_query_model_runnable(state["few_shot_examples"])
+
+        selected_datasets = self._get_selected_datasets(messages)
+
+        system_prompt = self.prompt_formatter.build_system_prompt(question, selected_datasets)
+        system_message = SystemMessage(content=system_prompt)
+
+        query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model
+
         return self._call_model(messages, is_last_step, config, query_model_runnable)
 
     async def _acall_query_agent(self, state: SQLAgentState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
@@ -332,9 +328,17 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
+        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
-        query_model_runnable = self._get_query_model_runnable(state["few_shot_examples"])
+
+        selected_datasets = self._get_selected_datasets(messages)
+
+        system_prompt = await self.prompt_formatter.abuild_system_prompt(question, selected_datasets)
+        system_message = SystemMessage(content=system_prompt)
+
+        query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model
+
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
 
     def _get_answer(self, state: SQLAgentState) -> dict[str, str]:
@@ -404,9 +408,6 @@ class SQLAgent:
         graph.add_node("call_select_datasets", RunnableLambda(self._call_select_datasets, self._acall_select_datasets))
         graph.add_node("tables_info", ToolNode([self.tables_info_tool]))
 
-        # similarity search node
-        graph.add_node("get_sql_examples", RunnableLambda(self._get_few_shot_examples, self._aget_few_shot_examples))
-
         # ReAct nodes
         graph.add_node("query_agent", RunnableLambda(self._call_query_agent, self._acall_query_agent))
         graph.add_node("tools", ToolNode([self.query_check_tool, self.query_table_tool]))
@@ -422,7 +423,6 @@ class SQLAgent:
         graph.add_edge("list_datasets", "call_select_datasets")
         graph.add_edge("call_select_datasets", "tables_info")
         graph.add_conditional_edges("tables_info", _check_tables_info)
-        graph.add_edge("get_sql_examples", "query_agent")
         graph.add_conditional_edges("query_agent", _should_continue)
         graph.add_edge("tools", "query_agent")
         graph.add_edge("get_answer", "prune_messages")
@@ -511,7 +511,7 @@ class SQLAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", "get_sql_examples"]:
+def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", "query_agent"]:
     """Checks if the datasets_tables_info tool call returned an error and routes back to the
     call_select_datasets node if it did. Otherwise, proceeds.
 
@@ -521,7 +521,7 @@ def _check_tables_info(state: SQLAgentState) -> Literal["call_select_datasets", 
     last_message = state["messages"][-1]
     if isinstance(last_message, ToolMessage) and "Error: " in last_message.content:
         return "call_select_datasets"
-    return "get_sql_examples"
+    return "query_agent"
 
 def _should_continue(state: SQLAgentState) -> Literal["tools", "get_answer"]:
     """Routes to the tools node if the last message has any tool calls.

@@ -2,10 +2,9 @@ from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from chatbot.agents import RouterAgent, VizAgent
-from chatbot.agents.sql_agent import (PromptFormatter, SQLAgent,
-                                      default_prompt_formatter)
+from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.contexts import BaseContextProvider
+from chatbot.formatters import BasePromptFormatter
 
 from .formatting import format_router_agent_response
 from .messages import SQLVizAssistantMessage
@@ -16,17 +15,15 @@ class AsyncSQLVizAssistant:
 
     Args:
         model (BaseChatModel):
-            A langchain `ChatModel` instance with tool-calling support.
+            A langchain `BaseChatModel` instance with tool-calling support.
         context_provider (BaseContextProvider):
-            An instance of `BaseContextProvider`. Supplies all metadata needed by the agent.
-            By supplying your own implementationf of a context provider, you can plug in any
-            metadata source(BigQuery, Postgres, hard-coded examples, etc.) without changing
-            agent's orchestration logic.
-        prompt_formatter (Callable[[list[SQLExample]], str], optional):
-            A callable that takes a list of `SQLExample` instances and returns a single
-            string to be used as the system prompt during SQL generation. If not empty, the
-            examples list is used to build a few-shot system prompt. Supply your own function
-            to change how examples are formatted or to use your own entire prompt structure.
+            A context provider that supplies all metadata needed by the agent. Implement
+            this abstract base to plug in any data source (BigQuery, Postgres, etc.)
+            without changing the agent's orchestration logic.
+        prompt_formatter (BasePromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during SQL generation step,
+            based on the user's question and optional few-shot examples. Must implement how examples
+            are retrieved and how the prompt template is composed.
         checkpointer (AsyncPostgresSaver | None, optional):
             A checkpointer that will be used for persisting per-thread state across
             assistant's runs. If set to `None`, the assistant will not retain memory
@@ -46,7 +43,7 @@ class AsyncSQLVizAssistant:
         self,
         model: BaseChatModel,
         context_provider: BaseContextProvider,
-        prompt_formatter: PromptFormatter = default_prompt_formatter,
+        prompt_formatter: BasePromptFormatter,
         checkpointer: AsyncPostgresSaver | None = None,
         viz_vector_store: VectorStore | None = None,
         question_limit: int | None = 5,

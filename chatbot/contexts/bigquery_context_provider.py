@@ -10,12 +10,11 @@ from google.cloud import bigquery as bq
 from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
-from langchain_core.vectorstores import VectorStore
 from loguru import logger
 
 from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
 
-from .context_provider import BaseContextProvider, SQLExample
+from .context_provider import BaseContextProvider
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
@@ -47,12 +46,6 @@ class BigQueryContextProvider(BaseContextProvider):
         metadata_format (Literal["markdown", "xml"], optional):
             The format in which fetched metadata should be returned. Accepted
             values are `"markdown"` and `"xml"`. Defaults to `"markdown"`.
-        sql_vector_store (VectorStore | None, optional):
-            A vector database containing examples of user messages and their corresponding
-            SQL queries for few-shot prompting during SQL query generation. If set to `None`,
-            no examples are fetched. Defaults to `None`.
-        top_k (int, optional):
-            Number of examples to fetch from the vector database. Defaults to `4`.
     """
 
     def __init__(
@@ -63,8 +56,6 @@ class BigQueryContextProvider(BaseContextProvider):
         max_results: int | None = 1000,
         timeout: float | None = 30.0,
         metadata_format: Literal["markdown", "xml"] = "markdown",
-        sql_vector_store: VectorStore | None = None,
-        top_k: int = 4,
     ):
         billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
         query_project = query_project or os.getenv('QUERY_PROJECT_ID')
@@ -78,9 +69,6 @@ class BigQueryContextProvider(BaseContextProvider):
         self._formatter = MetadataFormatterFactory.get_metadata_formatter(
             format=metadata_format
         )
-
-        self._sql_vector_store = sql_vector_store
-        self._top_k = top_k
 
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()
@@ -318,45 +306,3 @@ class BigQueryContextProvider(BaseContextProvider):
         except Exception as query_exception:
             logger.exception("Error on querying table:")
             raise query_exception
-
-    def _get_sql_examples(self, query: str) -> list[SQLExample]:
-        """Fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        examples = self._sql_vector_store.similarity_search(query, self._top_k)
-
-        return [
-            SQLExample(
-                question=ex.page_content,
-                query=ex.metadata["query"],
-            )
-            for ex in examples
-        ]
-
-    async def _aget_sql_examples(self, query: str) -> list[SQLExample]:
-        """Asynchronously fetch example SQL queries relevant to a given user message
-        for few-shot prompting building.
-
-        Args:
-            query (str): A natural language user message.
-
-        Returns:
-            list[SQLExample]: A list of `SQLExample` instances,
-                              each containing a sample question and its SQL query.
-        """
-        examples = await self._sql_vector_store.asimilarity_search(query, self._top_k)
-
-        return [
-            SQLExample(
-                question=ex.page_content,
-                query=ex.metadata["query"],
-            )
-            for ex in examples
-        ]
