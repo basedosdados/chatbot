@@ -10,7 +10,7 @@ from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
 
@@ -20,6 +20,8 @@ from .context_provider import BaseContextProvider
 CACHE_TTL = 60*60
 
 class Data(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     dataset: Dataset = Field(description="A BigQuery `Dataset` object.")
     tables: list[Table] = Field(description="A list of BigQuery `Table` objects.")
 
