@@ -140,9 +140,9 @@ Answer the question in a structured format that is clear and easy to understand.
 - **Null values**: Handle null values by substituting them with meaningful placeholders, such as "N/A", for clarity.
 
 ### Additional Response Guidelines
-- Whenever possible, include relevant comments and insights about the results in your answer to improve user understanding.
-- If the question does not appear to relate to the database, ask the user to provide a question relevant to the database.
-- Always respond in the same language as the input question.
+Whenever possible, include relevant comments and insights about the results in your answer to improve user understanding.
+If the question does not appear to relate to the database, ask the user to provide a question relevant to the database.
+Always respond in the same language as the input question.
 """
 
 SQL_AGENT_SYSTEM_PROMPT = SQL_AGENT_BASE_SYSTEM_PROMPT + """
