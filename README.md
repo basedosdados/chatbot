@@ -1,6 +1,6 @@
 # Chatbot
 
-This library is designed to make it easy for large language models (LLMs) to interact with relational databases. It is built on top of [LangChain](https://python.langchain.com/docs/introduction/) and [LangGraph](https://langchain-ai.github.io/langgraph/concepts/why-langgraph/) and provides agents and high-level assistants for natural language querying and data visualization.
+**Chatbot** is a Python library designed to make it easy for Large Language Models (LLMs) to interact with your data. It is built on top of [LangChain](https://python.langchain.com/docs/introduction/) and [LangGraph](https://langchain-ai.github.io/langgraph/concepts/why-langgraph/) and provides agents and high-level assistants for natural language querying and data visualization.
 
 > [!NOTE]
 > This library is **still under active development**. Expect breaking changes, incomplete features, and limited documentation.
