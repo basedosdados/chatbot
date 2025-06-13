@@ -95,7 +95,7 @@ with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
 An async version is also available: [`AsyncSQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/async_sql_assistant.py).
 
 ### SQLVizAssistant
-[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends `SQLAssistant` by not only retrieving data but also **preparing it for visualization**. It identifies which variables should be plotted on each axis, suggests appropriate chart types, and defines metadata such as titles, labels, and legends, without plotting the chart itself. It needs a LangChain Chat Model, a Context Provider and two separate Prompt Formatters: One for **SQL generation** and the other for guiding **data preprocessing for visualization**.
+[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) by not only retrieving data but also **preparing it for visualization**. It determines which variables should be plotted to each axis, suggests suitable chart types, and defines metadata such as titles, labels, and legends, without actually rendering the chart. It requires a LangChain Chat Model, a Context Provider, and two separate Prompt Formatters: one for **SQL queries generation** and another for **guiding data preprocessing for visualization**.
 
 We provide a default [`VizPromptFormatter`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/formatters/viz_prompt_formatter.py), which is used internally by the Visualization Agent during **data preprocessing**.
 ```python
@@ -124,7 +124,7 @@ assistant = SQLVizAssistant(
 response = assistant.invoke("hello! what can you tell me about our database?")
 ```
 
-You can also optionally use a `PostgresSaver` checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during both **SQL generation** and **data preprocessing for visualization**:
+You can also optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during both **SQL generation** and **data preprocessing for visualization**:
 ```python
 from langchain.chat_models import init_chat_model
 
