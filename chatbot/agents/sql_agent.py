@@ -269,14 +269,14 @@ class SQLAgent:
 
         return await self._acall_model(filtered_messages, is_last_step, config, self.select_datasets_runnable)
 
-    def _get_selected_datasets(self, messages: list[BaseMessage]) -> dict | None:
+    def _get_selected_datasets(self, messages: list[BaseMessage]) -> list[str]:
         """Gets a filter to be applied in the similarity search.
 
         Args:
             messages (list[BaseMessage]): The message list.
 
         Returns:
-            dict | None: The filter.
+            list[str]: A list of the selected datasets names.
         """
         selected_datasets = []
         stop = False
