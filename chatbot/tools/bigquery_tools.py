@@ -37,7 +37,7 @@ class ListDatasetsTool(BaseBigQueryTool, BaseTool):
             query (str, optional): User-provided query.
 
         Returns:
-            str: Metadata of all datasets and its tables.
+            str: Metadata of relevant datasets and its tables.
         """
         return self.context_provider.get_datasets_info(query)
 
