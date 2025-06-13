@@ -1,13 +1,9 @@
 from typing import Annotated, TypedDict
 
-import pydantic
-from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      RemoveMessage, SystemMessage)
-from langchain_core.runnables import (RunnableConfig, RunnableLambda,
-                                      RunnableSequence)
-from langchain_core.vectorstores import VectorStore
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
@@ -15,24 +11,14 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from loguru import logger
 
+from chatbot.formatters import VizPromptContext, VizPromptFormatter
+
 from .prompts import (CHART_METADATA_SYSTEM_PROMPT,
-                      CHART_PREPROCESS_BASE_SYSTEM_PROMPT,
-                      CHART_PREPROCESS_SYSTEM_PROMPT,
                       REPHRASER_VIZ_SYSTEM_PROMPT,
                       VALIDATION_VIZ_SYSTEM_PROMPT)
 from .reducers import Item
 from .structured_outputs import Chart, ChartData, ChartMetadata, Rephrase
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
-
-EXAMPLE_TEMPLATE = """<example>
-User question: {user_question}
-
-<query_results>
-{query_results}
-</query_results>
-
-Output: {output}
-</example>"""
 
 
 class VizAgentState(TypedDict):
@@ -61,14 +47,35 @@ class VizAgentState(TypedDict):
     chart_metadata: ChartMetadata
 
 class VizAgent:
+    """LLM-powered Visualization Agent for visualization recommendations.
+
+    Args:
+        model (BaseChatModel):
+            A LangChain chat model with structured output support.
+        prompt_formatter (VizPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during data preprocessing
+            step, based on the user's question and optional few-shot examples. Must implement how
+            examples are retrieved and how the prompt template is composed.
+        checkpointer (PostgresSaver | AsyncPostgresSaver | bool | None, optional):
+            PostgresSaver/AsyncPostgresSaver instance to persist per-thread state across
+            runs. If the agent is used a subgraph, pass `True` instead. If set to `None`,
+            no state is persisted. Defaults to `None`.
+        question_limit (int | None, optional):
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the LLM. If `None`, the context is unlimited. Defaults to `5`.
+    """
+
     def __init__(
         self,
         model: BaseChatModel,
+        prompt_formatter: VizPromptFormatter,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
-        vector_store: VectorStore | None = None,
-        top_k: int = 4,
         question_limit: int | None = 5,
     ):
+        self.prompt_formatter = prompt_formatter
+        self.checkpointer = checkpointer
+        self.question_limit = question_limit
+
         rephraser_system_message = SystemMessage(REPHRASER_VIZ_SYSTEM_PROMPT)
 
         self.rephraser_runnable = (
@@ -88,13 +95,6 @@ class VizAgent:
         ) | model
 
         self.preprocess_model = model.with_structured_output(ChartData)
-
-        self.checkpointer = checkpointer
-
-        self.vector_store = vector_store
-        self.top_k = top_k
-
-        self.question_limit = question_limit
 
         self.graph = self._compile()
 
@@ -159,65 +159,6 @@ class VizAgent:
 
         return {"messages": [message]}
 
-    def _similarity_search(self, question: str) -> list[Document]:
-        """Searches for the top-k most similar examples to the input question.
-
-        Args:
-            question (str): The input question.
-
-        Returns:
-            list[Document]: A list of the top-k most similar examples.
-        """
-        if self.vector_store is not None:
-            return self.vector_store.similarity_search(
-                query=question,
-                k=self.top_k
-            )
-        return []
-
-    async def _asimilarity_search(self, question: str) -> list[Document]:
-        """Asynchronously searches for the top-k most similar examples to the input question.
-
-        Args:
-            question (str): The input question.
-
-        Returns:
-            list[Document]: A list of the top-k most similar examples.
-        """
-        if self.vector_store is not None:
-            return await self.vector_store.asimilarity_search(
-                query=question,
-                k=self.top_k
-            )
-        return []
-
-    def _get_preprocess_runnable(self, documents: list[Document]) -> RunnableSequence:
-        """Dynamically builds a model runnable with a few-shot system prompt and the preprocessing model.
-
-        Args:
-            documents (list[Document]): A list of documents.
-
-        Returns:
-            RunnableSequence: The model runnable.
-        """
-        examples = "\n\n".join(
-            EXAMPLE_TEMPLATE.format(
-                user_question=doc.page_content,
-                query_results=doc.metadata['query_results'],
-                output=doc.metadata['query_results_preprocessed']
-            )
-            for doc in documents
-        )
-
-        if examples:
-            system_message = SystemMessage(
-                content=CHART_PREPROCESS_SYSTEM_PROMPT.format(examples=examples)
-            )
-        else:
-            system_message = SystemMessage(content=CHART_PREPROCESS_BASE_SYSTEM_PROMPT)
-
-        return (lambda messages: [system_message] + messages) | self.preprocess_model
-
     def _call_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
         """Calls the model for preprocessing the queries results.
 
@@ -231,9 +172,12 @@ class VizAgent:
         question = state["question_rephrased"]
         messages = state["messages"]
 
-        documents = self._similarity_search(question)
+        context = VizPromptContext(query=question)
 
-        preprocess_runnable = self._get_preprocess_runnable(documents)
+        system_prompt = self.prompt_formatter.build_system_prompt(context)
+        system_message = SystemMessage(content=system_prompt)
+
+        preprocess_runnable = (lambda messages: [system_message] + messages) | self.preprocess_model
 
         chart_data: ChartData = preprocess_runnable.invoke(messages, config)
 
@@ -255,9 +199,12 @@ class VizAgent:
         question = state["question_rephrased"]
         messages = state["messages"]
 
-        documents = await self._asimilarity_search(question)
+        context = VizPromptContext(query=question)
 
-        preprocess_runnable = self._get_preprocess_runnable(documents)
+        system_prompt = await self.prompt_formatter.abuild_system_prompt(context)
+        system_message = SystemMessage(content=system_prompt)
+
+        preprocess_runnable = (lambda messages: [system_message] + messages) | self.preprocess_model
 
         chart_data: ChartData = await preprocess_runnable.ainvoke(messages, config)
 

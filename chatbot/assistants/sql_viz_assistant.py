@@ -1,9 +1,9 @@
-from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
-from chatbot.databases import Database
+from chatbot.contexts import BaseContextProvider
+from chatbot.formatters import SQLPromptFormatter, VizPromptFormatter
 
 from .formatting import format_router_agent_response
 from .messages import SQLVizAssistantMessage
@@ -13,23 +13,27 @@ class SQLVizAssistant:
     """LLM-powered assistant for querying and visualizing databases.
 
     Args:
-        database (Database):
-            A `Database` object implementing the `Database` protocol.
         model (BaseChatModel):
-            A langchain `ChatModel` with support to structured outputs and tool calling.
+            A langchain `ChatModel` instance with tool-calling support.
+        context_provider (BaseContextProvider):
+            A context provider that supplies all metadata needed by the agent. Implement
+            this abstract base to plug in any data source (BigQuery, Postgres, etc.)
+            without changing the agent's orchestration logic.
+        sql_prompt_formatter (SQLPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during SQL generation step,
+            based on the user's question and optional few-shot examples. Must implement how examples
+            are retrieved and how the prompt template is composed.
+        viz_prompt_formatter (VizPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during data preprocessing
+            step, based on the user's question and optional few-shot examples. Must implement how
+            examples are retrieved and how the prompt template is composed.
         checkpointer (PostgresSaver | None, optional):
-            A checkpointer that will be used for persisting state across assistant's runs.
-            If set to `None`, the assistant will not retain memory of previous messages.
-            Defaults to `None`.
-        sql_vector_store (VectorStore | None, optional):
-            A vector store that contains examples for the `SQLAgent` LLM calls.
-            If set to `None`, no examples will be used. Defaults to `None`.
-        viz_vector_store (VectorStore | None, optional):
-            A vector store that contains examples for the `VizAgent` LLM calls.
-            If set to `None`, no examples will be used. Defaults to `None`.
+            A checkpointer that will be used for persisting per-thread state across
+            assistant's runs. If set to `None`, the assistant will not retain memory
+            of previous messages. Defaults to `None`.
         question_limit (int | None, optional):
-            Maximum number of previous questions to keep in memory.
-            If `None`, all questions are kept. Defaults to `5`.
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.
 
     Raises:
         TypeError: If the provided checkpointer or vector stores are of the wrong type.
@@ -37,11 +41,11 @@ class SQLVizAssistant:
 
     def __init__(
         self,
-        database: Database,
         model: BaseChatModel,
+        context_provider: BaseContextProvider,
+        sql_prompt_formatter: SQLPromptFormatter,
+        viz_prompt_formatter: VizPromptFormatter,
         checkpointer: PostgresSaver | None = None,
-        sql_vector_store: VectorStore | None = None,
-        viz_vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         if checkpointer is None:
@@ -54,25 +58,18 @@ class SQLVizAssistant:
                 f"or `None`, but got `{type(checkpointer)}`."
             )
 
-        if sql_vector_store is not None and not isinstance(sql_vector_store, VectorStore) \
-        or viz_vector_store is not None and not isinstance(viz_vector_store, VectorStore):
-            raise TypeError(
-                "`sql_vector_store` and `viz_vector_store` must be instances of langchain `VectorStore` or `None`, "
-                f"but got `sql_vector_store`: {type(sql_vector_store)}, `viz_vector_store`: {type(viz_vector_store)}."
-            )
-
         sql_agent = SQLAgent(
-            db=database,
             model=model,
+            context_provider=context_provider,
+            prompt_formatter=sql_prompt_formatter,
             checkpointer=subgraph_checkpointer,
-            vector_store=sql_vector_store,
             question_limit=question_limit
         )
 
         viz_agent = VizAgent(
             model=model,
+            prompt_formatter=viz_prompt_formatter,
             checkpointer=subgraph_checkpointer,
-            vector_store=viz_vector_store,
             question_limit=question_limit
         )
 

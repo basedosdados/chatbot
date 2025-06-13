@@ -1,9 +1,9 @@
-from langchain.vectorstores import VectorStore
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.agents import SQLAgent
-from chatbot.databases import Database
+from chatbot.contexts import BaseContextProvider
+from chatbot.formatters import SQLPromptFormatter
 
 from .formatting import format_sql_agent_response
 from .messages import SQLAssistantMessage
@@ -13,20 +13,23 @@ class SQLAssistant:
     """LLM-powered assistant for querying databases.
 
     Args:
-        database (Database):
-            A `Database` object implementing the `Database` protocol.
         model (BaseChatModel):
-            A langchain `ChatModel` with support to structured outputs and tool calling.
+            A langchain `ChatModel` instance with tool-calling support.
+        context_provider (BaseContextProvider):
+            A context provider that supplies all metadata needed by the agent. Implement
+            this abstract base to plug in any data source (BigQuery, Postgres, etc.)
+            without changing the agent's orchestration logic.
+        prompt_formatter (SQLPromptFormatter):
+            A formatter responsible for constructing the LLM system prompt during SQL generation step,
+            based on the user's question and optional few-shot examples. Must implement how examples
+            are retrieved and how the prompt template is composed.
         checkpointer (PostgresSaver | None, optional):
-            A checkpointer that will be used for persisting state across assistant's runs.
-            If set to `None`, the assistant will not retain memory of previous messages.
-            Defaults to `None`.
-        vector_store (VectorStore | None, optional):
-            A vector store that contains examples for the `SQLAgent` LLM calls.
-            If set to `None`, no examples will be used. Defaults to `None`.
+            A checkpointer that will be used for persisting per-thread state across
+            assistant's runs. If set to `None`, the assistant will not retain memory
+            of previous messages. Defaults to `None`.
         question_limit (int | None, optional):
-            Maximum number of previous questions to keep in memory.
-            If `None`, all questions are kept. Defaults to `5`.
+            Maximum number of Q&A turns to retain in the conversation history
+            sent to the model. If set to `None`, the context is unlimited. Defaults to `None`.
 
     Raises:
         TypeError: If the provided checkpointer or vector store are of the wrong type.
@@ -34,10 +37,10 @@ class SQLAssistant:
 
     def __init__(
         self,
-        database: Database,
         model: BaseChatModel,
+        context_provider: BaseContextProvider,
+        prompt_formatter: SQLPromptFormatter,
         checkpointer: PostgresSaver | None = None,
-        vector_store: VectorStore | None = None,
         question_limit: int | None = 5,
     ):
         if checkpointer is not None and not isinstance(checkpointer, PostgresSaver):
@@ -46,17 +49,11 @@ class SQLAssistant:
                 f"or `None`, but got `{type(checkpointer)}`."
             )
 
-        if vector_store is not None and not isinstance(vector_store, VectorStore):
-            raise TypeError(
-                "`vector_store` must be an instance of langchain `VectorStore` "
-                f"or `None`, but got `{type(vector_store)}`."
-            )
-
         self.sql_agent = SQLAgent(
-            db=database,
             model=model,
+            context_provider=context_provider,
+            prompt_formatter=prompt_formatter,
             checkpointer=checkpointer,
-            vector_store=vector_store,
             question_limit=question_limit
         )
 

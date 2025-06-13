@@ -1,7 +1,6 @@
 import json
 import os
 import time
-from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 from typing import Literal
@@ -11,16 +10,22 @@ from google.cloud.bigquery.dataset import (Dataset, DatasetListItem,
                                            DatasetReference)
 from google.cloud.bigquery.table import Table, TableListItem, TableReference
 from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
 
-from chatbot.databases.metadata_formatter import MetadataFormatterFactory
+from chatbot.contexts.metadata_formatter import MetadataFormatterFactory
+
+from .context_provider import BaseContextProvider
 
 # cache living time (in seconds)
 CACHE_TTL = 60*60
 
-# using a named tuple for clarity
-Data = namedtuple("Data", ("dataset", "tables"))
+class Data(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-class BigQueryDatabase:
+    dataset: Dataset = Field(description="A BigQuery `Dataset` object.")
+    tables: list[Table] = Field(description="A list of BigQuery `Table` objects.")
+
+class BigQueryContextProvider(BaseContextProvider):
     """A BigQuery-backed database interface, for fetching and formatting data.
 
     Args:
@@ -38,7 +43,7 @@ class BigQueryDatabase:
         max_results (int | None, optional):
             Maximum number of results per page when fetching datasets and tables.
             Defaults to `1000`.
-        timeout (int | None, optional):
+        timeout (float | None, optional):
             The number of seconds to wait for an HTTP response before retrying.
             Defaults to `30.0`.
         metadata_format (Literal["markdown", "xml"], optional):
@@ -53,7 +58,7 @@ class BigQueryDatabase:
         max_workers: int | None = 4,
         max_results: int | None = 1000,
         timeout: float | None = 30.0,
-        metadata_format: Literal["markdown", "xml"] = "markdown"
+        metadata_format: Literal["markdown", "xml"] = "markdown",
     ):
         billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
         query_project = query_project or os.getenv('QUERY_PROJECT_ID')
@@ -64,7 +69,9 @@ class BigQueryDatabase:
         self._max_results = max_results
         self._timeout = timeout
 
-        self.formatter = MetadataFormatterFactory.get_metadata_formatter(metadata_format)
+        self._formatter = MetadataFormatterFactory.get_metadata_formatter(
+            format=metadata_format
+        )
 
         self._cache: dict[str, Data] = {}
         self._cache_lock = Lock()
@@ -224,7 +231,7 @@ class BigQueryDatabase:
             logger.exception("Error on getting table info:")
             raise query_exception
 
-        return self.formatter.format_table_metadata(table, sample_rows)
+        return self._formatter.format_table_metadata(table, sample_rows)
 
     def _get_tables_metadata(self, dataset_name: str) -> str:
         """Gets the formatted metadata of all the tables of a single BigQuery dataset
@@ -243,15 +250,18 @@ class BigQueryDatabase:
 
         return "\n\n".join(tables_metadata)
 
-    def get_datasets_info(self) -> str:
+    def get_datasets_info(self, query: str) -> str:
         """Gets the formatted metadata of all the datasets of a BigQuery project
+
+        Args:
+            query (str): A natural language user message. It is unused in this implementation.
 
         Returns:
             str: The formatted metadata
         """
         with self._cache_lock:
             datasets_info = [
-                self.formatter.format_dataset_metadata(data.dataset, data.tables)
+                self._formatter.format_dataset_metadata(data.dataset, data.tables)
                 for data in self._cache.values()
             ]
 
@@ -276,20 +286,20 @@ class BigQueryDatabase:
 
         return "\n\n---\n\n".join(tables_info)
 
-    def query(self, query: str) -> str:
-        """Runs a SQL query in BigQuery
+    def get_query_results(self, sql_query: str) -> str:
+        """Run a SQL query in BigQuery.
 
         Args:
-            query (str): A SQL query
+            query (sql_query): A valid GoogleSQL query statement.
 
         Raises:
-            query_exception: If the query failed for any reason
+            query_exception: If the query failed for any reason.
 
         Returns:
-            str: The SQL query results
+            str: The execution results, formatted as a string.
         """
         try:
-            rows = self._client.query(query, project=self._project).result()
+            rows = self._client.query(sql_query, project=self._project).result()
 
             results = [dict(row) for row in rows]
 
