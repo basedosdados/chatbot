@@ -106,7 +106,6 @@ Do NOT skip this step.
 Then you should query the schema of the most relevant tables.
 
 If the question does not seem related to the database, ask the user to make a question that is related to the database.
-Always respond in the same language as the input question.
 """
 
 SQL_AGENT_BASE_SYSTEM_PROMPT = """You are an agent designed to interact with a BigQuery database.
@@ -142,7 +141,6 @@ Answer the question in a structured format that is clear and easy to understand.
 ### Additional Response Guidelines
 Whenever possible, include relevant comments and insights about the results in your answer to improve user understanding.
 If the question does not appear to relate to the database, ask the user to provide a question relevant to the database.
-Always respond in the same language as the input question.
 """
 
 SQL_AGENT_SYSTEM_PROMPT = SQL_AGENT_BASE_SYSTEM_PROMPT + """
@@ -321,7 +319,7 @@ REPHRASER_VIZ_SYSTEM_PROMPT = """You are an AI assistant specialized in rephrasi
 
 ### 3. Output the Simplified Query:
 - Provide a concise and clear query focusing exclusively on data visualization requirements.
-- Always respond in the same language as the user query.
+- Always respond in the same language as the query.
 """
 
 VALIDATION_VIZ_SYSTEM_PROMPT = """You are a visualization assistant responsible for generating a friendly message that introduces a chart created based on a user's question and SQL data. If the chart is valid, it will be plotted right after your message. Your goal is to craft a clear and concise message that naturally integrates with the answer to the user's question.
