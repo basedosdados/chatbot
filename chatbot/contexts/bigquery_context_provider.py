@@ -43,7 +43,7 @@ class BigQueryContextProvider(BaseContextProvider):
         max_results (int | None, optional):
             Maximum number of results per page when fetching datasets and tables.
             Defaults to `1000`.
-        timeout (int | None, optional):
+        timeout (float | None, optional):
             The number of seconds to wait for an HTTP response before retrying.
             Defaults to `30.0`.
         metadata_format (Literal["markdown", "xml"], optional):

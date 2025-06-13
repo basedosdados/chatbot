@@ -2,7 +2,10 @@ from typing import Iterator
 from unittest.mock import MagicMock
 
 import pytest
-from google.cloud.bigquery.table import Row
+from google.cloud.bigquery.dataset import Dataset, DatasetListItem
+from google.cloud.bigquery.table import Row, Table, TableListItem
+from google.cloud.bigquery.schema import SchemaField
+from pydantic import BaseModel
 
 from chatbot.contexts import BigQueryContextProvider
 
@@ -10,30 +13,7 @@ from chatbot.contexts import BigQueryContextProvider
 # in the `list_datasets` and `list_tables` mock functions
 N_DATASETS = 2
 N_TABLES = 2
-
-# dummy classes for simulating google.cloud.bigquery instances
-class Dataset:
-    dataset_id: str
-    description: str
-
-class DatasetListItem:
-    dataset_id: str
-
-class Field:
-    name: str
-    field_type: str
-    description: str
-
-class Table:
-    dataset_id: str
-    table_id: str
-    full_table_id: str
-    description: str
-    schema: list[Field]
-
-class TableListItem:
-    dataset_id: str
-    full_table_id: str
+N_FIELDS = 3
 
 # ============================== fixtures ==============================
 @pytest.fixture
@@ -41,7 +21,7 @@ def mock_bigquery_client():
     class MockBigQueryClient:
         # it should return a Dataset object
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.dataset.Dataset
-        def get_dataset(self, dataset_id: str, timeout: float):
+        def get_dataset(self, dataset_id: str, timeout: float|None = None):
             dataset = MagicMock(spec=Dataset)
             dataset.dataset_id = dataset_id
             dataset.description = f"mock description for dataset {dataset_id}"
@@ -49,7 +29,7 @@ def mock_bigquery_client():
 
         # it should return an Iterator of DatasetListItem objects
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.dataset.DatasetListItem
-        def list_datasets(self, project: str, timeout: float, max_results: int) -> Iterator:
+        def list_datasets(self, project: str, timeout: float|None = None, max_results: int|None = None) -> Iterator:
             dataset_list = [MagicMock(spec=DatasetListItem) for _ in range(N_DATASETS)]
             for i, dataset_list_item in enumerate(dataset_list):
                 dataset_list_item.dataset_id = f"mock_dataset_{i+1}"
@@ -57,27 +37,28 @@ def mock_bigquery_client():
 
         # it should return a Table object
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.table.Table
-        def get_table(self, table_like: MagicMock, timeout: float):
-            schema = [MagicMock(spec=Field) for _ in range(3)]
+        def get_table(self, table_list_item: TableListItem, timeout: float|None = None):
+            table = MagicMock(spec=Table)
+
+            table.dataset_id = table_list_item.dataset_id
+            table.table_id = table_list_item.table_id
+            table.full_table_id = table_list_item.full_table_id
+            table.description=f"mock description for table {table.full_table_id}"
+
+            schema = [MagicMock(spec=SchemaField) for _ in range(N_FIELDS)]
 
             for i, field in enumerate(schema):
                 field.name = f"field_{i+1}"
                 field.field_type = f"STRING"
                 field.description = f"mock_field_{i+1}"
 
-            table = MagicMock(spec=Table)
-
-            table.dataset_id = table_like.dataset_id
-            table.table_id = table_like.full_table_id.split(".")[-1]
-            table.full_table_id = table_like.full_table_id
-            table.description=f"mock description for table {table.full_table_id}"
             table.schema = schema
 
             return table
 
         # it should return an Iterator of TableListItem objects
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.table.TableListItem
-        def list_tables(self, dataset_id: str, timeout: float, max_results: int):
+        def list_tables(self, dataset_id: str, timeout: float|None = None, max_results: int|None = None):
             table_list = [MagicMock(spec=TableListItem) for _ in range(N_TABLES)]
             for i, table_list_item in enumerate(table_list):
                 table_list_item.dataset_id=dataset_id
@@ -103,7 +84,7 @@ def mock_bigquery_client():
     return MockBigQueryClient()
 
 @pytest.fixture
-def db(mock_bigquery_client, monkeypatch):
+def context_provider(mock_bigquery_client, monkeypatch):
     monkeypatch.setattr(
         "google.cloud.bigquery.Client", lambda _: mock_bigquery_client
     )
@@ -120,36 +101,36 @@ def dataset_list_item():
 
 @pytest.fixture
 def table_list_item():
-    dataset_id = "mock_dataset"
-    full_table_id = f"mock_project:{dataset_id}.mock_table"
+    dataset_id = "mock_dataset_id"
+    full_table_id = f"mock_project:{dataset_id}.mock_table_id"
     table_list_item = MagicMock(spec=TableListItem)
     table_list_item.dataset_id = dataset_id
     table_list_item.full_table_id = full_table_id
     return table_list_item
 
 # ============================== test cases ==============================
-def test_fetch_dataset(db: BigQueryContextProvider, dataset_list_item: MagicMock):
-    dataset = db._fetch_dataset(dataset_list_item)
+def test_fetch_dataset(context_provider: BigQueryContextProvider, dataset_list_item: MagicMock):
+    dataset = context_provider._fetch_dataset(dataset_list_item)
     assert dataset.dataset_id == dataset_list_item.dataset_id
     assert dataset.description == dataset_list_item.description
 
-def test_fetch_datasets(db: BigQueryContextProvider):
-    datasets = db._fetch_datasets()
+def test_fetch_datasets(context_provider: BigQueryContextProvider):
+    datasets = context_provider._fetch_datasets()
     assert isinstance(datasets, list)
     for dataset in datasets:
         assert hasattr(dataset, "dataset_id")
         assert hasattr(dataset, "description")
 
-def test_fetch_table(db: BigQueryContextProvider, table_list_item: MagicMock):
-    table = db._fetch_table(table_list_item)
+def test_fetch_table(context_provider: BigQueryContextProvider, table_list_item: MagicMock):
+    table = context_provider._fetch_table(table_list_item)
     assert table.dataset_id == table_list_item.dataset_id
     assert table.full_table_id == table_list_item.full_table_id
     assert hasattr(table, "table_id")
     assert hasattr(table, "description")
     assert hasattr(table, "schema")
 
-def test_fetch_tables(db: BigQueryContextProvider):
-    tables = db._fetch_tables("mock_dataset_id")
+def test_fetch_tables(context_provider: BigQueryContextProvider):
+    tables = context_provider._fetch_tables("mock_dataset_id")
     assert isinstance(tables, list)
     for table in tables:
         assert table.dataset_id == "mock_dataset_id"
@@ -158,14 +139,14 @@ def test_fetch_tables(db: BigQueryContextProvider):
         assert hasattr(table, "description")
         assert hasattr(table, "schema")
 
-def test_cache_data(db: BigQueryContextProvider):
-    db._cache_data()
+def test_cache_data(context_provider: BigQueryContextProvider):
+    context_provider._cache_data()
 
-    assert isinstance(db._cache, dict)
+    assert isinstance(context_provider._cache, dict)
 
-    for dataset_id, data in db._cache.items():
+    for dataset_id, data in context_provider._cache.items():
         assert isinstance(dataset_id, str)
-        assert isinstance(data, tuple)
+        assert isinstance(data, BaseModel)
 
         assert hasattr(data.dataset, "dataset_id")
         assert hasattr(data.dataset, "description")
@@ -179,7 +160,7 @@ def test_cache_data(db: BigQueryContextProvider):
             assert hasattr(table, "description")
             assert hasattr(table, "schema")
 
-def test_query(db: BigQueryContextProvider):
+def test_query(context_provider: BigQueryContextProvider):
     expected = '[{"field_1": "value_1", "field_2": "value_2", "field_3": "value_3"}]'
-    query_results = db.get_query_results("mock_query")
+    query_results = context_provider.get_query_results("mock_query")
     assert query_results == expected
