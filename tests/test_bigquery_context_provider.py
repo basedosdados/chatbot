@@ -1,4 +1,3 @@
-from typing import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,11 +28,11 @@ def mock_bigquery_client():
 
         # it should return an Iterator of DatasetListItem objects
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.dataset.DatasetListItem
-        def list_datasets(self, project: str, timeout: float|None = None, max_results: int|None = None) -> Iterator:
-            dataset_list = [MagicMock(spec=DatasetListItem) for _ in range(N_DATASETS)]
-            for i, dataset_list_item in enumerate(dataset_list):
+        def list_datasets(self, project: str, timeout: float|None = None, max_results: int|None = None):
+            for i in range(N_DATASETS):
+                dataset_list_item = MagicMock(spec=DatasetListItem)
                 dataset_list_item.dataset_id = f"mock_dataset_{i+1}"
-            return iter(dataset_list)
+                yield dataset_list_item
 
         # it should return a Table object
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.table.Table
@@ -59,11 +58,11 @@ def mock_bigquery_client():
         # it should return an Iterator of TableListItem objects
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.table.TableListItem
         def list_tables(self, dataset_id: str, timeout: float|None = None, max_results: int|None = None):
-            table_list = [MagicMock(spec=TableListItem) for _ in range(N_TABLES)]
-            for i, table_list_item in enumerate(table_list):
-                table_list_item.dataset_id=dataset_id
+            for i in range(N_TABLES):
+                table_list_item = MagicMock(spec=TableListItem)
+                table_list_item.dataset_id = dataset_id
                 table_list_item.full_table_id=f"mock_project:{dataset_id}.table_{i+1}"
-            return iter(table_list)
+                yield table_list_item
 
         # it should return an Iterator of Rows when the return() method is called
         # https://cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.table.Row
