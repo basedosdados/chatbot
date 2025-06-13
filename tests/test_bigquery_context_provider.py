@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from google.cloud.bigquery.dataset import Dataset, DatasetListItem
-from google.cloud.bigquery.table import Row, Table, TableListItem
 from google.cloud.bigquery.schema import SchemaField
+from google.cloud.bigquery.table import Row, Table, TableListItem
 from pydantic import BaseModel
 
 from chatbot.contexts import BigQueryContextProvider
