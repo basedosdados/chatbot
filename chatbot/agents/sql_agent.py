@@ -20,14 +20,18 @@ from chatbot.formatters import SQLPromptContext, SQLPromptFormatter
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
-from .prompts import SELECT_DATASETS_SYSTEM_PROMPT
+from .prompts import REWRITE_QUERY_SYSTEM_PROMPT, SELECT_DATASETS_SYSTEM_PROMPT
 from .reducers import BaseItem, ItemRemove, add_item
+from .structured_outputs import RewrittenQuery
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
 class SQLAgentState(TypedDict):
-    # input question and final answer
+    # input question and rewritten question
     question: str
+    question_rewritten: str
+
+    # final answer
     final_answer: str
 
     # sql queries that were executed without errors and its results
@@ -39,7 +43,6 @@ class SQLAgentState(TypedDict):
 
     # flag for indicating recursion limit has been reached
     is_last_step: IsLastStep
-
 
 class SQLAgent:
     """LLM-powered SQL Agent for interacting with a SQL database.
@@ -78,6 +81,15 @@ class SQLAgent:
         self.prompt_formatter = prompt_formatter
         self.checkpointer = checkpointer
         self.question_limit = question_limit
+
+        # query rewriting model
+        rewriter_system_message = SystemMessage(
+            content=REWRITE_QUERY_SYSTEM_PROMPT
+        )
+
+        self.rewriting_runnable = (
+            lambda messages: [rewriter_system_message] + messages
+        ) | model.with_structured_output(RewrittenQuery)
 
         # datasets and tables selection tools
         self.list_datasets_tool = ListDatasetsTool(
@@ -177,6 +189,45 @@ class SQLAgent:
 
         return {"messages": [response]}
 
+    def _call_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+        user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+
+        chat_history = user_queries[:-1]
+        chat_history = "\n".join([f"{i+1}. {msg.content}" for i, msg in enumerate(user_queries)])
+        chat_history = "\n" + chat_history if chat_history else chat_history
+
+        latest_query = user_queries[-1].content
+
+        message = (
+            f"Conversation History:{chat_history}\n\n"
+            f"Latest User Query:\n{latest_query}\n\n"
+            "Rewritten Query:\n"
+        )
+
+        response: RewrittenQuery = self.rewriting_runnable.invoke([message])
+
+        return {"question_rewritten": response.rewritten}
+
+    async def _acall_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+
+        user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+
+        chat_history = user_queries[:-1]
+        chat_history = "\n".join([f"{i+1}. {msg.content}" for i, msg in enumerate(user_queries)])
+        chat_history = "\n" + chat_history if chat_history else chat_history
+
+        latest_query = user_queries[-1].content
+
+        message = (
+            f"Conversation History:{chat_history}\n\n"
+            f"Latest User Query:\n{latest_query}\n\n"
+            "Rewritten Query:\n"
+        )
+
+        response: RewrittenQuery = await self.rewriting_runnable.ainvoke([message])
+
+        return {"question_rewritten": response.rewritten}
+
     def _call_list_datasets(self, state: SQLAgentState) -> dict[str, list[AIMessage]]:
         """Forces the dataset listing tool call.
 
@@ -192,7 +243,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question"]}
+                    "args": {"query": state["question_rewritten"]}
                 }
             ]
         )
@@ -214,7 +265,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question"]}
+                    "args": {"query": state["question_rewritten"]}
                 }
             ]
         )
@@ -410,6 +461,9 @@ class SQLAgent:
         # node for clearing previous sql answer, queries, and results
         graph.add_node("clear_sql", self._clear_sql)
 
+        # node for query rewriting
+        graph.add_node("rewrite_query", RunnableLambda(self._call_rewrite_query, self._acall_rewrite_query))
+
         # list datasets nodes
         graph.add_node("call_list_datasets", RunnableLambda(self._call_list_datasets, self._acall_list_datasets))
         graph.add_node("list_datasets", ToolNode([self.list_datasets_tool]))
@@ -428,7 +482,8 @@ class SQLAgent:
         # message pruning node
         graph.add_node("prune_messages", self._prune_messages)
 
-        graph.add_edge("clear_sql", "call_list_datasets")
+        graph.add_edge("clear_sql", "rewrite_query")
+        graph.add_edge("rewrite_query", "call_list_datasets")
         graph.add_edge("call_list_datasets", "list_datasets")
         graph.add_edge("list_datasets", "call_select_datasets")
         graph.add_edge("call_select_datasets", "tables_info")
