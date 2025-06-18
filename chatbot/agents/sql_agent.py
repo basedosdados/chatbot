@@ -190,6 +190,14 @@ class SQLAgent:
         return {"messages": [response]}
 
     def _call_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+        """Rewrites the user query for semantic search.
+
+        Args:
+            state (SQLAgentState): The graph state.
+
+        Returns:
+            dict[str, str]: The state update containing the rewritten query.
+        """
         user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
 
         chat_history = user_queries[:-1]
@@ -209,7 +217,14 @@ class SQLAgent:
         return {"question_rewritten": response.rewritten}
 
     async def _acall_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+        """Asynchronously rewrites the user query for semantic search.
 
+        Args:
+            state (SQLAgentState): The graph state.
+
+        Returns:
+            dict[str, str]: The state update containing the rewritten query.
+        """
         user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
 
         chat_history = user_queries[:-1]
@@ -232,7 +247,7 @@ class SQLAgent:
         """Forces the dataset listing tool call.
 
         Args:
-            state (SQLAgentState): The graph state. It's unused in this function.
+            state (SQLAgentState): The graph state.
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message.
@@ -254,7 +269,7 @@ class SQLAgent:
         """Asynchronously forces the dataset listing tool call.
 
         Args:
-            state (SQLAgentState): The graph state. It's unused in this function.
+            state (SQLAgentState): The graph state.
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message.
