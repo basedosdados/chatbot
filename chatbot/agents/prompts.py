@@ -367,6 +367,7 @@ You will be given a conversation history (a series of user queries in chronologi
 - If the latest query is already self-contained and clear, you can return it as is.
 - DO NOT answer the user's query. Your only output should be the rewritten query.
 - DO NOT add any conversational text or pleasantries.
+- DO NOT invent or assume information that is not present in the query and the conversation history. If the user's query contains an acronym you don't know and cannot resolve from the history, retain it exactly as-is.
 - ALWAYS respond in the same language as the user query.
 
 ## Examples:
@@ -431,7 +432,19 @@ Which product category had the most revenue in Q4 2023, broken down by region?
 
 ---
 
-### Example 6: No Rewrite Needed
+### Example 6: Retaining Unknown Acronyms
+Conversation History:
+1. What is the status of our new CRM implementation?
+
+Latest User Query:
+How does it impact the sales team's QBR?
+
+Rewritten Query:
+How does the new CRM implementation impact the sales team's QBR?
+
+---
+
+### Example 7: No Rewrite Needed
 Conversation History:
 1. What is the capital of France?
 
