@@ -29,7 +29,7 @@ from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 class SQLAgentState(TypedDict):
     # input question and rewritten question
     question: str
-    question_rewritten: str
+    question_rewritten: str | None
 
     # final answer
     final_answer: str
@@ -41,7 +41,10 @@ class SQLAgentState(TypedDict):
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # flag for indicating recursion limit has been reached
+    # flag indicating if the query should be rewritten for this run
+    rewrite_query: bool
+
+    # flag indicating if the recursion limit has been reached
     is_last_step: IsLastStep
 
 class SQLAgent:
@@ -198,6 +201,9 @@ class SQLAgent:
         Returns:
             dict[str, str]: The state update containing the rewritten query.
         """
+        if not state["rewrite_query"]:
+            return {"question_rewritten": None}
+
         user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
 
         chat_history = user_queries[:-1]
@@ -225,6 +231,9 @@ class SQLAgent:
         Returns:
             dict[str, str]: The state update containing the rewritten query.
         """
+        if not state["rewrite_query"]:
+            return {"question_rewritten": None}
+
         user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
 
         chat_history = user_queries[:-1]
@@ -258,7 +267,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question_rewritten"]}
+                    "args": {"query": self._get_query(state)}
                 }
             ]
         )
@@ -280,7 +289,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question_rewritten"]}
+                    "args": {"query": self._get_query(state)}
                 }
             ]
         )
@@ -371,14 +380,13 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
-        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
 
         selected_datasets = self._get_selected_datasets(messages)
 
         context = SQLPromptContext(
-            query=question,
+            query=self._get_query(state),
             selected_datasets=selected_datasets
         )
 
@@ -399,14 +407,13 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
-        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
 
         selected_datasets = self._get_selected_datasets(messages)
 
         context = SQLPromptContext(
-            query=question,
+            query=self._get_query(state),
             selected_datasets=selected_datasets
         )
 
@@ -416,6 +423,11 @@ class SQLAgent:
         query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model
 
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
+
+    def _get_query(state: SQLAgentState) -> str:
+        if state["rewrite_query"]:
+            return state["question_rewritten"]
+        return state["question"]
 
     def _get_answer(self, state: SQLAgentState) -> dict[str, str]:
         last_message = state["messages"][-1]
@@ -477,7 +489,7 @@ class SQLAgent:
         graph.add_node("clear_sql", self._clear_sql)
 
         # node for query rewriting
-        graph.add_node("rewrite_query", RunnableLambda(self._call_rewrite_query, self._acall_rewrite_query))
+        graph.add_node("maybe_rewrite_query", RunnableLambda(self._call_rewrite_query, self._acall_rewrite_query))
 
         # list datasets nodes
         graph.add_node("call_list_datasets", RunnableLambda(self._call_list_datasets, self._acall_list_datasets))
@@ -497,8 +509,8 @@ class SQLAgent:
         # message pruning node
         graph.add_node("prune_messages", self._prune_messages)
 
-        graph.add_edge("clear_sql", "rewrite_query")
-        graph.add_edge("rewrite_query", "call_list_datasets")
+        graph.add_edge("clear_sql", "maybe_rewrite_query")
+        graph.add_edge("maybe_rewrite_query", "call_list_datasets")
         graph.add_edge("call_list_datasets", "list_datasets")
         graph.add_edge("list_datasets", "call_select_datasets")
         graph.add_edge("call_select_datasets", "tables_info")
@@ -516,7 +528,7 @@ class SQLAgent:
         # For more information, visit https://github.com/langchain-ai/langgraph/issues/3020
         return graph.compile(self.checkpointer)
 
-    def invoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
+    def invoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> SQLAgentState:
         """Runs the compiled graph with a question and an optional configuration.
 
         Args:
@@ -534,13 +546,14 @@ class SQLAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )
 
         return response
 
-    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
+    async def ainvoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> SQLAgentState:
         """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
@@ -558,6 +571,7 @@ class SQLAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )
