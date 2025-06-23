@@ -41,7 +41,8 @@ class SQLAgentState(TypedDict):
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # flag indicating if the query should be rewritten for this run
+    # flag indicating if the input question
+    # should be rewritten for the current run
     rewrite_query: bool
 
     # flag indicating if the recursion limit has been reached
@@ -424,7 +425,7 @@ class SQLAgent:
 
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
 
-    def _get_query(state: SQLAgentState) -> str:
+    def _get_query(self, state: SQLAgentState) -> str:
         if state["rewrite_query"]:
             return state["question_rewritten"]
         return state["question"]
@@ -534,6 +535,7 @@ class SQLAgent:
         Args:
             question (str): The question.
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
 
         Returns:
             SQLAgentState: The output of the agent execution.
@@ -559,6 +561,7 @@ class SQLAgent:
         Args:
             question (str): The question.
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
 
         Returns:
             SQLAgentState: The output of the agent execution.
