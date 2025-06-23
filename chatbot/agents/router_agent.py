@@ -32,6 +32,10 @@ class RouterAgentState(TypedDict):
     # input question
     question: str
 
+    # flag indicating if the input question should be rewritten
+    # for the current run when calling the SQLAgent
+    rewrite_query: bool
+
     # intermediate answers and final answer
     sql_answer: str
     chart_answer: str
@@ -209,7 +213,11 @@ class RouterAgent:
         Returns:
             dict[str, str|list[Item]|list[AIMessage]]: The graph state update.
         """
-        response = self.sql_agent.invoke(state["question"], config)
+        response = self.sql_agent.invoke(
+            question=state["question"],
+            rewrite_query=state["rewrite_query"],
+            config=config,
+        )
 
         return {
             "sql_answer": response["final_answer"],
@@ -230,7 +238,11 @@ class RouterAgent:
         Returns:
             dict[str, str|list[Item]|list[AIMessage]]: The graph state update.
         """
-        response = await self.sql_agent.ainvoke(state["question"], config)
+        response = await self.sql_agent.ainvoke(
+            question=state["question"],
+            rewrite_query=state["rewrite_query"],
+            config=config,
+        )
 
         return {
             "sql_answer": response["final_answer"],
@@ -414,12 +426,14 @@ class RouterAgent:
         # For more information, visit https://github.com/langchain-ai/langgraph/issues/3020
         return graph.compile(self.checkpointer)
 
-    def invoke(self, question: str, config: RunnableConfig | None = None) -> RouterAgentState:
+    def invoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> RouterAgentState:
         """Runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
+                                                   when calling the `SQLAgent`. Defaults to `False`.
 
         Returns:
             RouterAgentState: The output of the agent execution.
@@ -432,18 +446,21 @@ class RouterAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )
 
         return response
 
-    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> RouterAgentState:
+    async def ainvoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> RouterAgentState:
         """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
+                                                   when calling the `SQLAgent`. Defaults to `False`.
 
         Returns:
             RouterAgentState: The output of the agent execution.
@@ -456,6 +473,7 @@ class RouterAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )
