@@ -14,7 +14,7 @@ async def assistant(monkeypatch):
     def mock_agent_init(self, checkpointer):
         self.checkpointer = checkpointer
 
-    async def mock_ainvoke(self, question, config):
+    async def mock_ainvoke(self, question, config, rewrite_query):
         chart_data = ChartData()
         chart_metadata = ChartMetadata()
         chart = Chart(
