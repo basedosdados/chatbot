@@ -20,14 +20,18 @@ from chatbot.formatters import SQLPromptContext, SQLPromptFormatter
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryTableTool)
 
-from .prompts import SELECT_DATASETS_SYSTEM_PROMPT
+from .prompts import REWRITE_QUERY_SYSTEM_PROMPT, SELECT_DATASETS_SYSTEM_PROMPT
 from .reducers import BaseItem, ItemRemove, add_item
+from .structured_outputs import RewrittenQuery
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
 class SQLAgentState(TypedDict):
-    # input question and final answer
+    # input question and rewritten question
     question: str
+    question_rewritten: str | None
+
+    # final answer
     final_answer: str
 
     # sql queries that were executed without errors and its results
@@ -37,9 +41,12 @@ class SQLAgentState(TypedDict):
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # flag for indicating recursion limit has been reached
-    is_last_step: IsLastStep
+    # flag indicating if the input question
+    # should be rewritten for the current run
+    rewrite_query: bool
 
+    # flag indicating if the recursion limit has been reached
+    is_last_step: IsLastStep
 
 class SQLAgent:
     """LLM-powered SQL Agent for interacting with a SQL database.
@@ -78,6 +85,15 @@ class SQLAgent:
         self.prompt_formatter = prompt_formatter
         self.checkpointer = checkpointer
         self.question_limit = question_limit
+
+        # query rewriting model
+        rewriter_system_message = SystemMessage(
+            content=REWRITE_QUERY_SYSTEM_PROMPT
+        )
+
+        self.rewriting_runnable = (
+            lambda messages: [rewriter_system_message] + messages
+        ) | model.with_structured_output(RewrittenQuery)
 
         # datasets and tables selection tools
         self.list_datasets_tool = ListDatasetsTool(
@@ -177,11 +193,71 @@ class SQLAgent:
 
         return {"messages": [response]}
 
+    def _call_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+        """Rewrites the user query for semantic search.
+
+        Args:
+            state (SQLAgentState): The graph state.
+
+        Returns:
+            dict[str, str]: The state update containing the rewritten query.
+        """
+        if not state["rewrite_query"]:
+            return {"question_rewritten": None}
+
+        user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+
+        chat_history = user_queries[:-1]
+        chat_history = "\n".join([f"{i+1}. {msg.content}" for i, msg in enumerate(user_queries)])
+        chat_history = "\n" + chat_history if chat_history else chat_history
+
+        latest_query = user_queries[-1].content
+
+        message = (
+            f"Conversation History:{chat_history}\n\n"
+            f"Latest User Query:\n{latest_query}\n\n"
+            "Rewritten Query:\n"
+        )
+
+        response: RewrittenQuery = self.rewriting_runnable.invoke([message])
+
+        return {"question_rewritten": response.rewritten}
+
+    async def _acall_rewrite_query(self, state: SQLAgentState) -> dict[str, str]:
+        """Asynchronously rewrites the user query for semantic search.
+
+        Args:
+            state (SQLAgentState): The graph state.
+
+        Returns:
+            dict[str, str]: The state update containing the rewritten query.
+        """
+        if not state["rewrite_query"]:
+            return {"question_rewritten": None}
+
+        user_queries = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+
+        chat_history = user_queries[:-1]
+        chat_history = "\n".join([f"{i+1}. {msg.content}" for i, msg in enumerate(user_queries)])
+        chat_history = "\n" + chat_history if chat_history else chat_history
+
+        latest_query = user_queries[-1].content
+
+        message = (
+            f"Conversation History:{chat_history}\n\n"
+            f"Latest User Query:\n{latest_query}\n\n"
+            "Rewritten Query:\n"
+        )
+
+        response: RewrittenQuery = await self.rewriting_runnable.ainvoke([message])
+
+        return {"question_rewritten": response.rewritten}
+
     def _call_list_datasets(self, state: SQLAgentState) -> dict[str, list[AIMessage]]:
         """Forces the dataset listing tool call.
 
         Args:
-            state (SQLAgentState): The graph state. It's unused in this function.
+            state (SQLAgentState): The graph state.
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message.
@@ -192,7 +268,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question"]}
+                    "args": {"query": self._get_query(state)}
                 }
             ]
         )
@@ -203,7 +279,7 @@ class SQLAgent:
         """Asynchronously forces the dataset listing tool call.
 
         Args:
-            state (SQLAgentState): The graph state. It's unused in this function.
+            state (SQLAgentState): The graph state.
 
         Returns:
             dict[str, list[AIMessage]]: The dataset listing tool call message.
@@ -214,7 +290,7 @@ class SQLAgent:
                 {
                     "id": str(uuid.uuid4()),
                     "name": self.list_datasets_tool.name,
-                    "args": {"query": state["question"]}
+                    "args": {"query": self._get_query(state)}
                 }
             ]
         )
@@ -305,14 +381,13 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
-        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
 
         selected_datasets = self._get_selected_datasets(messages)
 
         context = SQLPromptContext(
-            query=question,
+            query=self._get_query(state),
             selected_datasets=selected_datasets
         )
 
@@ -333,14 +408,13 @@ class SQLAgent:
         Returns:
             dict[str, list[BaseMessage]]: The updated message list.
         """
-        question = state["question"]
         messages = state["messages"]
         is_last_step = state["is_last_step"]
 
         selected_datasets = self._get_selected_datasets(messages)
 
         context = SQLPromptContext(
-            query=question,
+            query=self._get_query(state),
             selected_datasets=selected_datasets
         )
 
@@ -350,6 +424,11 @@ class SQLAgent:
         query_model_runnable = (lambda messages: [system_message] + messages) | self.query_model
 
         return await self._acall_model(messages, is_last_step, config, query_model_runnable)
+
+    def _get_query(self, state: SQLAgentState) -> str:
+        if state["rewrite_query"]:
+            return state["question_rewritten"]
+        return state["question"]
 
     def _get_answer(self, state: SQLAgentState) -> dict[str, str]:
         last_message = state["messages"][-1]
@@ -410,6 +489,9 @@ class SQLAgent:
         # node for clearing previous sql answer, queries, and results
         graph.add_node("clear_sql", self._clear_sql)
 
+        # node for query rewriting
+        graph.add_node("maybe_rewrite_query", RunnableLambda(self._call_rewrite_query, self._acall_rewrite_query))
+
         # list datasets nodes
         graph.add_node("call_list_datasets", RunnableLambda(self._call_list_datasets, self._acall_list_datasets))
         graph.add_node("list_datasets", ToolNode([self.list_datasets_tool]))
@@ -428,7 +510,8 @@ class SQLAgent:
         # message pruning node
         graph.add_node("prune_messages", self._prune_messages)
 
-        graph.add_edge("clear_sql", "call_list_datasets")
+        graph.add_edge("clear_sql", "maybe_rewrite_query")
+        graph.add_edge("maybe_rewrite_query", "call_list_datasets")
         graph.add_edge("call_list_datasets", "list_datasets")
         graph.add_edge("list_datasets", "call_select_datasets")
         graph.add_edge("call_select_datasets", "tables_info")
@@ -446,12 +529,13 @@ class SQLAgent:
         # For more information, visit https://github.com/langchain-ai/langgraph/issues/3020
         return graph.compile(self.checkpointer)
 
-    def invoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
+    def invoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> SQLAgentState:
         """Runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question.
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
 
         Returns:
             SQLAgentState: The output of the agent execution.
@@ -464,18 +548,20 @@ class SQLAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )
 
         return response
 
-    async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> SQLAgentState:
+    async def ainvoke(self, question: str, config: RunnableConfig | None = None, rewrite_query: bool = False) -> SQLAgentState:
         """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question.
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
 
         Returns:
             SQLAgentState: The output of the agent execution.
@@ -488,6 +574,7 @@ class SQLAgent:
             input={
                 "question": question,
                 "messages": [message],
+                "rewrite_query": rewrite_query,
             },
             config=config,
         )

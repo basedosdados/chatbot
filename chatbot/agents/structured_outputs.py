@@ -32,6 +32,9 @@ class Rephrase(BaseModel):
     original: str = Field(description="The original user question")
     rephrased: str = Field(description="The rephrased user question")
 
+class RewrittenQuery(BaseModel):
+    rewritten: str = Field(description="The rewritten user query")
+
 class InitialRouting(BaseModel):
     """Determines the initial agent to handle the user's query."""
     next: Literal["sql_agent", "viz_agent"] = Field(

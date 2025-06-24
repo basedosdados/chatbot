@@ -185,6 +185,9 @@ with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
 ```
 An async version is also available: [`AsyncSQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/async_sql_viz_assistant.py).
 
+> [!TIP]
+> To improve semantic search when using vector stores, you can enable query rewriting by setting `rewrite_query=True` when invoking the assistants or the `SQLAgent` directly.
+
 ## Extensibility
 Under the hood, both assistants rely on composable agents:
 
