@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main  # Run tests on pushes to the main branch
+    paths:
+      - "**.py"
   pull_request:
     branches:
       - main  # Run tests on pull requests targeting the main branch
+    paths:
+      - "**.py"
   workflow_dispatch:
 
 jobs:
