@@ -105,7 +105,7 @@ class AsyncSQLAssistant:
                 Its type, shape and content depends on the `stream_mode` arg.
         """
         async for chunk in self.sql_agent.astream(
-            message, stream_mode, config, rewrite_query
+            message, config, stream_mode, rewrite_query
         ):
             yield chunk
 

@@ -131,7 +131,7 @@ class SQLVizAssistant:
                 Its type, shape and content depends on the `stream_mode` and `subgraphs` args.
         """
         for chunk in self.router_agent.stream(
-            message, stream_mode, subgraphs, config, rewrite_query
+            message, config, stream_mode, subgraphs, rewrite_query
         ):
             yield chunk
 
