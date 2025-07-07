@@ -431,7 +431,7 @@ class RouterAgent:
 
         Args:
             question (str): The input question.
-            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
             rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
                                                    when calling the `SQLAgent`. Defaults to `False`.
 
@@ -458,7 +458,7 @@ class RouterAgent:
 
         Args:
             question (str): The input question.
-            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
             rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
                                                    when calling the `SQLAgent`. Defaults to `False`.
 
@@ -487,7 +487,7 @@ class RouterAgent:
         stream_mode: list[str] | None = None,
         subgraphs: bool = False,
         rewrite_query: bool = False
-    ) -> Iterator[tuple]:
+    ) -> Iterator[dict|tuple]:
         """Stream graph steps.
 
         Args:
