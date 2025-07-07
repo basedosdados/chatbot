@@ -83,7 +83,7 @@ class AsyncSQLVizAssistant:
             question_limit=question_limit
         )
 
-    async def invoke(self, message: str, config: dict|None=None, rewrite_query: bool=False) -> SQLVizAssistantMessage:
+    async def ainvoke(self, message: str, config: dict|None=None, rewrite_query: bool=False) -> SQLVizAssistantMessage:
         """Asynchronously sends a message to the `RouterAgent` and returns its response.
 
         Args:
@@ -105,7 +105,7 @@ class AsyncSQLVizAssistant:
 
         return SQLVizAssistantMessage(**response)
 
-    async def stream(
+    async def astream(
         self,
         message: str,
         config: dict|None=None,
@@ -135,7 +135,7 @@ class AsyncSQLVizAssistant:
         ):
             yield chunk
 
-    async def clear_thread(self, thread_id: str):
+    async def aclear_thread(self, thread_id: str):
         """Asynchronously deletes all checkpoints for a given thread.
 
         Args:

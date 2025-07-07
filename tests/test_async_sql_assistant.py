@@ -55,7 +55,7 @@ async def assistant(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invoke(assistant: AsyncSQLAssistant):
-    response = await assistant.invoke("mock question")
+    response = await assistant.ainvoke("mock question")
 
     expected_response = SQLAssistantMessage(
         content="mock final answer",
@@ -69,7 +69,7 @@ async def test_invoke(assistant: AsyncSQLAssistant):
 async def test_invoke_with_config(assistant: AsyncSQLAssistant):
     run_id = str(uuid.uuid4())
 
-    response = await assistant.invoke("mock question", {"run_id": run_id})
+    response = await assistant.ainvoke("mock question", {"run_id": run_id})
 
     expected_response = SQLAssistantMessage(
         id=run_id,
@@ -83,7 +83,7 @@ async def test_invoke_with_config(assistant: AsyncSQLAssistant):
 
 @pytest.mark.asyncio
 async def test_stream(assistant: AsyncSQLAssistant):
-    async for chunk in assistant.stream("mock question"):
+    async for chunk in assistant.astream("mock question"):
         assert isinstance(chunk, dict)
 
     final_state = chunk
@@ -93,4 +93,4 @@ async def test_stream(assistant: AsyncSQLAssistant):
 
 @pytest.mark.asyncio
 async def test_clear_thread(assistant: AsyncSQLAssistant):
-    await assistant.clear_thread(thread_id=str(uuid.uuid4()))
+    await assistant.aclear_thread(thread_id=str(uuid.uuid4()))

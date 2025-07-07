@@ -59,7 +59,7 @@ class AsyncSQLAssistant:
             question_limit=question_limit
         )
 
-    async def invoke(self, message: str, config: dict|None=None, rewrite_query: bool=False) -> SQLAssistantMessage:
+    async def ainvoke(self, message: str, config: dict|None=None, rewrite_query: bool=False) -> SQLAssistantMessage:
         """Asynchronously sends a message to the `SQLAgent` and returns its response.
 
         Args:
@@ -81,7 +81,7 @@ class AsyncSQLAssistant:
 
         return SQLAssistantMessage(**response)
 
-    async def stream(
+    async def astream(
         self,
         message: str,
         config: dict|None=None,
@@ -109,7 +109,7 @@ class AsyncSQLAssistant:
         ):
             yield chunk
 
-    async def clear_thread(self, thread_id: str):
+    async def aclear_thread(self, thread_id: str):
         """Asynchronously deletes all checkpoints for a given thread.
 
         Args:
