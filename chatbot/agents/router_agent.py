@@ -544,7 +544,7 @@ class RouterAgent:
 
         message = HumanMessage(content=question)
 
-        async for chunk in await self.graph.astream(
+        async for chunk in self.graph.astream(
             input={
                 "question": question,
                 "messages": [message],

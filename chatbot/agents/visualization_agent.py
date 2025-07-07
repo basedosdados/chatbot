@@ -552,7 +552,7 @@ class VizAgent:
         """
         question = question.strip()
 
-        async for chunk in await self.graph.astream(
+        async for chunk in self.graph.astream(
             input={
                 "question": question,
                 "sql_answer": sql_answer,
