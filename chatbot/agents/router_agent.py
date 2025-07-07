@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, AsyncIterator, Iterator, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -430,8 +430,8 @@ class RouterAgent:
         """Runs the compiled graph with a question and an optional configuration.
 
         Args:
-            question (str): The question
-            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
             rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
                                                    when calling the `SQLAgent`. Defaults to `False`.
 
@@ -457,8 +457,8 @@ class RouterAgent:
         """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
-            question (str): The question
-            config (RunnableConfig | None, optional): Optional configuration for the agent execution.
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
             rewrite_query (bool | None, optional): Whether to rewrite the question for semantic search
                                                    when calling the `SQLAgent`. Defaults to `False`.
 
@@ -479,6 +479,82 @@ class RouterAgent:
         )
 
         return response
+
+    def stream(
+        self,
+        question: str,
+        config: RunnableConfig | None = None,
+        stream_mode: list[str] | None = None,
+        subgraphs: bool = False,
+        rewrite_query: bool = False
+    ) -> Iterator[dict|tuple]:
+        """Stream graph steps.
+
+        Args:
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
+            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide in
+                https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+            subgraphs (bool, optional): Whether to stream events from inside subgraphs. Defaults to `False`.
+            rewrite_query (bool, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
+
+        Yields:
+            dict|tuple: The output for each step in the graph.
+                Its Its type, shape and content depends on the `stream_mode` and `subgraphs` args.
+        """
+        question = question.strip()
+
+        message = HumanMessage(content=question)
+
+        for chunk in self.graph.stream(
+            input={
+                "question": question,
+                "messages": [message],
+                "rewrite_query": rewrite_query,
+            },
+            config=config,
+            stream_mode=stream_mode,
+            subgraphs=subgraphs,
+        ):
+            yield chunk
+
+    async def astream(
+        self,
+        question: str,
+        config: RunnableConfig | None = None,
+        stream_mode: list[str] | None = None,
+        subgraphs: bool = False,
+        rewrite_query: bool = False
+    ) -> AsyncIterator[dict|tuple]:
+        """Asynchronously stream graph steps.
+
+        Args:
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
+            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide in
+                https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+            subgraphs (bool, optional): Whether to stream events from inside subgraphs. Defaults to `False`.
+            rewrite_query (bool, optional): Whether to rewrite the question for semantic search. Defaults to `False`.
+
+        Yields:
+            dict|tuple: The output for each step in the graph.
+                Its Its type, shape and content depends on the `stream_mode` and `subgraphs` args.
+        """
+        question = question.strip()
+
+        message = HumanMessage(content=question)
+
+        async for chunk in self.graph.astream(
+            input={
+                "question": question,
+                "messages": [message],
+                "rewrite_query": rewrite_query,
+            },
+            config=config,
+            stream_mode=stream_mode,
+            subgraphs=subgraphs,
+        ):
+            yield chunk
 
     # Unfortunately, there is no clean way to delete an agent's memory
     # except by deleting its checkpoints, as noted in this github discussion:

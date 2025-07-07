@@ -15,11 +15,24 @@ def assistant(monkeypatch):
     def mock_invoke(self, question, config, rewrite_query):
         return SQLAgentState(
             question=question,
+            question_rewritten=None,
             final_answer="mock final answer",
             sql_queries=[],
             sql_queries_results=[],
-            similar_examples=[],
             messages=[],
+            rewrite_query=False,
+            is_last_step=False
+        )
+
+    def mock_stream(self, question, config, stream_mode, rewrite_query):
+        yield SQLAgentState(
+            question=question,
+            question_rewritten=None,
+            final_answer="mock final answer",
+            sql_queries=[],
+            sql_queries_results=[],
+            messages=[],
+            rewrite_query=False,
             is_last_step=False
         )
 
@@ -28,6 +41,7 @@ def assistant(monkeypatch):
 
     monkeypatch.setattr(SQLAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(SQLAgent, "invoke", mock_invoke)
+    monkeypatch.setattr(SQLAgent, "stream", mock_stream)
     monkeypatch.setattr(SQLAssistant, "__init__", mock_assistant_init)
 
     mock_agent = SQLAgent(checkpointer=None)
@@ -61,6 +75,15 @@ def test_invoke_with_config(assistant: SQLAssistant):
     assert response.id == expected_response.id
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
+
+def test_stream(assistant: SQLAssistant):
+    for chunk in assistant.stream("mock question"):
+        assert isinstance(chunk, dict)
+
+    final_state = chunk
+
+    for k in SQLAgentState.__required_keys__:
+        assert k in final_state.keys()
 
 def test_clear_thread(assistant: SQLAssistant):
     assistant.clear_thread(thread_id=str(uuid.uuid4()))

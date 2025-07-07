@@ -26,6 +26,29 @@ def assistant(monkeypatch):
             _previous="mock previous",
             _next="mock next",
             question=question,
+            rewrite_query=False,
+            sql_answer="mock sql answer",
+            chart_answer="mock chart answer",
+            final_answer="mock final answer",
+            sql_queries=[],
+            sql_queries_results=[],
+            chart=chart,
+            messages=[],
+        )
+
+    def mock_stream(self, question, config, stream_mode, subgraphs, rewrite_query):
+        chart_data = ChartData()
+        chart_metadata = ChartMetadata()
+        chart = Chart(
+            data=chart_data,
+            metadata=chart_metadata,
+            is_valid=False
+        )
+        yield RouterAgentState(
+            _previous="mock previous",
+            _next="mock next",
+            question=question,
+            rewrite_query=False,
             sql_answer="mock sql answer",
             chart_answer="mock chart answer",
             final_answer="mock final answer",
@@ -40,6 +63,7 @@ def assistant(monkeypatch):
 
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
     monkeypatch.setattr(RouterAgent, "invoke", mock_invoke)
+    monkeypatch.setattr(RouterAgent, "stream", mock_stream)
     monkeypatch.setattr(SQLVizAssistant, "__init__", mock_assistant_init)
 
     mock_agent = RouterAgent(checkpointer=None)
@@ -85,6 +109,15 @@ def test_invoke_with_config(assistant: SQLVizAssistant):
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
     assert response.chart == expected_response.chart
+
+def test_stream(assistant: SQLVizAssistant):
+    for chunk in assistant.stream("mock question"):
+        assert isinstance(chunk, dict)
+
+    final_state = chunk
+
+    for k in RouterAgentState.__required_keys__:
+        assert k in final_state.keys()
 
 def test_clear_thread(assistant: SQLVizAssistant):
     assistant.clear_thread(thread_id=str(uuid.uuid4()))
