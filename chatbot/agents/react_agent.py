@@ -1,4 +1,5 @@
-from typing import Annotated, Any, Literal, Sequence, TypedDict
+from typing import (Annotated, Any, AsyncIterator, Iterator, Literal, Sequence,
+                    TypedDict)
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -21,23 +22,8 @@ class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     is_last_step: IsLastStep
 
-def should_continue(state: State) -> Literal["prune", "tools"]:
-    """Routes to the tools node if the last message has any tool calls.
-    Otherwise, routes to the message pruning node
-
-    Args:
-        state (State): The graph state
-
-    Returns:
-        str: The next node to route to
-    """
-    last_message = state["messages"][-1]
-    if hasattr(last_message, "tool_calls") and len(last_message.tool_calls) > 0:
-        return "tools"
-    return "prune"
-
 class ReActAgent:
-    """A LangGraph ReAct Agent"""
+    """A LangGraph ReAct Agent."""
 
     agent_node = "agent"
     tools_node = "tools"
@@ -75,14 +61,14 @@ class ReActAgent:
         self.graph = self._compile()
 
     def _call_model(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
-        """Calls the LLM on a message list
+        """Calls the LLM on a message list.
 
         Args:
-            state (State): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (State): The graph state.
+            config (RunnableConfig): A config to use when calling the LLM.
 
         Returns:
-            dict[str, list[BaseMessage]]: The updated message list
+            dict[str, list[BaseMessage]]: The updated message list.
         """
         messages = state["messages"]
         is_last_step = state["is_last_step"]
@@ -102,14 +88,14 @@ class ReActAgent:
         return {"messages": [response]}
 
     async def _acall_model(self, state: State, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
-        """Asynchronously calls the LLM on a message list
+        """Asynchronously calls the LLM on a message list.
 
         Args:
-            state (State): The graph state
-            config (RunnableConfig): A config to use when calling the LLM
+            state (State): The graph state.
+            config (RunnableConfig): A config to use when calling the LLM.
 
         Returns:
-            dict[str, list[BaseMessage]]: The updated message list
+            dict[str, list[BaseMessage]]: The updated message list.
         """
         messages = state["messages"]
         is_last_step = state["is_last_step"]
@@ -133,10 +119,10 @@ class ReActAgent:
         corresponding AI messages and Tool messages are sent to the LLM.
 
         Args:
-            state (State): The graph state containing the message list
+            state (State): The graph state containing the message list.
 
         Returns:
-            dict[str, list[RemoveMessage]]: The pruned message list
+            dict[str, list[RemoveMessage]]: The pruned message list.
         """
         if self.question_limit is None:
             return {"messages": []}
@@ -149,10 +135,10 @@ class ReActAgent:
         }
 
     def _compile(self) -> CompiledGraph:
-        """Compiles the state graph into a LangChain Runnable
+        """Compiles the state graph into a LangChain Runnable.
 
         Returns:
-            CompiledGraph: The compiled state graph
+            CompiledGraph: The compiled state graph.
         """
         graph = StateGraph(State)
 
@@ -161,7 +147,7 @@ class ReActAgent:
         graph.add_node(self.prune_node, self._prune_messages)
 
         graph.set_entry_point(self.agent_node)
-        graph.add_conditional_edges(self.agent_node, should_continue)
+        graph.add_conditional_edges(self.agent_node, _should_continue)
         graph.add_edge(self.tools_node, self.agent_node)
         graph.set_finish_point(self.prune_node)
 
@@ -172,14 +158,14 @@ class ReActAgent:
         return graph.compile(self.checkpointer)
 
     def invoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
-        """Runs the compiled graph with a question and an optional configuration
+        """Runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            config (RunnableConfig | None, optional): The configuration. Defaults to `None`.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            dict[str, Any] | Any: The last output of the graph run.
         """
         message = HumanMessage(content=question.strip())
 
@@ -191,14 +177,14 @@ class ReActAgent:
         return response
 
     async def ainvoke(self, question: str, config: RunnableConfig | None = None) -> dict[str, Any] | Any:
-        """Asynchronously runs the compiled graph with a question and an optional configuration
+        """Asynchronously runs the compiled graph with a question and an optional configuration.
 
         Args:
             question (str): The question
-            config (RunnableConfig | None, optional): The configuration. Defaults to None.
+            config (RunnableConfig | None, optional): The configuration. Defaults to `None`.
 
         Returns:
-            dict[str, Any] | Any: The last output of the graph run
+            dict[str, Any] | Any: The last output of the graph run.
         """
         message = HumanMessage(content=question.strip())
 
@@ -209,14 +195,70 @@ class ReActAgent:
 
         return response
 
+    def stream(
+        self,
+        question: str,
+        config: RunnableConfig | None = None,
+        stream_mode: list[str] | None = None,
+    ) -> Iterator[dict|tuple]:
+        """Stream graph steps.
+
+        Args:
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
+            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide in
+                https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+
+        Yields:
+            dict|tuple: The output for each step in the graph. Its type, shape and content depends on the `stream_mode` arg.
+        """
+        question = question.strip()
+
+        message = HumanMessage(content=question)
+
+        for chunk in self.graph.stream(
+            input={"messages": [message]},
+            config=config,
+            stream_mode=stream_mode,
+        ):
+            yield chunk
+
+    async def astream(
+        self,
+        question: str,
+        config: RunnableConfig | None = None,
+        stream_mode: list[str] | None = None,
+    ) -> AsyncIterator[dict|tuple]:
+        """Asynchronously stream graph steps.
+
+        Args:
+            question (str): The input question.
+            config (RunnableConfig | None, optional): Optional configuration for the agent execution. Defaults to `None`.
+            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide in
+                https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+
+        Yields:
+            dict|tuple: The output for each step in the graph. Its type, shape and content depends on the `stream_mode` arg.
+        """
+        question = question.strip()
+
+        message = HumanMessage(content=question)
+
+        async for chunk in self.graph.astream(
+            input={"messages": [message]},
+            config=config,
+            stream_mode=stream_mode,
+        ):
+            yield chunk
+
     # Unfortunately, there is no clean way to delete an agent's memory
     # except by deleting its checkpoints, as noted in this github discussion:
     # https://github.com/langchain-ai/langgraph/discussions/912
     def clear_thread(self, thread_id: str):
-        """Clears a thread
+        """Deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
@@ -225,13 +267,28 @@ class ReActAgent:
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
     async def aclear_thread(self, thread_id: str):
-        """Asynchronously clears a thread
+        """Asynchronously deletes all checkpoints for a given thread.
 
         Args:
-            thread_id (str): The thread unique identifier
+            thread_id (str): The thread unique identifier.
         """
         if self.checkpointer is None:
             logger.info("Checkpointer is None, ignoring...")
         else:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
+
+def _should_continue(state: State) -> Literal["prune", "tools"]:
+    """Routes to the tools node if the last message has any tool calls.
+    Otherwise, routes to the message pruning node.
+
+    Args:
+        state (State): The graph state.
+
+    Returns:
+        str: The next node to route to.
+    """
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and len(last_message.tool_calls) > 0:
+        return "tools"
+    return "prune"
