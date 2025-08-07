@@ -80,7 +80,10 @@ class ReActAgent:
                 "messages": [
                     AIMessage(
                         id=response.id,
-                        content="Desculpe, não consegui encontrar uma resposta para a sua pergunta. Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        content=(
+                            "Desculpe, não consegui encontrar uma resposta para a sua pergunta. "
+                            "Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        )
                     )
                 ]
             }
@@ -107,7 +110,10 @@ class ReActAgent:
                 "messages": [
                     AIMessage(
                         id=response.id,
-                        content="Desculpe, não consegui encontrar uma resposta para a sua pergunta. Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        content=(
+                            "Desculpe, não consegui encontrar uma resposta para a sua pergunta. "
+                            "Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        )
                     )
                 ]
             }
