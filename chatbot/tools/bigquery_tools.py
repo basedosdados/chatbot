@@ -72,7 +72,7 @@ class _QueryCheckToolInput(BaseModel):
 class QueryCheckTool(BaseTool):
     """Tool for checking if a query is correct using a LLM"""
     name: str = "sql_query_check"
-    description: str = "Use this tool to double check if your query is correct before executing it. Always use this tool before executing a query with sql_query!"
+    description: str = "Use this tool to double check if your query is correct before executing it. Always use this tool before executing a query with sql_query_exec"
     args_schema: Type[BaseModel] = _QueryCheckToolInput
     llm: BaseChatModel
 
@@ -116,7 +116,7 @@ class _QueryExecToolInput(BaseModel):
 class QueryExecTool(BaseBigQueryTool, BaseTool):
     """Tool for querying a BigQuery database"""
     name: str = "sql_query_exec"
-    description: str = "Input to this tool is a detailed and correct SQL query, output is a result from the database. If the query is not correct, an error message will be returned. If an error is returned, rewrite the query, check the query with the sql_query_check tool and try again."
+    description: str = "Input to this tool is a detailed and correct SQL query, output is a result from the database. If the query is not correct, an error message will be returned. If an error is returned, rewrite the query, check the query with the sql_query_check tool and try again"
     args_schema: Type[BaseModel] = _QueryExecToolInput
 
     def _run(self, query: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> str:
