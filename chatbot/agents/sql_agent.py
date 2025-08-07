@@ -18,7 +18,7 @@ from loguru import logger
 from chatbot.contexts import BaseContextProvider
 from chatbot.formatters import SQLPromptContext, SQLPromptFormatter
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
-                           QueryCheckTool, QueryTableTool)
+                           QueryCheckTool, QueryExecTool)
 
 from .prompts import REWRITE_QUERY_SYSTEM_PROMPT, SELECT_DATASETS_SYSTEM_PROMPT
 from .reducers import BaseItem, ItemRemove, add_item
@@ -105,7 +105,7 @@ class SQLAgent:
 
         # query checking and execution tools
         self.query_check_tool = QueryCheckTool(llm=model)
-        self.query_table_tool = QueryTableTool(
+        self.query_exec_tool = QueryExecTool(
             context_provider=self.context_provider
         )
 
@@ -124,7 +124,7 @@ class SQLAgent:
 
         self.query_model = model.bind_tools([
             self.query_check_tool,
-            self.query_table_tool
+            self.query_exec_tool
         ])
 
         self.graph = self._compile()
@@ -154,7 +154,10 @@ class SQLAgent:
                 "messages": [
                     AIMessage(
                         id=response.id,
-                        content="Desculpe, não consegui encontrar uma resposta para a sua pergunta. Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        content=(
+                            "Desculpe, não consegui encontrar uma resposta para a sua pergunta. "
+                            "Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        )
                     )
                 ]
             }
@@ -186,7 +189,10 @@ class SQLAgent:
                 "messages": [
                     AIMessage(
                         id=response.id,
-                        content="Desculpe, não consegui encontrar uma resposta para a sua pergunta. Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        content=(
+                            "Desculpe, não consegui encontrar uma resposta para a sua pergunta. "
+                            "Sinta-se à vontade para reformulá-la ou tentar perguntar algo diferente."
+                        )
                     )
                 ]
             }
@@ -502,7 +508,7 @@ class SQLAgent:
 
         # ReAct nodes
         graph.add_node("query_agent", RunnableLambda(self._call_query_agent, self._acall_query_agent))
-        graph.add_node("tools", ToolNode([self.query_check_tool, self.query_table_tool]))
+        graph.add_node("tools", ToolNode([self.query_check_tool, self.query_exec_tool]))
 
         # answer retrieval node
         graph.add_node("get_answer", self._get_answer)
