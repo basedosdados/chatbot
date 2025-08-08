@@ -12,12 +12,12 @@ from langgraph.graph.message import add_messages
 from loguru import logger
 
 from chatbot.agents.sql_agent import SQLAgent
-from chatbot.agents.visualization_agent import VizAgent
+from chatbot.agents.visualization_agent import VizAgent, Visualization
 
 from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
                       POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import Item
-from .structured_outputs import InitialRouting, PostSQLRouting, Visualization
+from .structured_outputs import InitialRouting, PostSQLRouting
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
@@ -43,8 +43,8 @@ class RouterAgentState(TypedDict):
     sql_queries: list[Item]
     sql_queries_results: list[Item]
 
-    # chart object for plotting
-    visualization: Visualization
+    # visualization object for plotting charts, if any
+    visualization: Visualization | None
 
     # router agent's message list
     messages: Annotated[list[BaseMessage], add_messages]
@@ -268,7 +268,7 @@ class RouterAgent:
             visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            visualization = Visualization(script=None, reasoning=None, data=None)
+            visualization = None
 
         return {"visualization": visualization}
 
@@ -291,7 +291,7 @@ class RouterAgent:
             visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            visualization = Visualization(script=None, reasoning=None, data=None)
+            visualization = None
 
         return {"visualization": visualization}
 
@@ -308,12 +308,11 @@ class RouterAgent:
 
         next = state["_next"]
 
-        if next == "viz_agent":
-            ...
-        else:
-            visualization = Visualization(script=None, reasoning=None, data=None)
-            state_update["visualization"] = visualization
+        # This means the VizAgent was not called
+        if next == "process_answers":
+            state_update["visualization"] = None
 
+        # For now, the final answer will always be the SQLAgent answer
         final_answer = state["sql_answer"]
 
         state_update["final_answer"] = final_answer

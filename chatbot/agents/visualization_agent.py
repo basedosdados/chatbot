@@ -1,5 +1,5 @@
 import json
-from typing import Annotated, Any, AsyncIterator, Iterator, TypedDict
+from typing import Annotated, Any, AsyncIterator, Iterator, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -14,9 +14,12 @@ from loguru import logger
 
 from .prompts import REPHRASER_VIZ_SYSTEM_PROMPT, VIZ_SYSTEM_PROMPT
 from .reducers import Item
-from .structured_outputs import Rephrase, Script, Visualization
+from .structured_outputs import Rephrase, VizScript
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
+class Visualization(VizScript):
+    data: list[dict[str, Any]]
+    data_placeholder: Literal["INPUT_DATA"] = "INPUT_DATA"
 
 class VizAgentState(TypedDict):
     # input question
@@ -35,7 +38,7 @@ class VizAgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
     # visualization output
-    visualization: Visualization
+    visualization: Visualization | None
 
 class VizAgent:
     """LLM-powered Visualization Agent for visualization recommendations.
@@ -74,7 +77,7 @@ class VizAgent:
 
         self.viz_runnable = (
             lambda messages: [viz_system_message] + messages
-        ) | model.with_structured_output(Script)
+        ) | model.with_structured_output(VizScript)
 
         self.graph = self._compile()
 
@@ -129,30 +132,38 @@ class VizAgent:
 
         return {"messages": [message], "normalized_data": queries_results}
 
-    def _generate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|Script]:
+    def _generate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|VizScript]:
         messages = state["messages"]
 
-        script: Script = self.viz_runnable.ainvoke(messages, config)
+        viz_script: VizScript = self.viz_runnable.invoke(messages, config)
 
-        script_data = script.model_dump()
-        script_data["data"] = state["normalized_data"]
+        if viz_script.script:
+            script_data = viz_script.model_dump()
+            script_data["data"] = state["normalized_data"]
+            visualization = Visualization(**script_data)
+        else:
+            visualization = None
 
         return {
-            "messages": [AIMessage(script.model_dump_json(indent=2))],
-            "visualization": Visualization(**script_data)
+            "messages": [AIMessage(viz_script.model_dump_json(indent=2))],
+            "visualization": visualization
         }
 
-    async def _agenerate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|Script]:
+    async def _agenerate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|VizScript]:
         messages = state["messages"]
 
-        script: Script = await self.viz_runnable.ainvoke(messages, config)
+        viz_script: VizScript = await self.viz_runnable.ainvoke(messages, config)
 
-        script_data = script.model_dump()
-        script_data["data"] = state["normalized_data"]
+        if viz_script.script:
+            script_data = viz_script.model_dump()
+            script_data["data"] = state["normalized_data"]
+            visualization = Visualization(**script_data)
+        else:
+            visualization = None
 
         return {
-            "messages": [AIMessage(script.model_dump_json(indent=2))],
-            "visualization": Visualization(**script_data)
+            "messages": [AIMessage(viz_script.model_dump_json(indent=2))],
+            "visualization": visualization
         }
 
     def _prune_messages(self, state: VizAgentState) -> dict[str, list[RemoveMessage]]:

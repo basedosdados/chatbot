@@ -77,7 +77,7 @@ def format_router_agent_response(response: RouterAgentState) -> RouterAgentForma
     formatted_response = {
         "content": answer,
         "sql_queries": sql_queries or None,
-        "visualization": response.get("visualization"),
+        "visualization": response["visualization"],
     }
 
     return formatted_response
