@@ -17,8 +17,7 @@ from chatbot.agents.visualization_agent import VizAgent
 from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
                       POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import Item
-from .structured_outputs import (Chart, ChartData, ChartMetadata,
-                                 InitialRouting, PostSQLRouting)
+from .structured_outputs import InitialRouting, PostSQLRouting, Visualization
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
@@ -38,7 +37,6 @@ class RouterAgentState(TypedDict):
 
     # intermediate answers and final answer
     sql_answer: str
-    chart_answer: str
     final_answer: str
 
     # sql queries that were executed without errors and its results
@@ -46,7 +44,7 @@ class RouterAgentState(TypedDict):
     sql_queries_results: list[Item]
 
     # chart object for plotting
-    chart: Chart
+    visualization: Visualization
 
     # router agent's message list
     messages: Annotated[list[BaseMessage], add_messages]
@@ -251,7 +249,7 @@ class RouterAgent:
             "messages": [AIMessage(response["final_answer"])]
         }
 
-    def _call_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
+    def _call_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, Visualization]:
         """Calls the `VizAgent`.
 
         Args:
@@ -259,35 +257,22 @@ class RouterAgent:
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|Chart]: The graph state update.
+            dict[str, Visualization]: The graph state update.
         """
         try:
             response = self.viz_agent.invoke(
                 question=state["question"],
-                sql_answer=state["sql_answer"],
-                sql_queries=state["sql_queries"],
                 sql_queries_results=state["sql_queries_results"],
                 config=config
             )
-
-            chart = response["chart"]
-            chart_answer = response["chart_answer"]
+            visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            chart = Chart(
-                data=ChartData(),
-                metadata=ChartMetadata(),
-                is_valid=False
-            )
-            chart_answer = f"Ops, algo deu errado na construção do gráfico! Por favor, tente novamente. "\
-                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
+            visualization = Visualization(script=None, reasoning=None)
 
-        return {
-            "chart": chart,
-            "chart_answer": chart_answer
-        }
+        return {"visualization": visualization}
 
-    async def _acall_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
+    async def _acall_viz_agent(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, Visualization]:
         """Asynchronously calls the `VizAgent`.
 
         Args:
@@ -295,33 +280,20 @@ class RouterAgent:
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, str|Chart]: The graph state update.
+            dict[str, Visualization]: The graph state update.
         """
         try:
             response = await self.viz_agent.ainvoke(
                 question=state["question"],
-                sql_answer=state["sql_answer"],
-                sql_queries=state["sql_queries"],
                 sql_queries_results=state["sql_queries_results"],
                 config=config
             )
-
-            chart = response["chart"]
-            chart_answer = response["chart_answer"]
+            visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            chart = Chart(
-                data=ChartData(),
-                metadata=ChartMetadata(),
-                is_valid=False
-            )
-            chart_answer = f"Ops, algo deu errado na construção do gráfico! Por favor, tente novamente. "\
-                    "Se o problema persistir, avise-nos. Obrigado pela paciência!",
+            visualization = Visualization(script=None, reasoning=None)
 
-        return {
-            "chart": chart,
-            "chart_answer": chart_answer,
-        }
+        return {"visualization": visualization}
 
     def _process_answers(self, state: RouterAgentState) -> dict[str, str]:
         """Builds the final answer that will be presented to the user.
@@ -334,33 +306,15 @@ class RouterAgent:
         """
         state_update = {}
 
-        previous = state["_previous"]
         next = state["_next"]
 
         if next == "viz_agent":
-            chart = state["chart"]
-            chart_answer = state["chart_answer"]
-
-            # sql_agent → viz_agent and the chart is valid
-            if previous == "sql_agent" and chart.is_valid:
-                sql_answer = state["sql_answer"]
-                final_answer = f"{sql_answer}\n\n{chart_answer}"
-            # sql_agent → viz_agent and the chart is not valid
-            elif previous == "sql_agent":
-                final_answer = state["sql_answer"]
-            # viz_agent called directly
-            else:
-                final_answer = chart_answer
-
-        # sql_agent → process_answers
+            ...
         else:
-            chart = Chart(
-                data=ChartData(),
-                metadata=ChartMetadata(),
-                is_valid=False
-            )
-            state_update["chart"] = chart
-            final_answer = state["sql_answer"]
+            visualization = Visualization(script=None, reasoning=None)
+            state_update["visualization"] = visualization
+
+        final_answer = state["sql_answer"]
 
         state_update["final_answer"] = final_answer
 

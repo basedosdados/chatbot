@@ -1,3 +1,4 @@
+import json
 from typing import Annotated, AsyncIterator, Iterator, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,13 +12,9 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from loguru import logger
 
-from chatbot.formatters import VizPromptContext, VizPromptFormatter
-
-from .prompts import (CHART_METADATA_SYSTEM_PROMPT,
-                      REPHRASER_VIZ_SYSTEM_PROMPT,
-                      VALIDATION_VIZ_SYSTEM_PROMPT)
+from .prompts import REPHRASER_VIZ_SYSTEM_PROMPT, VIZ_SYSTEM_PROMPT
 from .reducers import Item
-from .structured_outputs import Chart, ChartData, ChartMetadata, Rephrase
+from .structured_outputs import Rephrase, Visualization
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
@@ -28,23 +25,14 @@ class VizAgentState(TypedDict):
     # rephrased question
     question_rephrased: str
 
-    # the sql answer, which will serve as a starting point for the chart answer
-    sql_answer: str
-
-    # the chart answer
-    chart_answer: str
-
-    # sql queries that were executed without errors and its results
-    sql_queries: list[Item]
+    # sql queries results
     sql_queries_results: list[Item]
 
     # visualization agent's message list
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # data and metadata for chart plotting and the final chart object
-    chart: Chart
-    chart_data: ChartData
-    chart_metadata: ChartMetadata
+    # visualization output
+    visualization: Visualization
 
 class VizAgent:
     """LLM-powered Visualization Agent for visualization recommendations.
@@ -68,33 +56,22 @@ class VizAgent:
     def __init__(
         self,
         model: BaseChatModel,
-        prompt_formatter: VizPromptFormatter,
         checkpointer: PostgresSaver | AsyncPostgresSaver | bool | None = None,
         question_limit: int | None = 5,
     ):
-        self.prompt_formatter = prompt_formatter
         self.checkpointer = checkpointer
         self.question_limit = question_limit
 
         rephraser_system_message = SystemMessage(REPHRASER_VIZ_SYSTEM_PROMPT)
+        viz_system_message = SystemMessage(VIZ_SYSTEM_PROMPT)
 
         self.rephraser_runnable = (
             lambda question: [rephraser_system_message] + [question]
         ) | model.with_structured_output(Rephrase)
 
-        chart_metadata_system_message = SystemMessage(CHART_METADATA_SYSTEM_PROMPT)
-
-        self.chart_metadata_runnable = (
-            lambda messages: [chart_metadata_system_message] + messages
-        ) | model.with_structured_output(ChartMetadata)
-
-        validation_system_message = SystemMessage(VALIDATION_VIZ_SYSTEM_PROMPT)
-
-        self.validation_runnable = (
-            lambda messages: [validation_system_message] + messages
-        ) | model
-
-        self.preprocess_model = model.with_structured_output(ChartData)
+        self.viz_runnable = (
+            lambda messages: [viz_system_message] + messages
+        ) | model.with_structured_output(Visualization)
 
         self.graph = self._compile()
 
@@ -137,228 +114,36 @@ class VizAgent:
         """
         question = state["question_rephrased"]
 
-        queries = "\n\n".join([
-            f"<query>\n{q.content}\n</query>"
-            for q in state["sql_queries"]
-        ])
-
-        if queries:
-            queries = "\n" + queries
-
-        queries_results = "\n\n".join([
-            f"<query_results>\n{qr.content}\n</query_results>"
+        queries_results = [
+            row
             for qr in state["sql_queries_results"]
-        ])
-
-        if queries_results:
-            queries_results = "\n" + queries_results
+            for row in json.loads(qr.content)
+        ]
 
         message = HumanMessage(
-            f"User question: {question}\n\nQueries:{queries}\n\nQueries results:{queries_results}"
+            f"Question: {question}\nData: {queries_results}"
         )
 
         return {"messages": [message]}
 
-    def _call_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
-        """Calls the model for preprocessing the queries results.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, list]: A dictionary containing the processed queries results.
-        """
-        question = state["question_rephrased"]
+    def _generate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|Visualization]:
         messages = state["messages"]
 
-        context = VizPromptContext(query=question)
-
-        system_prompt = self.prompt_formatter.build_system_prompt(context)
-        system_message = SystemMessage(content=system_prompt)
-
-        preprocess_runnable = (lambda messages: [system_message] + messages) | self.preprocess_model
-
-        chart_data: ChartData = preprocess_runnable.invoke(messages, config)
+        output: Visualization = self.viz_runnable.invoke(messages, config)
 
         return {
-            "chart_data": chart_data,
-            "messages": [AIMessage(chart_data.model_dump_json(indent=4))]
+            "messages": [AIMessage(output.model_dump_json(indent=2))],
+            "visualization": output
         }
 
-    async def _acall_preprocess_data(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartData]:
-        """Asynchronously calls the model for preprocessing the queries results.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, list]: A dictionary containing the processed queries results.
-        """
-        question = state["question_rephrased"]
+    async def _agenerate_visualization(self, state: VizAgentState, config: RunnableConfig) -> dict[str, AIMessage|Visualization]:
         messages = state["messages"]
 
-        context = VizPromptContext(query=question)
-
-        system_prompt = await self.prompt_formatter.abuild_system_prompt(context)
-        system_message = SystemMessage(content=system_prompt)
-
-        preprocess_runnable = (lambda messages: [system_message] + messages) | self.preprocess_model
-
-        chart_data: ChartData = await preprocess_runnable.ainvoke(messages, config)
+        output: Visualization = await self.viz_runnable.ainvoke(messages, config)
 
         return {
-            "chart_data": chart_data,
-            "messages": [AIMessage(chart_data.model_dump_json(indent=4))]
-        }
-
-    def _call_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
-        """Calls the model for generating chart metadata.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata.
-        """
-        question = state["question_rephrased"]
-        chart_data = state["chart_data"]
-
-        messages = [HumanMessage(
-            f"User question: {question}\n\nQuery results: {chart_data.data}"
-        )]
-
-        chart_metadata: ChartMetadata = self.chart_metadata_runnable.invoke(messages, config)
-
-        return {"chart_metadata": chart_metadata}
-
-    async def _acall_chart_metadata(self, state: VizAgentState, config: RunnableConfig) -> dict[str, ChartMetadata]:
-        """Asynchronously calls the model for generating chart metadata.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, str|ChartMetadata]: A dictionary containing the final answer and the chart metadata.
-        """
-        question = state["question_rephrased"]
-        chart_data = state["chart_data"]
-
-        messages = [HumanMessage(
-            f"User question: {question}\n\nQuery results: {chart_data.data}"
-        )]
-
-        chart_metadata: ChartMetadata = await self.chart_metadata_runnable.ainvoke(messages, config)
-
-        return {"chart_metadata": chart_metadata}
-
-    def _validate_chart(self, chart_data: ChartData, chart_metadata: ChartMetadata) -> bool:
-        """Checks if the recommended chart can be plotted using Plotly.
-
-        Args:
-            chart_data (ChartData): The chart data.
-            chart_metadata (ChartMetadata): The chart metadata.
-
-        Returns:
-            bool: Whether the chart can be plotted or not.
-        """
-        if chart_data.data is None or \
-           chart_metadata.chart_type is None:
-            return False
-
-        attrs = {
-            chart_metadata.x_axis,
-            chart_metadata.y_axis
-        }
-
-        if chart_metadata.label is not None:
-            attrs.add(chart_metadata.label)
-
-        chart_attrs = {k for row in chart_data.data for k in row.keys()}
-
-        if attrs.issubset(chart_attrs):
-           return True
-        else:
-            logger.error(f"Chart validation error: one or more of {attrs} are not in {chart_attrs}")
-            return False
-
-    def _call_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
-        """Builds the Chart object and generates an answer to introduce it.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer.
-        """
-        question = state["question"]
-        sql_answer = state["sql_answer"]
-        chart_data = state["chart_data"]
-        chart_metadata = state["chart_metadata"]
-
-        chart = Chart(
-            data=chart_data,
-            metadata=chart_metadata,
-            is_valid=self._validate_chart(chart_data, chart_metadata)
-        )
-
-        response = self.validation_runnable.invoke(
-            input=[
-                HumanMessage(f"User question: {question}"),
-                HumanMessage(f"Question answer: \n\n{sql_answer}"),
-                HumanMessage(f"Chart: {chart.model_dump_json(indent=4)}"),
-            ],
-            config=config
-        )
-
-        # ensuring we won't duplicate the sql answer
-        response.content = response.content.replace(sql_answer, "").strip()
-
-        return {
-            "chart": chart,
-            "chart_answer": response.content
-        }
-
-    async def _acall_get_answer(self, state: VizAgentState, config: RunnableConfig) -> dict[str, str|Chart]:
-        """Builds the Chart object and generates an answer to introduce it.
-
-        Args:
-            state (VizAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
-
-        Returns:
-            dict[str, str|Chart]: A dictionary containing the Chart object and the generated answer.
-        """
-        question = state["question"]
-        sql_answer = state["sql_answer"]
-        chart_data = state["chart_data"]
-        chart_metadata = state["chart_metadata"]
-
-        chart = Chart(
-            data=chart_data,
-            metadata=chart_metadata,
-            is_valid=self._validate_chart(chart_data, chart_metadata)
-        )
-
-        response = await self.validation_runnable.ainvoke(
-            input=[
-                HumanMessage(f"User question: {question}"),
-                HumanMessage(f"Question answer: \n\n{sql_answer}"),
-                HumanMessage(f"Chart: {chart.model_dump_json(indent=4)}"),
-            ],
-            config=config
-        )
-
-        # ensuring we won't duplicate the sql answer
-        response.content = response.content.replace(sql_answer, "").strip()
-
-        return {
-            "chart": chart,
-            "chart_answer": response.content
+            "messages": [AIMessage(output.model_dump_json(indent=2))],
+            "visualization": output
         }
 
     def _prune_messages(self, state: VizAgentState) -> dict[str, list[RemoveMessage]]:
@@ -395,23 +180,15 @@ class VizAgent:
         # node for getting sql queries and its results
         graph.add_node("get_data", self._get_queries_and_results)
 
-        # preprocessing node
-        graph.add_node("preprocess_data", RunnableLambda(self._call_preprocess_data, self._acall_preprocess_data))
-
-        # plot recommendation node
-        graph.add_node("get_metadata", RunnableLambda(self._call_chart_metadata, self._acall_chart_metadata))
-
-        # plot validation and answer generation node
-        graph.add_node("get_answer", RunnableLambda(self._call_get_answer, self._acall_get_answer))
+        # node for generating visualization script
+        graph.add_node("create_visualization", RunnableLambda(self._generate_visualization, self._agenerate_visualization))
 
         # message pruning node
         graph.add_node("prune_messages", self._prune_messages)
 
         graph.add_edge("rephrase", "get_data")
-        graph.add_edge("get_data", "preprocess_data")
-        graph.add_edge("preprocess_data", "get_metadata")
-        graph.add_edge("get_metadata", "get_answer")
-        graph.add_edge("get_answer", "prune_messages")
+        graph.add_edge("get_data", "create_visualization")
+        graph.add_edge("create_visualization", "prune_messages")
 
         graph.set_entry_point("rephrase")
         graph.set_finish_point("prune_messages")
@@ -425,8 +202,6 @@ class VizAgent:
     def invoke(
         self,
         question: str,
-        sql_answer: str,
-        sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None
     ) -> VizAgentState:
@@ -447,8 +222,6 @@ class VizAgent:
         response = self.graph.invoke(
             input={
                 "question": question,
-                "sql_answer": sql_answer,
-                "sql_queries": sql_queries,
                 "sql_queries_results": sql_queries_results
             },
             config=config,
@@ -459,8 +232,6 @@ class VizAgent:
     async def ainvoke(
         self,
         question: str,
-        sql_answer: str,
-        sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None
     ) -> VizAgentState:
@@ -481,8 +252,6 @@ class VizAgent:
         response = await self.graph.ainvoke(
             input={
                 "question": question,
-                "sql_answer": sql_answer,
-                "sql_queries": sql_queries,
                 "sql_queries_results": sql_queries_results
             },
             config=config,
@@ -493,8 +262,6 @@ class VizAgent:
     def stream(
         self,
         question: str,
-        sql_answer: str,
-        sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None,
         stream_mode: list[str] | None = None,
@@ -518,8 +285,6 @@ class VizAgent:
         for chunk in self.graph.stream(
             input={
                 "question": question,
-                "sql_answer": sql_answer,
-                "sql_queries": sql_queries,
                 "sql_queries_results": sql_queries_results
             },
             config=config,
@@ -530,8 +295,6 @@ class VizAgent:
     async def astream(
         self,
         question: str,
-        sql_answer: str,
-        sql_queries: list[Item],
         sql_queries_results: list[Item],
         config: RunnableConfig | None = None,
         stream_mode: list[str] | None = None,
@@ -555,8 +318,6 @@ class VizAgent:
         async for chunk in self.graph.astream(
             input={
                 "question": question,
-                "sql_answer": sql_answer,
-                "sql_queries": sql_queries,
                 "sql_queries_results": sql_queries_results
             },
             config=config,
