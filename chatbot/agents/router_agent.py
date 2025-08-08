@@ -268,7 +268,7 @@ class RouterAgent:
             visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            visualization = Visualization(script=None, reasoning=None)
+            visualization = Visualization(script=None, reasoning=None, data=None)
 
         return {"visualization": visualization}
 
@@ -291,7 +291,7 @@ class RouterAgent:
             visualization = response["visualization"]
         except Exception:
             logger.exception(f"Error on calling the visualization agent:")
-            visualization = Visualization(script=None, reasoning=None)
+            visualization = Visualization(script=None, reasoning=None, data=None)
 
         return {"visualization": visualization}
 
@@ -311,7 +311,7 @@ class RouterAgent:
         if next == "viz_agent":
             ...
         else:
-            visualization = Visualization(script=None, reasoning=None)
+            visualization = Visualization(script=None, reasoning=None, data=None)
             state_update["visualization"] = visualization
 
         final_answer = state["sql_answer"]

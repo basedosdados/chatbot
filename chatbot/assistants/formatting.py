@@ -5,7 +5,7 @@ import sqlparse
 
 from chatbot.agents.router_agent import RouterAgentState
 from chatbot.agents.sql_agent import SQLAgentState
-from chatbot.agents.structured_outputs import Chart
+from chatbot.agents.structured_outputs import Visualization
 
 
 class SQLAgentFormattedResponse(TypedDict):
@@ -15,7 +15,7 @@ class SQLAgentFormattedResponse(TypedDict):
 class RouterAgentFormattedResponse(TypedDict):
     content: str
     sql_queries: list[str]|None
-    chart: Chart|None
+    visualization: Visualization|None
 
 def format_sql_agent_response(response: SQLAgentState) -> SQLAgentFormattedResponse:
     """Formats the response that will be presented to the user

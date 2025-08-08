@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, Field
 
-from chatbot.agents import Visualization
+from chatbot.agents.structured_outputs import Visualization
 
 
 class SQLAssistantMessage(BaseModel):
@@ -11,4 +11,4 @@ class SQLAssistantMessage(BaseModel):
     sql_queries: list[str] | None = Field(default=None)
 
 class SQLVizAssistantMessage(SQLAssistantMessage):
-    chart: Visualization | None = Field(default=None)
+    visualization: Visualization | None = Field(default=None)
