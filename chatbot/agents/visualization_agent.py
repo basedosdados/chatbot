@@ -14,12 +14,9 @@ from loguru import logger
 
 from .prompts import REPHRASER_VIZ_SYSTEM_PROMPT, VIZ_SYSTEM_PROMPT
 from .reducers import Item
-from .structured_outputs import Rephrase, VizScript
+from .structured_outputs import Rephrase, VizScript, Visualization
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
-class Visualization(VizScript):
-    data: list[dict[str, Any]]
-    data_placeholder: Literal["INPUT_DATA"] = "INPUT_DATA"
 
 class VizAgentState(TypedDict):
     # input question
@@ -120,11 +117,15 @@ class VizAgent:
         """
         question = state["question_rephrased"]
 
-        queries_results = [
-            row
-            for qr in state["sql_queries_results"]
-            for row in json.loads(qr.content)
-        ]
+        queries_results = []
+
+        for qr in state["sql_queries_results"]:
+            if qr.content:
+                try:
+                    for row in json.loads(qr.content):
+                        queries_results.append(row)
+                except json.JSONDecodeError:
+                    logger.exception(f"JSON decode error, skipping {qr.content = }:")
 
         message = HumanMessage(
             f"Question: {question}\nData: {queries_results}"
