@@ -12,12 +12,12 @@ from langgraph.graph.message import add_messages
 from loguru import logger
 
 from chatbot.agents.sql_agent import SQLAgent
-from chatbot.agents.visualization_agent import VizAgent, Visualization
+from chatbot.agents.visualization_agent import VizAgent
 
 from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
                       POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import Item
-from .structured_outputs import InitialRouting, PostSQLRouting
+from .structured_outputs import InitialRouting, PostSQLRouting, Visualization
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
 
@@ -306,14 +306,22 @@ class RouterAgent:
         """
         state_update = {}
 
+        previous = state["_previous"]
         next = state["_next"]
 
-        # This means the VizAgent was not called
-        if next == "process_answers":
+        if next == "viz_agent":
+            chart = state["visualization"]
+            # sql_agent → viz_agent
+            if previous == "sql_agent":
+                sql_answer = state["sql_answer"]
+                final_answer = f"{sql_answer}\n\n{chart.insights}"
+            # viz_agent called directly
+            else:
+                final_answer = chart.insights
+        # sql_agent → process_answers
+        else:
             state_update["visualization"] = None
-
-        # For now, the final answer will always be the SQLAgent answer
-        final_answer = state["sql_answer"]
+            final_answer = state["sql_answer"]
 
         state_update["final_answer"] = final_answer
 

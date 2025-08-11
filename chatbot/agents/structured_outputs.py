@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,8 +8,13 @@ class Rephrase(BaseModel):
     rephrased: str = Field(description="The rephrased user question")
 
 class VizScript(BaseModel):
-    script: str | None = Field("A Python script for creating Plotly figures")
-    reasoning: str = Field("Step-by-step reasoning behind the script")
+    script: str | None = Field(description="A complete and executable Python script that generates a Plotly figure")
+    reasoning: str = Field(description="A detailed, step-by-step explanation of the choices made during the script's creation. This includes the choice of visualization, data transformations, and any calculations performed")
+    insights: str = Field(description="A concise, business-friendly paragraph that describes the generated visualization and its key takeaways, highlighting the most important trends or patterns in the data")
+
+class Visualization(VizScript):
+    data: list[dict[str, Any]]
+    data_placeholder: Literal["INPUT_DATA"] = "INPUT_DATA"
 
 class RewrittenQuery(BaseModel):
     rewritten: str = Field(description="The rewritten user query")
