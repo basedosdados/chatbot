@@ -21,12 +21,20 @@ class RewrittenQuery(BaseModel):
 
 class InitialRouting(BaseModel):
     """Determines the initial agent to handle the user's query."""
-    next: Literal["sql_agent", "viz_agent"] = Field(
-        description="The agent selected to process the user's question.",
+    agent: Literal["sql_agent", "viz_agent"] = Field(
+        description="The agent selected to handle the user's question",
         default="sql_agent"
     )
     reasoning: str = Field(
-        description="Brief reasoning of why the agent was called"
+        description="Brief reasoning for the routing decision, explaining what the user wants and why this agent was chosen"
+    )
+    question_for_viz_agent: str | None = Field(
+        default=None,
+        description="A rephrased, self-contained question for the viz_agent, including all necessary context from the conversation"
+    )
+    data_turn_ids: list[int] | None = Field(
+        default=None,
+        description="A list of all turn numbers from the chat history that contains the relevant data when routing to the viz_agent."
     )
 
 class PostSQLRouting(BaseModel):
