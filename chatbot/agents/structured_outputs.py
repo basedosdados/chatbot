@@ -3,9 +3,34 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-class Rephrase(BaseModel):
-    original: str = Field(description="The original user question")
-    rephrased: str = Field(description="The rephrased user question")
+class InitialRouting(BaseModel):
+    """Determines the initial agent to handle the user's query."""
+    agent: Literal["sql_agent", "viz_agent"] = Field(description="The agent selected to handle the user's question")
+    reasoning: str = Field(
+        description="Brief reasoning for the routing decision, explaining what the user wants and why this agent was chosen"
+    )
+    data_turn_ids: list[int] | None = Field(
+        default=None,
+        description="A list of all turn numbers from the chat history that contains the relevant data when routing to the viz_agent"
+    )
+    question_for_viz_agent: str | None = Field(
+        default=None,
+        description="A rephrased, self-contained question for the viz_agent, including all necessary context from the conversation"
+    )
+
+class PostSQLRouting(BaseModel):
+    """Determines the next action after data retrieval by the sql_agent."""
+    action: Literal["trigger_visualization", "skip_visualization"] = Field(description="The next action to take")
+    reasoning: str = Field(
+        description="Brief reasoning for the decision, explaining why this action was chosen"
+    )
+    question_for_viz_agent: str | None = Field(
+        default=None,
+        description="A rephrased, self-contained question for the viz_agent, including all necessary context from the conversation"
+    )
+
+class RewrittenQuery(BaseModel):
+    rewritten: str = Field(description="The rewritten user query")
 
 class VizScript(BaseModel):
     script: str | None = Field(description="A complete and executable Python script that generates a Plotly figure")
@@ -15,34 +40,3 @@ class VizScript(BaseModel):
 class Visualization(VizScript):
     data: list[dict[str, Any]]
     data_placeholder: Literal["INPUT_DATA"] = "INPUT_DATA"
-
-class RewrittenQuery(BaseModel):
-    rewritten: str = Field(description="The rewritten user query")
-
-class InitialRouting(BaseModel):
-    """Determines the initial agent to handle the user's query."""
-    agent: Literal["sql_agent", "viz_agent"] = Field(
-        description="The agent selected to handle the user's question",
-        default="sql_agent"
-    )
-    reasoning: str = Field(
-        description="Brief reasoning for the routing decision, explaining what the user wants and why this agent was chosen"
-    )
-    question_for_viz_agent: str | None = Field(
-        default=None,
-        description="A rephrased, self-contained question for the viz_agent, including all necessary context from the conversation"
-    )
-    data_turn_ids: list[int] | None = Field(
-        default=None,
-        description="A list of all turn numbers from the chat history that contains the relevant data when routing to the viz_agent."
-    )
-
-class PostSQLRouting(BaseModel):
-    """Determines the next step after data retrieval by the sql_agent."""
-    next: Literal["viz_agent", "process_answers"] = Field(
-        description="The next step based on the retrieved data.",
-        default="viz_agent"
-    )
-    reasoning: str = Field(
-        description="Explanation for choosing the next step after data retrieval."
-    )

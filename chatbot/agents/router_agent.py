@@ -1,15 +1,15 @@
-import operator
-from typing import Annotated, AsyncIterator, Iterator, Literal, TypedDict
+import json
+from operator import add
+from typing import Annotated, Any, AsyncIterator, Iterator, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
+from langchain_core.messages import (AIMessage, HumanMessage,
                                      RemoveMessage, SystemMessage)
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
-from langgraph.graph.message import add_messages
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -20,11 +20,10 @@ from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
                       POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import Item
 from .structured_outputs import InitialRouting, PostSQLRouting, Visualization
-from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
+from .utils import async_delete_checkpoints, delete_checkpoints
 
 
 class ChatTurn(BaseModel):
-    # turn_id: int
     user_question: str
     ai_response: str
     data: list[Item] | None = Field(default=None)
@@ -33,7 +32,7 @@ class RouterAgentState(TypedDict):
     # node before routing
     _previous: str|None
 
-    # next node to route to
+    # node after routing
     _next: str
 
     # input question
@@ -43,26 +42,27 @@ class RouterAgentState(TypedDict):
     # for the current run when calling the SQLAgent
     rewrite_query: bool
 
-    turn_counter: int
-
-    # intermediate answers and final answer
+    # SQLAgent output
     sql_answer: str
+
+    # RouterAgent output
     final_answer: str
 
     # sql queries that were executed without errors and its results
     sql_queries: list[Item]
     sql_queries_results: list[Item]
 
-    question_for_viz_agent: str | None
+    # list of turn IDs whose data should be passed to the VizAgent
     data_turn_ids: list[int] | None
 
-    # visualization object for plotting charts, if any
+    # rephrased question for VizAgent
+    question_for_viz_agent: str | None
+
+    # visualization object for plotting charts
     visualization: Visualization | None
 
-    # router agent's message list
-    messages: Annotated[list[BaseMessage], add_messages]
-
-    history: Annotated[list[ChatTurn], operator.add]
+    # RouterAgent conversation history
+    history: Annotated[list[ChatTurn], add]
 
 class RouterAgent:
     """LLM-powered Agent that orchestrates SQL querying and data visualization via a multi-agent workflow.
@@ -112,14 +112,14 @@ class RouterAgent:
         Returns:
             dict[str, Literal["sql_agent", "viz_agent"] | None: The graph state update.
         """
-        final_content = format_chat_history(
+        input_message = format_chat_history(
             current_question=state["question"],
             chat_history=state["history"],
         )
 
         messages = [
             SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT),
-            HumanMessage(content=final_content)
+            HumanMessage(content=input_message)
         ]
 
         router = self.model.with_structured_output(InitialRouting)
@@ -145,14 +145,14 @@ class RouterAgent:
         Returns:
             dict[str, Literal["sql_agent", "viz_agent"] | None: The graph state update.
         """
-        final_content = format_chat_history(
+        input_message = format_chat_history(
             current_question=state["question"],
             chat_history=state["history"],
         )
 
         messages = [
             SystemMessage(INITIAL_ROUTING_SYSTEM_PROMPT),
-            HumanMessage(content=final_content)
+            HumanMessage(content=input_message)
         ]
 
         router = self.model.with_structured_output(InitialRouting)
@@ -166,9 +166,7 @@ class RouterAgent:
             "data_turn_ids": response.data_turn_ids,
         }
 
-    def _call_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> (
-        dict[str, Literal["process_answers", "viz_agent"]]
-    ):
+    def _call_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str]:
         """Defines if the `VizAgent` should be called before returning a response.
 
         Args:
@@ -180,29 +178,33 @@ class RouterAgent:
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
-        query_results = [qr.content for qr in state['sql_queries_results']]
-        if len(query_results) == 1:
-            query_results = query_results[0]
+        data = normalize_data(state["sql_queries_results"])
+
+        input_message = {
+            "user_question": state["question"],
+            "data": data,
+            "text_answer": state["sql_answer"]
+        }
 
         messages = [
             SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
-            HumanMessage(
-                f"User question: {state['question']}\n\n"\
-                f"Query results: {query_results}\n\n"\
-                f"Answer: {state['sql_answer']}"
-            )
+            HumanMessage(json.dumps(input_message, indent=2))
         ]
 
         response: PostSQLRouting = router.invoke(messages, config)
 
+        if response.action == "trigger_visualization":
+            next_node = "viz_agent"
+        else:
+            next_node = "process_outputs"
+
         return {
             "_previous": "sql_agent",
-            "_next": response.next
+            "_next": next_node,
+            "question_for_viz_agent": response.question_for_viz_agent
         }
 
-    async def _acall_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> (
-        dict[str, Literal["process_answers", "viz_agent"]]
-    ):
+    async def _acall_post_sql_router(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str]:
         """Asynchronously defines if the `VizAgent` should be called before returning a response.
 
         Args:
@@ -214,24 +216,30 @@ class RouterAgent:
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
-        query_results = [qr.content for qr in state['sql_queries_results']]
-        if len(query_results) == 1:
-            query_results = query_results[0]
+        data = normalize_data(state["sql_queries_results"])
+
+        input_message = {
+            "user_question": state["question"],
+            "data": data,
+            "text_answer": state["sql_answer"]
+        }
 
         messages = [
             SystemMessage(POST_SQL_ROUTING_SYSTEM_PROMPT),
-            HumanMessage(
-                f"User question: {state['question']}\n\n"\
-                f"Query results: {query_results}\n\n"\
-                f"Answer: {state['sql_answer']}"
-            )
+            HumanMessage(json.dumps(input_message, indent=2))
         ]
 
         response: PostSQLRouting = await router.ainvoke(messages, config)
 
+        if response.action == "trigger_visualization":
+            next_node = "viz_agent"
+        else:
+            next_node = "process_outputs"
+
         return {
             "_previous": "sql_agent",
-            "_next": response.next
+            "_next": next_node,
+            "question_for_viz_agent": response.question_for_viz_agent
         }
 
     def _call_sql_agent(self, state: RouterAgentState, config: RunnableConfig) -> (
@@ -292,23 +300,23 @@ class RouterAgent:
         Returns:
             dict[str, Visualization]: The graph state update.
         """
+        question_for_viz = state["question_for_viz_agent"] or state["question"]
+
+        # if SQLAgent was called in this turn, get the data fetched by it
         if state["_previous"] == "sql_agent":
-            question_for_viz = state["question"]
-            sql_queries_results = state["sql_queries_results"]
+            data = normalize_data(state["sql_queries_results"])
+        # else, get the data fetched in previous turns
         else:
-            question_for_viz = state["question_for_viz_agent"]
-            # Turn IDs are 1-based, list indices are 0-based
-            chat_turns = [
-                state["history"][turn_id - 1]
-                for turn_id in state["data_turn_ids"]
-            ]
-            sql_queries_results = [item for turn in chat_turns for item in turn.data]
+            chat_turns = get_chat_turns(
+                turn_ids=state["data_turn_ids"],
+                chat_history=state["history"]
+            )
+            data = normalize_data([item for turn in chat_turns for item in turn.data])
 
         try:
             response = self.viz_agent.invoke(
                 question=question_for_viz,
-                sql_queries_results=sql_queries_results,
-                config=config
+                data=data,
             )
             visualization = response["visualization"]
         except Exception:
@@ -327,23 +335,23 @@ class RouterAgent:
         Returns:
             dict[str, Visualization]: The graph state update.
         """
+        question_for_viz = state["question_for_viz_agent"] or state["question"]
+
+        # if SQLAgent was called in this turn, get the data fetched by it
         if state["_previous"] == "sql_agent":
-            question_for_viz = state["question"]
-            sql_queries_results = state["sql_queries_results"]
+            data = normalize_data(state["sql_queries_results"])
+        # else, get the data fetched in previous turns
         else:
-            question_for_viz = state["question_for_viz_agent"]
-            # Turn IDs are 1-based, list indices are 0-based
-            chat_turns = [
-                state["history"][turn_id - 1]
-                for turn_id in state["data_turn_ids"]
-            ]
-            sql_queries_results = [item for turn in chat_turns for item in turn.data]
+            chat_turns = get_chat_turns(
+                turn_ids=state["data_turn_ids"],
+                chat_history=state["history"]
+            )
+            data = normalize_data([item for turn in chat_turns for item in turn.data])
 
         try:
             response = await self.viz_agent.ainvoke(
                 question=question_for_viz,
-                sql_queries_results=sql_queries_results,
-                config=config
+                data=data,
             )
             visualization = response["visualization"]
         except Exception:
@@ -352,8 +360,9 @@ class RouterAgent:
 
         return {"visualization": visualization}
 
-    def _process_answers(self, state: RouterAgentState) -> dict[str, str]:
-        """Builds the final answer that will be presented to the user.
+    def _process_outputs(self, state: RouterAgentState) -> dict[str, str|ChatTurn|None]:
+        """Builds the final answer that will be presented to the user
+        and updates the conversation history.
 
         Args:
             state (RouterAgentState): The graph state.
@@ -363,25 +372,29 @@ class RouterAgent:
         """
         state_update = {}
 
-        previous = state["_previous"]
-        next = state["_next"]
+        previous_node = state["_previous"]
+        next_node = state["_next"]
 
-        if next == "viz_agent":
+        if next_node == "viz_agent":
             chart = state["visualization"]
             # sql_agent → viz_agent
-            if previous == "sql_agent":
+            if previous_node == "sql_agent":
                 sql_answer = state["sql_answer"]
-                final_answer = f"{sql_answer}\n\n{chart.insights}"
+                if chart:
+                    final_answer = f"{sql_answer}\n\n{chart.insights}"
+                else:
+                    final_answer = sql_answer
                 data = state["sql_queries_results"]
             # viz_agent called directly
             else:
                 final_answer = chart.insights
-                chat_turns = [
-                    state["history"][turn_id - 1]
-                    for turn_id in state["data_turn_ids"]
-                ]
+                # turn IDs are 1-based, list indices are 0-based
+                chat_turns = get_chat_turns(
+                    turn_ids=state["data_turn_ids"],
+                    chat_history=state["history"]
+                )
                 data = [item for turn in chat_turns for item in turn.data]
-        # sql_agent → process_answers
+        # sql_agent → process_outputs
         else:
             state_update["visualization"] = None
             final_answer = state["sql_answer"]
@@ -398,7 +411,7 @@ class RouterAgent:
 
         return state_update
 
-    def _prune_messages(self, state: RouterAgentState) -> dict[str, list[RemoveMessage]]:
+    def _prune_history(self, state: RouterAgentState) -> dict[str, list[RemoveMessage]]:
         """Prunes the message list to ensure that only a limited number of questions and their
         corresponding AI messages and Tool messages are sent to the LLM.
 
@@ -431,23 +444,23 @@ class RouterAgent:
         graph.add_node("sql_agent", RunnableLambda(self._call_sql_agent, self._acall_sql_agent))
         graph.add_node("viz_agent", RunnableLambda(self._call_viz_agent, self._acall_viz_agent))
 
-        # post sql router node, calls the viz_agent or process_answers
+        # post sql router node, calls the viz_agent or process_outputs
         graph.add_node("post_sql_router", RunnableLambda(self._call_post_sql_router, self._acall_post_sql_router))
 
         # node for building the final answer
-        graph.add_node("process_answers", self._process_answers)
+        graph.add_node("process_outputs", self._process_outputs)
 
         # node for deleting old messages
-        graph.add_node("prune_messages", self._prune_messages)
+        graph.add_node("prune_history", self._prune_history)
 
         graph.add_edge("sql_agent", "post_sql_router")
-        graph.add_edge("viz_agent", "process_answers")
-        graph.add_edge("process_answers", "prune_messages")
+        graph.add_edge("viz_agent", "process_outputs")
+        graph.add_edge("process_outputs", "prune_history")
         graph.add_conditional_edges("initial_router", _route)
-        graph.add_conditional_edges("post_sql_router", _post_sql_route)
+        graph.add_conditional_edges("post_sql_router", _route)
 
         graph.set_entry_point("initial_router")
-        graph.set_finish_point("prune_messages")
+        graph.set_finish_point("prune_history")
 
         # The checkpointer is ignored by default when the graph is used as a subgraph
         # For more information, visit https://langchain-ai.github.io/langgraph/how-tos/subgraph-persistence
@@ -600,37 +613,46 @@ class RouterAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _route(state: RouterAgentState) -> Literal["sql_agent", "viz_agent"]:
-    "Routes to the next node."
-    return state["_next"]
-
-def _post_sql_route(state: RouterAgentState) -> Literal["viz_agent", "process_answers"]:
+def _route(state: RouterAgentState) -> (
+    Literal["sql_agent", "viz_agent", "process_outputs"]
+):
     "Routes to the next node."
     return state["_next"]
 
 def format_chat_history(current_question: str, chat_history: list[ChatTurn]):
-    history_content = []
+    chat_history = [
+        {
+            "turn_id": i+1,
+            "user_question": chat_turn.user_question,
+            "ai_response": chat_turn.ai_response
+        }
+        for i, chat_turn in enumerate(chat_history)
+    ]
 
-    for i, chat_turn in enumerate(chat_history):
-        history_content.append(
-            f"### Turn {i+1}:\n"
-            f"**User:** {chat_turn.user_question}\n"
-            f"**AI:** {chat_turn.ai_response}"
-        )
+    input_message = {
+        "conversation_history": chat_history,
+        "current_question": current_question
+    }
 
-    if history_content:
-        final_content = (
-            "# Conversation History\n\n"
-            + "\n---\n".join(history_content)
-            + "\n\n# Current Turn:\n"
-            + f"**User:** {current_question}"
-        )
-    else:
-        final_content = (
-            "# Conversation History\n"
-            + "(empty)"
-            + "\n\n# Current Turn:\n"
-            + f"**User:** {current_question}"
-        )
+    return json.dumps(input_message, indent=2)
 
-    return final_content
+def normalize_data(data: list[Item]) -> list[Any]:
+    normalized_data = []
+    for item in data:
+        if item.content:
+            try:
+                for obj in json.loads(item.content):
+                    normalized_data.append(obj)
+            except json.JSONDecodeError:
+                logger.exception(f"JSON decode error, skipping {item.content = }:")
+    return normalized_data
+
+def get_chat_turns(turn_ids: list[int], chat_history: list[ChatTurn]) -> list[ChatTurn]:
+    chat_turns: list[ChatTurn] = []
+    for turn_id in turn_ids:
+        try:
+            # turn IDs are 1-based, list indices are 0-based
+            chat_turns.append(chat_history[turn_id-1])
+        except IndexError:
+            logger.exception(f"Turn ID {turn_id} is out of range:")
+    return chat_turns

@@ -71,8 +71,8 @@ class AsyncSQLVizAssistant:
         viz_agent = VizAgent(
             model=model,
             # prompt_formatter=viz_prompt_formatter,
-            checkpointer=subgraph_checkpointer,
-            question_limit=question_limit
+            # checkpointer=subgraph_checkpointer,
+            # question_limit=question_limit
         )
 
         self.router_agent = RouterAgent(
