@@ -8,7 +8,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
 
 from .prompts import VIZ_SYSTEM_PROMPT
-from .structured_outputs import VizScript, Visualization
+from .structured_outputs import Visualization, VizScript
 
 
 class VizAgentState(TypedDict):
@@ -39,7 +39,7 @@ class VizAgent:
     def _create_visualization(self, state: VizAgentState) -> dict[str, Visualization|None]:
         input_message = {
             "user_question": state["question"],
-            "data": state["daa"]
+            "data": state["data"]
         }
 
         messages = [HumanMessage(json.dumps(input_message, indent=2))]
