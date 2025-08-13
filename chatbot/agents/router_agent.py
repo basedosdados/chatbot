@@ -92,19 +92,17 @@ class RouterAgent:
         self.question_limit = question_limit
         self.graph = self._compile()
 
-    def _call_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> (
-        dict[str, Literal["sql_agent", "viz_agent"] | None]
-    ):
+    def _call_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str|None]:
         """Defines whether the `SQLAgent` or `VizAgent` should be called.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, Literal["sql_agent", "viz_agent"] | None: The graph state update.
+            dict[str, str|None]: The graph state update.
         """
-        input_message = format_input_message(
+        input_message = _format_input_message(
             current_question=state["question"],
             chat_history=state["chat_history"],
         )
@@ -125,19 +123,17 @@ class RouterAgent:
             "data_turn_ids": response.data_turn_ids,
         }
 
-    async def _acall_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> (
-        dict[str, Literal["sql_agent", "viz_agent"] | None]
-    ):
+    async def _acall_initial_router(self, state: RouterAgentState, config: RunnableConfig) -> dict[str, str|None]:
         """Asynchronously defines whether the `SQLAgent` or `VizAgent` should be called.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, Literal["sql_agent", "viz_agent"] | None: The graph state update.
+            dict[str, str|None]: The graph state update.
         """
-        input_message = format_input_message(
+        input_message = _format_input_message(
             current_question=state["question"],
             chat_history=state["chat_history"],
         )
@@ -162,15 +158,15 @@ class RouterAgent:
         """Defines if the `VizAgent` should be called before returning a response.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, Literal["process_answers", "viz_agent"]]: The graph state update.
+            dict[str, str]: The graph state update.
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
-        data = normalize_data(state["sql_queries_results"])
+        data = _normalize_data(state["sql_queries_results"])
 
         input_message = {
             "user_question": state["question"],
@@ -200,15 +196,15 @@ class RouterAgent:
         """Asynchronously defines if the `VizAgent` should be called before returning a response.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
-            dict[str, Literal["process_answers", "viz_agent"]]: The graph state update.
+            dict[str, str]: The graph state update.
         """
         router = self.model.with_structured_output(PostSQLRouting)
 
-        data = normalize_data(state["sql_queries_results"])
+        data = _normalize_data(state["sql_queries_results"])
 
         input_message = {
             "user_question": state["question"],
@@ -240,7 +236,7 @@ class RouterAgent:
         """Calls the `SQLAgent`.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
@@ -264,7 +260,7 @@ class RouterAgent:
         """Asynchronously calls the `SQLAgent`.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
             config (RunnableConfig): Configuration for the agent execution.
 
         Returns:
@@ -286,8 +282,7 @@ class RouterAgent:
         """Calls the `VizAgent`.
 
         Args:
-            state (RouterAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
+            state (RouterAgentState): Current graph state.
 
         Returns:
             dict[str, Visualization]: The graph state update.
@@ -296,14 +291,14 @@ class RouterAgent:
 
         # if SQLAgent was called in this turn, get the data fetched by it
         if state["_previous"] == "sql_agent":
-            normalized_data = normalize_data(state["sql_queries_results"])
+            normalized_data = _normalize_data(state["sql_queries_results"])
         # else, get the data fetched in previous turns
         else:
-            data = get_data_from_chat_turns(
+            data = _get_data_from_chat_turns(
                 turn_ids=state["data_turn_ids"],
                 chat_history=state["chat_history"]
             )
-            normalized_data = normalize_data(data)
+            normalized_data = _normalize_data(data)
 
         try:
             response = self.viz_agent.invoke(
@@ -321,8 +316,7 @@ class RouterAgent:
         """Asynchronously calls the `VizAgent`.
 
         Args:
-            state (RouterAgentState): The graph state.
-            config (RunnableConfig): Configuration for the agent execution.
+            state (RouterAgentState): Current graph state.
 
         Returns:
             dict[str, Visualization]: The graph state update.
@@ -331,14 +325,14 @@ class RouterAgent:
 
         # if SQLAgent was called in this turn, get the data fetched by it
         if state["_previous"] == "sql_agent":
-            normalized_data = normalize_data(state["sql_queries_results"])
+            normalized_data = _normalize_data(state["sql_queries_results"])
         # else, get the data fetched in previous turns
         else:
-            data = get_data_from_chat_turns(
+            data = _get_data_from_chat_turns(
                 turn_ids=state["data_turn_ids"],
                 chat_history=state["chat_history"]
             )
-            normalized_data = normalize_data(data)
+            normalized_data = _normalize_data(data)
 
         try:
             response = await self.viz_agent.ainvoke(
@@ -353,14 +347,14 @@ class RouterAgent:
         return {"visualization": visualization}
 
     def _process_outputs(self, state: RouterAgentState) -> dict[str, Any]:
-        """Formats the final answer that will be presented to the user
-        and updates the conversation history.
+        """Builds the final answer for the user and updates the conversation history.
 
         Args:
-            state (RouterAgentState): The graph state.
+            state (RouterAgentState): Current graph state.
 
         Returns:
-            dict[str, Any]: The final answer state update.
+            dict[str, Any]: A dictionary containing the final answer and the updated history.
+                If the visualization step was skipped, it also contains a `None` visualization.
         """
         state_update = {}
 
@@ -377,7 +371,7 @@ class RouterAgent:
             # viz_agent called directly
             else:
                 final_answer = viz.insights if viz else ""
-                data = get_data_from_chat_turns(
+                data = _get_data_from_chat_turns(
                     turn_ids=state["data_turn_ids"],
                     chat_history=state["chat_history"]
                 )
@@ -408,14 +402,18 @@ class RouterAgent:
         return state_update
 
     def _prune_history(self, state: RouterAgentState) -> dict[str, dict[int, ChatTurnRemove]]:
-        """Prunes the message list to ensure that only a limited number of questions and their
-        corresponding AI messages and Tool messages are sent to the LLM.
+        """Removes the oldest chat turn from the conversation history when the maximum
+        allowed number of turns is reached, implementing a sliding window strategy.
+
+        This ensures that only the most recent chat turns up to the defined
+        `question_limit` are retained when sending context to the LLM.
 
         Args:
-            state (RouterAgentState): The graph state containing the message list.
+            state (RouterAgentState): The current graph state containing the
+                conversation history under the `chat_history` key.
 
         Returns:
-            dict[str, Dict[int, ChatTurnRemove]]: The pruned message list.
+            dict[str, dict[int, ChatTurnRemove]]: The state update.
         """
         chat_history = state["chat_history"]
 
@@ -445,17 +443,17 @@ class RouterAgent:
         # post sql router node, calls the viz_agent or process_outputs
         graph.add_node("post_sql_router", RunnableLambda(self._call_post_sql_router, self._acall_post_sql_router))
 
-        # node for building the final answer
+        # node for building the final answer and updating chat history
         graph.add_node("process_outputs", self._process_outputs)
 
-        # node for deleting old messages
+        # node for deleting old chat turns
         graph.add_node("prune_history", self._prune_history)
 
         graph.add_edge("sql_agent", "post_sql_router")
         graph.add_edge("viz_agent", "process_outputs")
         graph.add_edge("process_outputs", "prune_history")
-        graph.add_conditional_edges("initial_router", _route)
-        graph.add_conditional_edges("post_sql_router", _route)
+        graph.add_conditional_edges("initial_router", _initial_route)
+        graph.add_conditional_edges("post_sql_router", _post_sql_route)
 
         graph.set_entry_point("initial_router")
         graph.set_finish_point("prune_history")
@@ -611,18 +609,27 @@ class RouterAgent:
             await async_delete_checkpoints(self.checkpointer, thread_id)
             logger.info(f"Deleted checkpoints for thread {thread_id}")
 
-def _route(state: RouterAgentState) -> Literal["sql_agent", "viz_agent", "process_outputs"]:
-    """Route to the next node in the router agent workflow.
+def _initial_route(state: RouterAgentState) -> Literal["sql_agent", "viz_agent"]:
+    """Route to the next node in the beginning of the router agent workflow.
 
     Returns:
         str: The identifier of the next node to execute. Must be one of:
             - "sql_agent": Route to the SQL agent.
             - "viz_agent": Route to the visualization agent.
+    """
+    return state["_next"]
+
+def _post_sql_route(state: RouterAgentState) -> Literal["viz_agent", "process_outputs"]:
+    """Route to the next node in the router agent workflow after calling the SQL agent.
+
+    Returns:
+        str: The identifier of the next node to execute. Must be one of:
+            - "viz_agent": Route to the visualization agent.
             - "process_outputs": Route to output processing and response formatting.
     """
     return state["_next"]
 
-def format_input_message(current_question: str, chat_history: dict[int, ChatTurn]) -> str:
+def _format_input_message(current_question: str, chat_history: dict[int, ChatTurn]) -> str:
     """Format conversation data into a JSON message for the `RouterAgent`.
 
     Transforms the current question and chat history into a structured JSON format
@@ -660,7 +667,7 @@ def format_input_message(current_question: str, chat_history: dict[int, ChatTurn
 
     return json.dumps(input_message, ensure_ascii=False, indent=2)
 
-def normalize_data(data: list[Item]) -> list[Any]:
+def _normalize_data(data: list[Item]) -> list[Any]:
     """Extract and flatten JSON content from `Item` objects for `VizAgent` processing.
 
     Processes a list of `Item` objects, extracts JSON content from each item's `content`
@@ -694,7 +701,7 @@ def normalize_data(data: list[Item]) -> list[Any]:
                 logger.exception(f"JSON decode error, skipping {item.content = }:")
     return normalized_data
 
-def get_data_from_chat_turns(turn_ids: list[int], chat_history: dict[int, ChatTurn]) -> list[Item]:
+def _get_data_from_chat_turns(turn_ids: list[int], chat_history: dict[int, ChatTurn]) -> list[Item]:
     """Retrieve and aggregate data from specified chat turns.
 
     Extracts data from one or more chat turns identified by their IDs and returns
