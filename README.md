@@ -39,7 +39,7 @@ prompt_formatter = SQLPromptFormatter()
 
 assistant = SQLAssistant(model, context_provider, prompt_formatter)
 
-response = assistant.invoke("hello! what can you tell me about our database?")
+response = assistant.invoke("Hello! what can you tell me about our database?")
 ```
 
 You can optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant and a [`VectorStore`](https://python.langchain.com/docs/integrations/vectorstores/) for few-shot prompting during **SQL queries generation**:
@@ -87,7 +87,7 @@ with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
     )
 
     response = assistant.invoke(
-        message="hello! what can you tell me about our database?",
+        message="Hello! what can you tell me about our database?",
         thread_id="some uuid"
     )
 ```
@@ -95,15 +95,14 @@ with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
 An async version is also available: [`AsyncSQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/async_sql_assistant.py).
 
 ### SQLVizAssistant
-[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) by not only retrieving data but also **preparing it for visualization**. It determines which variables should be plotted to each axis, suggests suitable chart types, and defines metadata such as titles, labels, and legends, without actually rendering the chart. It requires a LangChain Chat Model, a Context Provider, and two separate Prompt Formatters: one for **SQL queries generation** and another for **guiding data preprocessing for visualization**.
+[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) by not only retrieving data but also **preparing it for visualization**. It generates a python script using [pandas](https://pandas.pydata.org/) and [plotly](https://plotly.com/python/) to create appropriate visualizations based on the retrieved data, without actually rendering them. It requires a LangChain chat model, a context provider, and a prompt formatter for the **SQL queries generation** step.
 
-We provide a default [`VizPromptFormatter`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/formatters/viz_prompt_formatter.py), which is used internally by the Visualization Agent during **data preprocessing**.
 ```python
 from langchain.chat_models import init_chat_model
 
 from chatbot.assistants import SQLAssistant
 from chatbot.contexts import BigQueryContextProvider
-from chatbot.formatters import SQLPromptFormatter, VizPromptFormatter
+from chatbot.formatters import SQLPromptFormatter
 
 model = init_chat_model("gpt-4o", temperature=0)
 
@@ -114,17 +113,14 @@ context_provider = BigQueryContextProvider(
     query_project="your query project",
 )
 
-sql_prompt_formatter = SQLPromptFormatter()
-viz_prompt_formatter = VizPromptFormatter()
+prompt_formatter = SQLPromptFormatter()
 
-assistant = SQLVizAssistant(
-  model, context_provider, sql_prompt_formatter, viz_prompt_formatter
-)
+assistant = SQLVizAssistant(model, context_provider, prompt_formatter)
 
-response = assistant.invoke("hello! what can you tell me about our database?")
+response = assistant.invoke("Hello! what can you tell me about our database?")
 ```
 
-You can also optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during both **SQL generation** and **data preprocessing for visualization**:
+You can also optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during **SQL queries generation**, just like we did with the `SQLAssistant`:
 ```python
 from langchain.chat_models import init_chat_model
 
@@ -133,7 +129,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from chatbot.assistants import SQLAssistant
 from chatbot.contexts import BigQueryContextProvider
-from chatbot.formatters import SQLPromptFormatter, VizPromptFormatter
+from chatbot.formatters import SQLPromptFormatter
 
 model = init_chat_model("gpt-4o", temperature=0)
 
@@ -146,7 +142,7 @@ context_provider = BigQueryContextProvider(
 
 # it could be any combination of
 # a langchain vector store and an embedding model
-sql_vector_store = PGVector(
+vector_store = PGVector(
     connection="your connection string",
     collection_name="your sql collection name",
     embedding=OpenAIEmbeddings(
@@ -154,39 +150,29 @@ sql_vector_store = PGVector(
     ),
 )
 
-viz_vector_store = PGVector(
-    connection="your connection string",
-    collection_name="your viz collection name",
-    embedding=OpenAIEmbeddings(
-      model="text-embedding-3-small",
-    ),
-)
-
-sql_prompt_formatter = SQLPromptFormatter(sql_vector_store)
-viz_prompt_formatter = VizPromptFormatter(viz_vector_store)
+prompt_formatter = SQLPromptFormatter(vector_store)
 
 DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres
 
 with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
     checkpointer.setup()
 
-    assistant = SQLAssistant(
+    assistant = SQLVizAssistant(
         model=model,
         context_provider=context_provider,
-        sql_prompt_formatter=sql_prompt_formatter,
-        viz_prompt_formatter=viz_prompt_formatter,
+        sql_prompt_formatter=prompt_formatter,
         checkpointer=checkpointer,
     )
 
     response = assistant.invoke(
-        message="hello! what can you tell me about our database?",
+        message="Hello! what can you tell me about our database?",
         thread_id="some uuid"
     )
 ```
 An async version is also available: [`AsyncSQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/async_sql_viz_assistant.py).
 
 > [!TIP]
-> To improve semantic search when using vector stores, you can enable query rewriting by setting `rewrite_query=True` when invoking the assistants or the `SQLAgent` directly.
+> To improve semantic search when using vector stores, you can enable query rewriting by setting `rewrite_query=True` when invoking the assistants.
 
 ## Extensibility
 Under the hood, both assistants rely on composable agents:
