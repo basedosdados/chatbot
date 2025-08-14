@@ -674,7 +674,7 @@ def _normalize_data(data: list[Item]) -> list[Any]:
     field, parses the JSON, and flattens all parsed objects into a single list.
 
     Args:
-        data (list[Item]): List of `Item` objects where each item may contain
+        data (list[Item]): List of `Item` objects where each item must contain
             JSON-serialized content.
 
     Returns:
@@ -726,6 +726,8 @@ def _get_data_from_chat_turns(turn_ids: list[int], chat_history: dict[int, ChatT
         >>> get_data_from_chat_turns([1, 2], chat_turns)
         [Item(id="a", ...), Item(id="b", ...)]
     """
+    if turn_ids is None:
+        return []
     chat_turns: list[ChatTurn] = []
     for turn_id in turn_ids:
         if chat_turn := chat_history.get(turn_id):
