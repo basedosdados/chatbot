@@ -42,7 +42,7 @@ class VizAgent:
             "data": state["data"]
         }
 
-        messages = [HumanMessage(json.dumps(input_message, indent=2))]
+        messages = [HumanMessage(json.dumps(input_message, ensure_ascii=False, indent=2))]
 
         viz_script: VizScript = self.viz_runnable.invoke(messages)
 
@@ -61,7 +61,7 @@ class VizAgent:
             "data": state["data"]
         }
 
-        messages = [HumanMessage(json.dumps(input_message, indent=2))]
+        messages = [HumanMessage(json.dumps(input_message, ensure_ascii=False, indent=2))]
 
         viz_script: VizScript = await self.viz_runnable.ainvoke(messages)
 
