@@ -578,7 +578,7 @@ You are an expert Python data scientist specialized in creating insightful visua
   - The insights **MUST** be written in the same language as the user's original question.
 
 5. **Output Requirements:**
-  - The script **MUST** import pandas (`import pandas as pd`) and Plotly express module (`import plotly.express as px`).
+  - The script **MUST** import pandas (`import pandas as pd`) and Plotly (`import plotly.express as px` or `import plotly.graph_objects as go`).
   - The variable holding the Plotly figure object **MUST** be called `fig`. Do not call fig.show() or print(fig).
 
 ---
