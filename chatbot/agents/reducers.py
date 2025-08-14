@@ -4,36 +4,41 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class BaseItem(BaseModel):
+class Item(BaseModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
     content: Any = Field(default=None)
+
+class ItemRemove(BaseModel):
     id: uuid.UUID
 
-class Item(BaseItem):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4)
-
-class ItemRemove(BaseItem):
-    ...
-
-class BaseChatTurn(BaseModel):
+class ChatTurn(BaseModel):
     id: int # easier for the LLMs to parse
-
-class ChatTurn(BaseChatTurn):
     user_question: str
     ai_response: str
     data: list[Item]
 
-class ChatTurnRemove(BaseChatTurn):
-    ...
+class ChatTurnRemove(BaseModel):
+    id: int # easier for the LLMs to parse
 
-def add_item(existing: Item|list[Item], update: BaseItem|list[BaseItem]) -> list[Item]:
-    """Merges two lists of Items, deleting or updating Items by ID.
+ItemUpdate = Item | ItemRemove | list[Item|ItemRemove]
+
+def add_item(existing: Item | list[Item], update: ItemUpdate) -> list[Item]:
+    """Merge Items into an existing list, replacing or removing entries by ID.
 
     Args:
-        existing (Item | list[Item]): An Item or a list of Item objects.
-        update (BaseItem | list[BaseItem]): A BaseItem or a list of BaseItem objects.
+        existing (Item | list[Item]):
+            The current `Item` or list of `Item` objects to be merged into.
+        update (ItemUpdate):
+            An `Item`, `ItemRemove`, or a list containing a mix of `Item` and
+            `ItemRemove` objects that specify changes to apply.
 
     Returns:
-        list[Item]: The merged list.
+        list[Item]:
+            The merged list of `Item` objects after applying the updates and deletions.
+
+    Raises:
+        ValueError:
+            If an `ItemRemove` references an ID that does not exist in `existing`.
     """
     if not isinstance(existing, list):
         existing = [existing]
@@ -67,15 +72,22 @@ def add_item(existing: Item|list[Item], update: BaseItem|list[BaseItem]) -> list
 
     return merged
 
-def add_chat_turn(existing: dict[int, ChatTurn], update: dict[int, BaseChatTurn]) -> dict[int, ChatTurn]:
-    """Merges two dictionaries of Chat Turns, deleting or updating Chat Turns by key.
+def add_chat_turn(existing: dict[int, ChatTurn], update: dict[int, ChatTurn|ChatTurnRemove]) -> dict[int, ChatTurn]:
+    """Merge chat turns into an existing dictionary, replacing or removing entries by key.
 
     Args:
-        existing (dict[int, ChatTurn]): A dictionary of ChatTurn objects.
-        update (dict[int, BaseChatTurn]): A dictionary of BaseChatTurn objects.
+        existing (dict[int, ChatTurn]):
+            The current dictionary of chat turns to be updated.
+        update (dict[int, ChatTurn | ChatTurnRemove]):
+            The dictionary containing additions, replacements, or deletions to apply.
 
     Returns:
-        dict[int, ChatTurn]: The merged dictionary.
+        dict[int, ChatTurn]:
+            The updated dictionary of chat turns.
+
+    Raises:
+        ValueError:
+            If a `ChatTurnRemove` references a key not present in `existing`.
     """
     merged = existing.copy()
 
@@ -86,11 +98,7 @@ def add_chat_turn(existing: dict[int, ChatTurn], update: dict[int, BaseChatTurn]
                     f"Attempted to delete non-existent chat turn '{k}'"
                 )
             del merged[k]
-        elif isinstance(v, ChatTurn):
-            merged[k] = v
         else:
-            raise TypeError(
-                f"Expected `ChatTurn` or `ChatTurnRemove`, got '{type(v)}'"
-            )
+            merged[k] = v
 
     return merged
