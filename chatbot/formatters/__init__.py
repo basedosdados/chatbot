@@ -1,3 +1,2 @@
 from .prompt_formatter import BasePromptFormatter
 from .sql_prompt_formatter import SQLPromptContext, SQLPromptFormatter
-from .viz_prompt_formatter import VizPromptContext, VizPromptFormatter

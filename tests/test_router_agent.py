@@ -1,14 +1,19 @@
+import json
+
 import pytest
-from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
-                                     RemoveMessage)
 
-from chatbot.agents.router_agent import RouterAgent
-from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
+from chatbot.agents.reducers import ChatTurn, ChatTurnRemove, Item
+from chatbot.agents.router_agent import (RouterAgent, RouterAgentState,
+                                         _format_input_message,
+                                         _get_data_from_chat_turns,
+                                         _normalize_data)
+from chatbot.agents.structured_outputs import Visualization
 
+QUESTION_LIMIT = 5
 
 @pytest.fixture
 def agent(monkeypatch) -> RouterAgent:
-    def mock_agent_init(self, question_limit: int = 5):
+    def mock_agent_init(self, question_limit: int = QUESTION_LIMIT):
         self.question_limit = question_limit
 
     monkeypatch.setattr(RouterAgent, "__init__", mock_agent_init)
@@ -16,197 +21,313 @@ def agent(monkeypatch) -> RouterAgent:
     return RouterAgent()
 
 @pytest.fixture()
-def messages() -> list[BaseMessage]:
-    return [
-        HumanMessage(""),
-        AIMessage(""),
+def chat_history() -> dict[int, ChatTurn]:
+    return {
+        1: ChatTurn(
+            id=1,
+            user_question="mock question",
+            ai_response="mock response",
+            data=[]
+        )
+    }
+
+@pytest.fixture()
+def full_chat_history() -> dict[int, ChatTurn]:
+    return {
+        i+1: ChatTurn(
+            id=i+1,
+            user_question="mock question",
+            ai_response="mock response",
+            data=[]
+        ) for i in range(QUESTION_LIMIT)
+    }
+
+@pytest.fixture()
+def visualization() -> Visualization:
+    return Visualization(
+        script="mock script",
+        reasoning="mock reasoning",
+        insights="mock insights",
+        data = [],
+        data_placeholder="INPUT_DATA",
+    )
+
+# =====================================================
+# ==                  Prune History                  ==
+# =====================================================
+def test_prune_history_not_delete(agent: RouterAgent, chat_history: dict[int, ChatTurn]):
+    response = agent._prune_history({"chat_history": chat_history})
+    expected = {"chat_history": {}}
+    assert response == expected
+
+def test_prune_history_delete(agent: RouterAgent, full_chat_history: dict[int, ChatTurn]):
+    response = agent._prune_history({"chat_history": full_chat_history})
+    key = min(full_chat_history.keys())
+    expected = {"chat_history": {key: ChatTurnRemove(id=key)}}
+    assert response == expected
+
+def test_prune_history_question_limit_none(agent: RouterAgent, full_chat_history: dict[int, ChatTurn]):
+    agent.question_limit = None
+    response = agent._prune_history({"chat_history": full_chat_history})
+    expected = {"chat_history": {}}
+    assert response == expected
+
+# =====================================================
+# ==                 Process Outputs                 ==
+# =====================================================
+def test_process_outputs_sql_then_viz(agent: RouterAgent, visualization: Visualization):
+    state = RouterAgentState(
+        _previous="sql_agent",
+        _next="viz_agent",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=visualization,
+        chat_history={},
+    )
+    response = agent._process_outputs(state)
+    final_answer = f"{state['sql_answer']}\n\n{visualization.insights}"
+    expected = {
+        "final_answer": final_answer,
+        "chat_history": {
+            1: ChatTurn(
+                id=1,
+                user_question=state["question"],
+                ai_response=final_answer,
+                data=state["sql_queries_results"],
+            )
+        }
+    }
+    assert response == expected
+
+def test_process_outputs_sql_then_viz_with_error(agent: RouterAgent):
+    state = RouterAgentState(
+        _previous="sql_agent",
+        _next="viz_agent",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=None,
+        chat_history={},
+    )
+    response = agent._process_outputs(state)
+    final_answer = state["sql_answer"]
+    expected = {
+        "final_answer": final_answer,
+        "chat_history": {
+            1: ChatTurn(
+                id=1,
+                user_question=state["question"],
+                ai_response=final_answer,
+                data=state["sql_queries_results"],
+            )
+        }
+    }
+    assert response == expected
+
+def test_process_outputs_only_viz(agent: RouterAgent, visualization: Visualization):
+    state = RouterAgentState(
+        _previous=None,
+        _next="viz_agent",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=visualization,
+        chat_history={},
+    )
+    response = agent._process_outputs(state)
+    final_answer = visualization.insights
+    expected = {
+        "final_answer": final_answer,
+        "chat_history": {
+            1: ChatTurn(
+                id=1,
+                user_question=state["question"],
+                ai_response=final_answer,
+                data=state["sql_queries_results"],
+            )
+        }
+    }
+    assert response == expected
+
+def test_process_outputs_only_viz_with_error(agent: RouterAgent):
+    state = RouterAgentState(
+        _previous=None,
+        _next="viz_agent",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=None,
+        chat_history={},
+    )
+    response = agent._process_outputs(state)
+    final_answer = state["final_answer"]
+    expected = {
+        "final_answer": final_answer,
+        "chat_history": {
+            1: ChatTurn(
+                id=1,
+                user_question=state["question"],
+                ai_response=final_answer,
+                data=state["sql_queries_results"],
+            )
+        }
+    }
+    assert response == expected
+
+def test_process_outputs_only_sql(agent: RouterAgent):
+    state = RouterAgentState(
+        _previous="sql_agent",
+        _next="process_outputs",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=None,
+        chat_history={},
+    )
+    response = agent._process_outputs(state)
+    final_answer = state["sql_answer"]
+    expected = {
+        "final_answer": final_answer,
+        "chat_history": {
+            1: ChatTurn(
+                id=1,
+                user_question=state["question"],
+                ai_response=final_answer,
+                data=state["sql_queries_results"],
+            )
+        },
+        "visualization": None
+    }
+    assert response == expected
+
+def test_process_outputs_with_non_empty_chat_history(agent: RouterAgent):
+    chat_history = {
+        1: ChatTurn(id=1, user_question="q1", ai_response="r1", data=[]),
+        2: ChatTurn(id=2, user_question="q2", ai_response="r2", data=[]),
+    }
+    state = RouterAgentState(
+        _previous="sql_agent",
+        _next="process_outputs",
+        question="mock question",
+        rewrite_query=False,
+        sql_answer="mock sql answer",
+        final_answer="",
+        sql_queries=[],
+        sql_queries_results=[],
+        data_turn_ids=None,
+        question_for_viz_agent=None,
+        visualization=None,
+        chat_history=chat_history,
+    )
+
+    response = agent._process_outputs(state)
+
+    assert 3 in response["chat_history"]
+    assert len(response["chat_history"]) == 1
+
+# ====================================================
+# ==                Helper Functions                ==
+# ====================================================
+def test_normalize_data():
+    item_1_data = [{"k1": "v1"}, {"k1": "v2"}]
+    item_2_data = [{"k2": "v1"}, {"k2": "v2"}]
+
+    data = [
+        Item(content=json.dumps(item_1_data)),
+        Item(content=json.dumps(item_2_data))
     ]
 
-@pytest.fixture()
-def valid_chart() -> Chart:
-    return Chart(
-        data=ChartData(),
-        metadata=ChartMetadata(),
-        is_valid=True
-    )
+    expected = item_1_data.copy()
+    expected.extend(item_2_data)
 
-@pytest.fixture()
-def invalid_chart() -> Chart:
-    return Chart(
-        data=ChartData(),
-        metadata=ChartMetadata(),
-        is_valid=False
-    )
+    normalized_data = _normalize_data(data)
 
-def test_prune_messages_not_delete(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    response = agent._prune_messages({"messages": messages})
-    expected = {"messages": []}
-    assert response == expected
+    assert normalized_data == expected
 
-def test_prune_messages_delete(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    # the message list is being repeated "question_limit" times
-    # so we just need to delete the first repetition
-    idx_messages = len(messages)
+def test_normalize_data_json_decode_error():
+    item_1_data = [{"k1": "v1"}, {"k1": "v2"}]
 
-    messages = messages*agent.question_limit
+    data = [
+        Item(content=json.dumps(item_1_data)),
+        Item(content="[1, 2, ")
+    ]
 
-    response = agent._prune_messages({"messages": messages})
+    normalized_data = _normalize_data(data)
 
-    expected = {
-        "messages": [
-            RemoveMessage(msg.id) for msg in messages[:idx_messages]
-        ]
+    assert normalized_data == item_1_data
+
+def test_get_data_from_chat_turns():
+    chat_history = {
+        1: ChatTurn(id=1, user_question="q1", ai_response="r1", data=[Item(content="a")]),
+        2: ChatTurn(id=2, user_question="q2", ai_response="r2", data=[Item(content="b"), Item(content="c")]),
+        3: ChatTurn(id=3, user_question="q2", ai_response="r2", data=[Item(content="d")])
     }
 
-    assert response == expected
+    expected = chat_history[2].data.copy()
+    expected.extend(chat_history[3].data)
 
-def test_prune_messages_delete_last_is_human(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    # the question limit is set to 2 to ensure that
-    # the last message is a human message when the limit is reached.
-    agent.question_limit = 2
+    data = _get_data_from_chat_turns([2, 3], chat_history)
 
-    messages += [HumanMessage("")]
+    assert data == expected
 
-    response = agent._prune_messages({"messages": messages})
-
-    expected = {
-        "messages": [RemoveMessage(msg.id) for msg in messages]
+def test_get_data_from_chat_turns_not_found():
+    chat_history = {
+        1: ChatTurn(id=1, user_question="q1", ai_response="r1", data=[Item(content="a")]),
+        2: ChatTurn(id=2, user_question="q2", ai_response="r2", data=[Item(content="b"), Item(content="c")]),
+        3: ChatTurn(id=3, user_question="q2", ai_response="r2", data=[Item(content="d")])
     }
 
-    assert response == expected
+    expected = chat_history[2].data
 
-def test_prune_messages_delete_consecutive_human(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    # the message list is being repeated "question_limit" times
-    # so we just need to delete the first repetition + the next human message
-    idx_messages = len(messages) + 1
+    data = _get_data_from_chat_turns([2, 4], chat_history)
 
-    messages = messages + [HumanMessage("")] + messages*(agent.question_limit-2)
+    assert data == expected
 
-    response = agent._prune_messages({"messages": messages})
+def test_format_input_message():
+    current_question = "mock questiÕn"
 
-    expected = {
-        "messages": [
-            RemoveMessage(msg.id) for msg in messages[:idx_messages]
-        ]
+    chat_history = {
+        1: ChatTurn(id=1, user_question="q1", ai_response="r1", data=[]),
+        2: ChatTurn(id=2, user_question="q2", ai_response="r2", data=[]),
     }
 
-    assert response == expected
+    expected = json.dumps({
+        "conversation_history": [
+            {
+                "turn_id": turn_id,
+                "user_question": chat_turn.user_question,
+                "ai_response": chat_turn.ai_response
+            } for turn_id, chat_turn in chat_history.items()
+        ],
+        "current_question": current_question,
+    }, ensure_ascii=False, indent=2)
 
-def test_prune_messages_question_limit_1(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    # setting question limit to 1
-    # means all messages must be deleted
-    agent.question_limit = 1
+    input_message = _format_input_message(current_question, chat_history)
 
-    response = agent._prune_messages({"messages": messages})
-
-    expected = {
-        "messages": [RemoveMessage(msg.id) for msg in messages]
-    }
-
-    assert response == expected
-
-def test_prune_messages_question_limit_none(
-    agent: RouterAgent,
-    messages: list[BaseMessage]
-):
-    # setting question limit to 1
-    # means all messages must be deleted
-    agent.question_limit = None
-    response = agent._prune_messages({"messages": messages})
-    expected = {"messages": []}
-    assert response == expected
-
-def test_build_final_answer_previous_sql_valid_chart(agent: RouterAgent, valid_chart: Chart):
-    state = {
-        "_previous": "sql_agent",
-        "_next": "viz_agent",
-        "sql_answer": "mock sql answer",
-        "chart_answer": "mock_chart_answer",
-        "chart": valid_chart
-    }
-
-    response = agent._process_answers(state)
-
-    expected = {
-        "final_answer": f"{state['sql_answer']}\n\n{state['chart_answer']}"
-    }
-
-    assert response == expected
-
-def test_build_final_answer_previous_sql_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
-    state = {
-        "_previous": "sql_agent",
-        "_next": "viz_agent",
-        "sql_answer": "mock sql answer",
-        "chart_answer": "mock_chart_answer",
-        "chart": invalid_chart
-    }
-
-    response = agent._process_answers(state)
-
-    expected = {"final_answer": state["sql_answer"]}
-
-    assert response == expected
-
-def test_build_final_answer_previous_sql_next_process_answers(agent: RouterAgent, invalid_chart: Chart):
-    state = {
-        "_previous": "sql_agent",
-        "_next": "process_answers",
-        "sql_answer": "mock sql answer",
-        "chart_answer": "mock_chart_answer",
-        "chart": valid_chart
-    }
-
-    response = agent._process_answers(state)
-
-    expected = {
-        "chart": invalid_chart,
-        "final_answer": state['sql_answer']
-    }
-
-    assert response == expected
-
-def test_build_final_answer_previous_initial_router_valid_chart(agent: RouterAgent, valid_chart: Chart):
-    state = {
-        "_previous": "initial_router",
-        "_next": "viz_agent",
-        "sql_answer": "mock sql answer",
-        "chart_answer": "mock_chart_answer",
-        "chart": valid_chart
-    }
-
-    response = agent._process_answers(state)
-
-    expected = {"final_answer": state["chart_answer"]}
-
-    assert response == expected
-
-def test_build_final_answer_previous_initial_router_invalid_chart(agent: RouterAgent, invalid_chart: Chart):
-    state = {
-        "_previous": "initial_router",
-        "_next": "viz_agent",
-        "sql_answer": "mock sql answer",
-        "chart_answer": "mock_chart_answer",
-        "chart": invalid_chart
-    }
-
-    response = agent._process_answers(state)
-
-    expected = {"final_answer": state["chart_answer"]}
-
-    assert response == expected
+    assert expected == input_message

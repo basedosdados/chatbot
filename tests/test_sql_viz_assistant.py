@@ -3,7 +3,6 @@ import uuid
 import pytest
 
 from chatbot.agents.router_agent import RouterAgent, RouterAgentState
-from chatbot.agents.structured_outputs import Chart, ChartData, ChartMetadata
 from chatbot.assistants import SQLVizAssistant, SQLVizAssistantMessage
 
 
@@ -15,47 +14,35 @@ def assistant(monkeypatch):
         self.checkpointer = checkpointer
 
     def mock_invoke(self, question, config, rewrite_query):
-        chart_data = ChartData()
-        chart_metadata = ChartMetadata()
-        chart = Chart(
-            data=chart_data,
-            metadata=chart_metadata,
-            is_valid=False
-        )
         return RouterAgentState(
             _previous="mock previous",
             _next="mock next",
             question=question,
             rewrite_query=False,
             sql_answer="mock sql answer",
-            chart_answer="mock chart answer",
             final_answer="mock final answer",
             sql_queries=[],
             sql_queries_results=[],
-            chart=chart,
-            messages=[],
+            data_turn_ids=None,
+            question_for_viz_agent=None,
+            visualization=None,
+            chat_history={},
         )
 
     def mock_stream(self, question, config, stream_mode, subgraphs, rewrite_query):
-        chart_data = ChartData()
-        chart_metadata = ChartMetadata()
-        chart = Chart(
-            data=chart_data,
-            metadata=chart_metadata,
-            is_valid=False
-        )
         yield RouterAgentState(
             _previous="mock previous",
             _next="mock next",
             question=question,
             rewrite_query=False,
             sql_answer="mock sql answer",
-            chart_answer="mock chart answer",
             final_answer="mock final answer",
             sql_queries=[],
             sql_queries_results=[],
-            chart=chart,
-            messages=[],
+            data_turn_ids=None,
+            question_for_viz_agent=None,
+            visualization=None,
+            chat_history={},
         )
 
     def mock_assistant_init(self, router_agent):
@@ -78,16 +65,12 @@ def test_invoke(assistant: SQLVizAssistant):
     expected_response = SQLVizAssistantMessage(
         content="mock final answer",
         sql_queries=None,
-        chart=Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
+        visualization=None,
     )
 
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
-    assert response.chart == expected_response.chart
+    assert response.visualization == expected_response.visualization
 
 def test_invoke_with_config(assistant: SQLVizAssistant):
     run_id = str(uuid.uuid4())
@@ -98,17 +81,13 @@ def test_invoke_with_config(assistant: SQLVizAssistant):
         id=run_id,
         content="mock final answer",
         sql_queries=None,
-        chart=Chart(
-            data=ChartData(),
-            metadata=ChartMetadata(),
-            is_valid=False
-        ),
+        visualization=None,
     )
 
     assert response.id == expected_response.id
     assert response.content == expected_response.content
     assert response.sql_queries == expected_response.sql_queries
-    assert response.chart == expected_response.chart
+    assert response.visualization == expected_response.visualization
 
 def test_stream(assistant: SQLVizAssistant):
     for chunk in assistant.stream("mock question"):

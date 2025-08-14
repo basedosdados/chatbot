@@ -5,7 +5,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from chatbot.agents import RouterAgent, SQLAgent, VizAgent
 from chatbot.contexts import BaseContextProvider
-from chatbot.formatters import SQLPromptFormatter, VizPromptFormatter
+from chatbot.formatters import SQLPromptFormatter
 
 from .formatting import format_router_agent_response
 from .messages import SQLVizAssistantMessage
@@ -25,10 +25,6 @@ class AsyncSQLVizAssistant:
             A formatter responsible for constructing the LLM system prompt during SQL generation step,
             based on the user's question and optional few-shot examples. Must implement how examples
             are retrieved and how the prompt template is composed.
-        viz_prompt_formatter (VizPromptFormatter):
-            A formatter responsible for constructing the LLM system prompt during data preprocessing
-            step, based on the user's question and optional few-shot examples. Must implement how
-            examples are retrieved and how the prompt template is composed.
         checkpointer (AsyncPostgresSaver | None, optional):
             A checkpointer that will be used for persisting per-thread state across
             assistant's runs. If set to `None`, the assistant will not retain memory
@@ -46,7 +42,6 @@ class AsyncSQLVizAssistant:
         model: BaseChatModel,
         context_provider: BaseContextProvider,
         sql_prompt_formatter: SQLPromptFormatter,
-        viz_prompt_formatter: VizPromptFormatter,
         checkpointer: AsyncPostgresSaver | None = None,
         question_limit: int | None = 5,
     ):
@@ -68,12 +63,7 @@ class AsyncSQLVizAssistant:
             question_limit=question_limit
         )
 
-        viz_agent = VizAgent(
-            model=model,
-            prompt_formatter=viz_prompt_formatter,
-            checkpointer=subgraph_checkpointer,
-            question_limit=question_limit
-        )
+        viz_agent = VizAgent(model)
 
         self.router_agent = RouterAgent(
             model=model,

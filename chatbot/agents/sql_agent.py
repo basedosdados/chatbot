@@ -21,7 +21,7 @@ from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryExecTool)
 
 from .prompts import REWRITE_QUERY_SYSTEM_PROMPT, SELECT_DATASETS_SYSTEM_PROMPT
-from .reducers import BaseItem, ItemRemove, add_item
+from .reducers import Item, ItemRemove, add_item
 from .structured_outputs import RewrittenQuery
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
 
@@ -35,8 +35,8 @@ class SQLAgentState(TypedDict):
     final_answer: str
 
     # sql queries that were executed without errors and its results
-    sql_queries: Annotated[list[BaseItem], add_item]
-    sql_queries_results: Annotated[list[BaseItem], add_item]
+    sql_queries: Annotated[list[Item | ItemRemove], add_item]
+    sql_queries_results: Annotated[list[Item | ItemRemove], add_item]
 
     # messages list
     messages: Annotated[list[BaseMessage], add_messages]
