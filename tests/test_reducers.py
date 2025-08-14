@@ -11,7 +11,7 @@ from chatbot.agents.reducers import (ChatTurn, ChatTurnRemove, Item,
 # ============================================
 @pytest.fixture
 def item_id() -> uuid.UUID:
-    """Returns an Item uuid"""
+    """Returns an Item uuid."""
     return uuid.uuid4()
 
 @pytest.fixture
