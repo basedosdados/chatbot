@@ -179,7 +179,7 @@ Under the hood, both assistants rely on composable agents:
 
 - [`SQLAgent`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/agents/sql_agent.py) – Handles database metadata retrieval, query generation and execution.
 - [`VizAgent`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/agents/visualization_agent.py) – Handles visualization reasoning.
-- [`RouterAgent`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/agents/router_agent.py) – Orchestrates SQL querying and data visualization via a multi-agent workflow..
+- [`RouterAgent`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/agents/router_agent.py) – Orchestrates SQL querying and data visualization via a multi-agent workflow.
 
 There is also an implementation of a simple [`ReActAgent`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/agents/react_agent.py) with support to custom system prompts and short-term memory, to which you can add an arbitrary set of tools.
 
