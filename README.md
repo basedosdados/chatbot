@@ -18,7 +18,7 @@ pip install .
 ### SQLAssistant
 The [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) allows LLMs to interact with your database so you can ask questions about it. All it needs is a LangChain [Chat Model](https://python.langchain.com/docs/integrations/chat/), a [Context Provider](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/contexts/context_provider.py) and a [Prompt Formatter](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/formatters/prompt_formatter.py). The context provider is responsible for providing context about your data to the SQL Agent and the prompt formatter is responsible for building a system prompt for **SQL generation**.
 
-We provide a default [`BigQueryContextProvider`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/contexts/bigquery_context_provider.py) for retrieving metadata directly from Google BigQuery and a default [`SQLPromptFormatter`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/formatters/sql_prompt_formatter.py). You can supply your own implementation of a context provider and a prompt formatter for custom behaviour.
+We provide a default [`BigQueryContextProvider`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/contexts/bigquery_context_provider.py) for retrieving metadata directly from Google BigQuery and a default [`SQLPromptFormatter`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/formatters/sql_prompt_formatter.py). You can supply your own implementation of a context provider and a prompt formatter for custom behavior.
 ```python
 from langchain.chat_models import init_chat_model
 
@@ -42,7 +42,7 @@ assistant = SQLAssistant(model, context_provider, prompt_formatter)
 response = assistant.invoke("Hello! what can you tell me about our database?")
 ```
 
-You can optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant and a [`VectorStore`](https://python.langchain.com/docs/integrations/vectorstores/) for few-shot prompting during **SQL queries generation**:
+You can optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant and a [`VectorStore`](https://python.langchain.com/docs/integrations/vectorstores/) for few-shot prompting during **SQL query generation**:
 ```python
 from langchain.chat_models import init_chat_model
 
@@ -74,9 +74,9 @@ vector_store = PGVector(
 
 prompt_formatter = SQLPromptFormatter(vector_store)
 
-DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres
+DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres"
 
-with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
+with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
     checkpointer.setup()
 
     assistant = SQLAssistant(
@@ -95,7 +95,7 @@ with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
 An async version is also available: [`AsyncSQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/async_sql_assistant.py).
 
 ### SQLVizAssistant
-[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) by not only retrieving data but also **preparing it for visualization**. It generates a python script using [pandas](https://pandas.pydata.org/) and [plotly](https://plotly.com/python/) to create appropriate visualizations based on the retrieved data, without actually rendering them. It requires a LangChain chat model, a context provider, and a prompt formatter for the **SQL queries generation** step.
+[`SQLVizAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_viz_assistant.py) extends [`SQLAssistant`](https://github.com/basedosdados/chatbot/blob/d5a1c275183932de52781af6346d06b1c148e675/chatbot/assistants/sql_assistant.py) by retrieving data and **preparing it for visualization**. Using [pandas](https://pandas.pydata.org/) and [plotly](https://plotly.com/python/), it generates a Python script that creates visualizations from the retrieved data. All it needs is a LangChain chat model, a context provider, and a prompt formatter for the **SQL query generation** step.
 
 ```python
 from langchain.chat_models import init_chat_model
@@ -120,7 +120,7 @@ assistant = SQLVizAssistant(model, context_provider, prompt_formatter)
 response = assistant.invoke("Hello! what can you tell me about our database?")
 ```
 
-You can also optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during **SQL queries generation**, just like we did with the `SQLAssistant`:
+You can also optionally use a [`PostgresSaver`](https://langchain-ai.github.io/langgraph/reference/checkpoints/#langgraph.checkpoint.postgres.PostgresSaver) checkpointer to add short-term memory to your assistant, and provide langchain vector stores for few-shot prompting during **SQL query generation**, just like we did with the `SQLAssistant`:
 ```python
 from langchain.chat_models import init_chat_model
 
@@ -152,9 +152,9 @@ vector_store = PGVector(
 
 prompt_formatter = SQLPromptFormatter(vector_store)
 
-DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres
+DB_URI = "postgresql://postgres:postgres@localhost:5442/postgres"
 
-with PostgresSaver.from_conn_strin(DB_URI) as checkpointer:
+with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
     checkpointer.setup()
 
     assistant = SQLVizAssistant(
