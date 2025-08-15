@@ -86,6 +86,7 @@ class SQLAssistant:
         message: str,
         config: dict|None=None,
         stream_mode: list[str]|None=None,
+        subgraphs: bool=False,
         rewrite_query: bool=False
     ) -> Iterator[dict|tuple]:
         """Streams graph steps.
@@ -95,8 +96,10 @@ class SQLAssistant:
             config (RunnableConfig | None, optional): Optional configuration for the agent execution.
                 Refer to https://python.langchain.com/docs/concepts/runnables/#runnableconfig
                 for a list of allowed properties. Defaults to `None`.
-            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide in
-                https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+            stream_mode (list[str] | None, optional): The mode to stream output. See the LangGraph streaming guide
+                in https://langchain-ai.github.io/langgraph/how-tos/streaming for more details. Defaults to `None`.
+            subgraphs (bool, optional): Whether to stream events from inside subgraphs.
+                **Unused in this implementation**. Defaults to `False`.
             rewrite_query (bool | None, optional): Whether to rewrite the input message
                 for semantic search when calling the `SQLAgent`. Defaults to `False`.
 
