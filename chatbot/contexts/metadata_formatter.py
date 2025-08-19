@@ -50,8 +50,8 @@ class MarkdownMetadataFormatter:
         Returns:
             str: Table metadata formatted in Markdown
         """
-        # Table name
-        metadata = f"# {table.table_id}\n\n"
+        # Table id
+        metadata = f"# {table.full_table_id.replace(':', '.')}\n\n"
 
         # Table description
         metadata += f"### Description:\n{table.description}\n\n"
@@ -140,9 +140,9 @@ class XMLMetadataFormatter:
         # Root table element
         table_elem = ET.Element("table")
 
-        # Table name
-        name_elem = ET.SubElement(table_elem, "name")
-        name_elem.text = table.table_id
+        # Table id
+        id_elem = ET.SubElement(table_elem, "name")
+        id_elem.text = table.full_table_id.replace(':', '.')
 
         # Table description
         description_elem = ET.SubElement(table_elem, "description")
