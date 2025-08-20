@@ -60,8 +60,8 @@ class BigQueryContextProvider(BaseContextProvider):
         timeout: float | None = 30.0,
         metadata_format: Literal["markdown", "xml"] = "markdown",
     ):
-        billing_project = billing_project or os.getenv('BILLING_PROJECT_ID')
-        query_project = query_project or os.getenv('QUERY_PROJECT_ID')
+        billing_project = billing_project or os.getenv("BILLING_PROJECT_ID")
+        query_project = query_project or os.getenv("QUERY_PROJECT_ID")
 
         self._client = bq.Client(billing_project)
         self._project = query_project
