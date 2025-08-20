@@ -31,7 +31,7 @@ class MarkdownMetadataFormatter:
 
         # Dataset tables
         tables_metadata = [
-            f"- {table.full_table_id.replace(":", ".")}: {table.description}" for table in tables
+            f"- {table.full_table_id.replace(':', '.')}: {table.description}" for table in tables
         ]
 
         metadata += "\n\n".join(tables_metadata)
@@ -51,13 +51,13 @@ class MarkdownMetadataFormatter:
             str: Table metadata formatted in Markdown
         """
         # Table id
-        metadata = f"# {table.full_table_id.replace(":", ".")}\n\n"
+        metadata = f"# {table.full_table_id.replace(':', '.')}\n\n"
 
         # Table description
         metadata += f"### Description:\n{table.description}\n\n"
 
         # Table schema
-        metadata += f"### Schema:\n"
+        metadata += "### Schema:\n"
         fields = "\n\t".join([
             f"{field.name} {field.field_type}"
             for field in table.schema
@@ -65,7 +65,7 @@ class MarkdownMetadataFormatter:
         metadata += f"CREATE TABLE {table.table_id} (\n\t{fields}\n)\n\n"
 
         # Table columns details
-        metadata += f"### Column Details:\n"
+        metadata += "### Column Details:\n"
         header = "|column name|column type|column description|\n|---|---|---|"
         lines = "\n".join([
             f"|{field.name}|{field.field_type}|{field.description}|"
@@ -183,4 +183,4 @@ class MetadataFormatterFactory:
             case "xml":
                 return XMLMetadataFormatter()
             case _:
-                raise ValueError(f"Format should be one of the following: 'markdown', 'xml'")
+                raise ValueError("Format should be one of the following: 'markdown', 'xml'")
