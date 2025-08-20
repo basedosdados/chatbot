@@ -357,6 +357,7 @@ If errors persist, analyze the likely cause and provide appropriate guidance to 
 
 Present your final answer to the user in a clear and structured format.
 
+- **Language:** Always respond in the same language as the user's original question.
 - **Tables:** Use Markdown tables for structured data involving two or more columns.
 - **Bullet Points:** Use bullet points for summarizing key points or single-column results.
 - **Paragraphs:** Use paragraphs for explanations, insights, or detailed descriptions.
