@@ -10,14 +10,14 @@ from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
 from loguru import logger
 
-from chatbot.agents.sql_agent import SQLAgent
-from chatbot.agents.visualization_agent import VizAgent
+from chatbot.prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
+                             POST_SQL_ROUTING_SYSTEM_PROMPT)
 
-from .prompts import (INITIAL_ROUTING_SYSTEM_PROMPT,
-                      POST_SQL_ROUTING_SYSTEM_PROMPT)
 from .reducers import ChatTurn, ChatTurnRemove, Item, add_chat_turn
+from .sql_agent import SQLAgent
 from .structured_outputs import InitialRouting, PostSQLRouting, Visualization
 from .utils import async_delete_checkpoints, delete_checkpoints
+from .visualization_agent import VizAgent
 
 
 class RouterAgentState(TypedDict):

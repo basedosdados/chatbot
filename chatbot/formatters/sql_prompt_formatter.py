@@ -1,8 +1,8 @@
 from langchain_core.vectorstores import VectorStore
 from pydantic import BaseModel, Field
 
-from chatbot.agents.prompts import (SQL_AGENT_BASE_SYSTEM_PROMPT,
-                                    SQL_AGENT_SYSTEM_PROMPT)
+from chatbot.prompts import (SQL_AGENT_BASE_SYSTEM_PROMPT,
+                             SQL_AGENT_SYSTEM_PROMPT)
 
 from .prompt_formatter import BasePromptFormatter
 

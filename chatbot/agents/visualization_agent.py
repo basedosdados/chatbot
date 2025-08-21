@@ -7,7 +7,8 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import CompiledGraph
 
-from .prompts import VIZ_SYSTEM_PROMPT
+from chatbot.prompts import VIZ_SYSTEM_PROMPT
+
 from .structured_outputs import Visualization, VizScript
 
 
