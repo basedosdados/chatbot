@@ -9,9 +9,9 @@ from langchain_core.tools.base import InjectedToolCallId
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field
 
-from chatbot.agents.prompts import SQL_CHECK_SYSTEM_PROMPT
 from chatbot.agents.reducers import Item
 from chatbot.contexts import BaseContextProvider
+from chatbot.prompts import SQL_CHECK_SYSTEM_PROMPT
 
 
 class BaseBigQueryTool(BaseModel):

@@ -17,10 +17,11 @@ from loguru import logger
 
 from chatbot.contexts import BaseContextProvider
 from chatbot.formatters import SQLPromptContext, SQLPromptFormatter
+from chatbot.prompts import (REWRITE_QUERY_SYSTEM_PROMPT,
+                             SELECT_DATASETS_SYSTEM_PROMPT)
 from chatbot.tools import (DatasetsTablesInfoTool, ListDatasetsTool,
                            QueryCheckTool, QueryExecTool)
 
-from .prompts import REWRITE_QUERY_SYSTEM_PROMPT, SELECT_DATASETS_SYSTEM_PROMPT
 from .reducers import Item, ItemRemove, add_item
 from .structured_outputs import RewrittenQuery
 from .utils import async_delete_checkpoints, delete_checkpoints, prune_messages
