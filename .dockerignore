@@ -1,0 +1,41 @@
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile
+compose.yaml
+
+# Claude
+.claude/
+
+# Dev Container
+.devcontainer/
+
+# Python-generated files
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+wheels/
+*.egg-info
+
+# Ruff-generated files
+.ruff_cache/
+
+# Environment files
+.env
+.env.*
+
+# Virtual environment
+.venv/
+
+# IDE
+.vscode/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
