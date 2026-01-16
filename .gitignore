@@ -1,0 +1,29 @@
+# Claude
+.claude/
+
+# Python-generated files
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+wheels/
+*.egg-info
+
+# Ruff-generated files
+.ruff_cache/
+
+# Environment files
+.env
+.env.*
+
+# Virtual environments
+.venv/
+
+# IDE
+.vscode/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
