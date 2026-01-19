@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Running database migrations..."
+if [[ -t 1 ]]; then
+    BOLD="\e[1m"
+    CYAN="\e[36m"
+    RESET="\e[0m"
+else
+    BOLD=""
+    CYAN=""
+    RESET=""
+fi
+
+printf "${BOLD}${CYAN}> Running database migrations...${RESET}\n"
 uv run alembic upgrade head
 
 set -a
 source .env
 set +a
 
-echo "Starting FastAPI server..."
+printf "\n${BOLD}${CYAN}> Starting FastAPI server...${RESET}"
 exec uv run fastapi dev --host 0.0.0.0 app/main.py
