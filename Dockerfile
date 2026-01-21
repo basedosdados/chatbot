@@ -3,10 +3,6 @@ FROM python:3.14-slim
 # Install uv by copying the binary from the official distroless Docker image
 COPY --from=ghcr.io/astral-sh/uv:0.9.24 /uv /uvx /bin/
 
-# Setup a non-root user
-RUN groupadd --system --gid 999 nonroot \
-    && useradd --system --gid 999 --uid 999 --create-home nonroot
-
 # Install the project into `/app`
 WORKDIR /app
 
@@ -38,9 +34,6 @@ RUN chmod +x /app/scripts/run.sh
 
 # Add virtual environment executables to PATH
 ENV PATH="/app/.venv/bin:$PATH"
-
-# Use the non-root user to run the application
-USER nonroot
 
 # Expose FastAPI server port
 EXPOSE 8000
