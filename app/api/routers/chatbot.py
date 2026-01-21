@@ -23,7 +23,7 @@ from app.settings import settings
 router = APIRouter(prefix="/chatbot")
 
 
-@router.get("/threads/")
+@router.get("/threads")
 async def list_threads(
     database: AsyncDB, user_id: UserID, order_by: str | None = None
 ) -> list[Thread]:
@@ -39,7 +39,7 @@ async def list_threads(
     return await database.get_threads(user_id, order_by)
 
 
-@router.post("/threads/", status_code=status.HTTP_201_CREATED)
+@router.post("/threads", status_code=status.HTTP_201_CREATED)
 async def create_thread(
     thread_payload: ThreadPayload,
     database: AsyncDB,
@@ -53,7 +53,7 @@ async def create_thread(
     return await database.create_thread(thread_create)
 
 
-@router.delete("/threads/{thread_id}/")
+@router.delete("/threads/{thread_id}")
 async def delete_thread_and_checkpoints(
     thread_id: str,
     database: AsyncDB,
@@ -71,7 +71,7 @@ async def delete_thread_and_checkpoints(
     await agent.aclear_thread(thread_id)
 
 
-@router.get("/threads/{thread_id}/messages/")
+@router.get("/threads/{thread_id}/messages")
 async def list_messages(
     thread_id: str, database: AsyncDB, user_id: UserID, order_by: str | None = None
 ) -> list[Message]:
@@ -95,7 +95,7 @@ async def list_messages(
     return await database.get_messages(thread.id, order_by)
 
 
-@router.post("/threads/{thread_id}/messages/")
+@router.post("/threads/{thread_id}/messages")
 async def send_message(
     thread_id: str,
     user_message: UserMessage,
@@ -133,7 +133,7 @@ async def send_message(
     )
 
 
-@router.put("/messages/{message_id}/feedback/", response_model=FeedbackPublic)
+@router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)
 async def upsert_feedback(
     message_id: str,
     feedback_payload: FeedbackPayload,
