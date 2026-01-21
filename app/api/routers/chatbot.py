@@ -7,9 +7,17 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import stream_response
-from app.db.models import (FeedbackCreate, FeedbackPayload, FeedbackPublic,
-                           Message, MessageCreate, MessageRole, Thread,
-                           ThreadCreate, ThreadPayload)
+from app.db.models import (
+    FeedbackCreate,
+    FeedbackPayload,
+    FeedbackPublic,
+    Message,
+    MessageCreate,
+    MessageRole,
+    Thread,
+    ThreadCreate,
+    ThreadPayload,
+)
 from app.settings import settings
 
 router = APIRouter(prefix="/chatbot")
@@ -25,7 +33,7 @@ async def list_threads(
             detail=(
                 "Invalid 'order_by' value. "
                 "Valid values are 'created_at' and '-created_at'"
-            )
+            ),
         )
 
     return await database.get_threads(user_id, order_by)
@@ -33,7 +41,9 @@ async def list_threads(
 
 @router.post("/threads/", status_code=status.HTTP_201_CREATED)
 async def create_thread(
-    thread_payload: ThreadPayload, database: AsyncDB, user_id: UserID,
+    thread_payload: ThreadPayload,
+    database: AsyncDB,
+    user_id: UserID,
 ) -> Thread:
     thread_create = ThreadCreate(
         title=thread_payload.title,
@@ -45,7 +55,10 @@ async def create_thread(
 
 @router.delete("/threads/{thread_id}/")
 async def delete_thread_and_checkpoints(
-    thread_id: str, database: AsyncDB, agent: Agent, user_id: UserID,
+    thread_id: str,
+    database: AsyncDB,
+    agent: Agent,
+    user_id: UserID,
 ):
     thread = await database.delete_thread(thread_id)
 
@@ -68,7 +81,7 @@ async def list_messages(
             detail=(
                 "Invalid 'order_by' value. "
                 "Valid values are 'created_at' and '-created_at'"
-            )
+            ),
         )
 
     thread = await database.get_thread(thread_id)
@@ -116,11 +129,11 @@ async def send_message(
             thread_id=thread_id,
             model_uri=settings.MODEL_URI,
         ),
-        status_code=status.HTTP_201_CREATED
+        status_code=status.HTTP_201_CREATED,
     )
 
 
-@router.put("/messages/{message_id}/feedbacks/", response_model=FeedbackPublic)
+@router.put("/messages/{message_id}/feedback/", response_model=FeedbackPublic)
 async def upsert_feedback(
     message_id: str,
     feedback_payload: FeedbackPayload,
@@ -139,8 +152,12 @@ async def upsert_feedback(
     async def send_feedback():
         # LangSmith's AsyncClient doesn't support the update_feedback method, so we use the sync Client instead.
         # Since it blocks the event loop, we run it in a separate thread to avoid blocking async execution.
-        sync_status, synced_at = await asyncio.to_thread(feedback_sender.send_feedback, feedback, created)
-        _ = await database.update_feedback_sync_status(feedback.id, sync_status, synced_at)
+        sync_status, synced_at = await asyncio.to_thread(
+            feedback_sender.send_feedback, feedback, created
+        )
+        _ = await database.update_feedback_sync_status(
+            feedback.id, sync_status, synced_at
+        )
 
     background_tasks.add_task(send_feedback)
 
