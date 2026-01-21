@@ -25,7 +25,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipython>=9.9.0",
-    "isort>=7.0.0",
+    "pre-commit>=4.5.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=7.0.0",
@@ -34,6 +34,12 @@ dev = [
     "ruff>=0.14.10",
     "testcontainers[postgres]>=4.10.0",
 ]
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
 
 [tool.pytest.ini_options]
 minversion = "9.0"
