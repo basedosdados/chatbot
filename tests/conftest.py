@@ -3,15 +3,23 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (AsyncEngine, async_sessionmaker,
-                                    create_async_engine)
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from testcontainers.postgres import PostgresContainer
 
 from app.db.database import AsyncDatabase
-from app.db.models import (Account, Feedback, FeedbackCreate, FeedbackRating,
-                           Message, MessageCreate, MessageRole, MessageStatus,
-                           Thread, ThreadCreate)
+from app.db.models import (
+    Account,
+    Feedback,
+    FeedbackCreate,
+    FeedbackRating,
+    Message,
+    MessageCreate,
+    MessageRole,
+    MessageStatus,
+    Thread,
+    ThreadCreate,
+)
 from app.settings import settings
 
 type ThreadFactory = Callable[[str], Awaitable[Thread]]
@@ -29,7 +37,9 @@ def postgres_container():
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def async_engine(postgres_container: PostgresContainer) -> AsyncGenerator[AsyncEngine, None]:
+async def async_engine(
+    postgres_container: PostgresContainer,
+) -> AsyncGenerator[AsyncEngine, None]:
     """Create an async engine connected to the test PostgreSQL container."""
     postgres_url = postgres_container.get_connection_url()
     engine = create_async_engine(postgres_url, echo=False)
@@ -41,7 +51,9 @@ async def async_engine(postgres_container: PostgresContainer) -> AsyncGenerator[
 async def database(async_engine: AsyncEngine):
     """Create a AsyncDatabase instance connected to the test PostgreSQL container."""
     async with async_engine.begin() as conn:
-        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}"))
+        await conn.execute(
+            text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}")
+        )
         await conn.run_sync(SQLModel.metadata.create_all)
 
     sessionmaker = async_sessionmaker(async_engine, expire_on_commit=False)
@@ -86,10 +98,12 @@ async def thread(database: AsyncDatabase, thread_create: ThreadCreate) -> Thread
 @pytest_asyncio.fixture
 async def thread_factory(database: AsyncDatabase, user: Account) -> ThreadFactory:
     """Factory to create multiple threads in a single test."""
+
     async def factory(title: str) -> Thread:
         thread_create = ThreadCreate(title=title, user_id=user.id)
         thread = await database.create_thread(thread_create)
         return thread
+
     return factory
 
 
@@ -109,7 +123,9 @@ def user_message_create(thread: Thread) -> MessageCreate:
 
 
 @pytest_asyncio.fixture
-async def user_message(database: AsyncDatabase, user_message_create: MessageCreate) -> Message:
+async def user_message(
+    database: AsyncDatabase, user_message_create: MessageCreate
+) -> Message:
     """Mock Message instance for testing (user)."""
     return await database.create_message(user_message_create)
 
@@ -130,7 +146,9 @@ def assistant_message_create(user_message: Message) -> MessageCreate:
 
 
 @pytest_asyncio.fixture
-async def assistant_message(database: AsyncDatabase, assistant_message_create: MessageCreate) -> Message:
+async def assistant_message(
+    database: AsyncDatabase, assistant_message_create: MessageCreate
+) -> Message:
     """Mock Message instance for testing (assistant)."""
     return await database.create_message(assistant_message_create)
 
@@ -138,6 +156,7 @@ async def assistant_message(database: AsyncDatabase, assistant_message_create: M
 @pytest_asyncio.fixture
 async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesFactory:
     """Factory to create a user/assistant message pair in a single test."""
+
     async def factory() -> tuple[Message, Message]:
         user_message_create = MessageCreate(
             thread_id=thread.id,
@@ -180,6 +199,8 @@ def feedback_create(assistant_message: Message) -> FeedbackCreate:
 
 
 @pytest_asyncio.fixture
-async def feedback(database: AsyncDatabase, feedback_create: FeedbackCreate) -> Feedback:
-    fb, _ = await database.upsert_feedback(feedback_create)
-    return fb
+async def feedback(
+    database: AsyncDatabase, feedback_create: FeedbackCreate
+) -> Feedback:
+    feedback, _ = await database.upsert_feedback(feedback_create)
+    return feedback

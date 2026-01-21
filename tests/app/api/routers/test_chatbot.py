@@ -11,8 +11,15 @@ from langchain_core.messages import AIMessage
 from app.api.dependencies import get_database, get_feedback_sender
 from app.api.streaming import StreamEvent
 from app.db.database import AsyncDatabase
-from app.db.models import (Account, Feedback, FeedbackPublic, FeedbackRating,
-                           FeedbackSyncStatus, Message, Thread)
+from app.db.models import (
+    Account,
+    Feedback,
+    FeedbackPublic,
+    FeedbackRating,
+    FeedbackSyncStatus,
+    Message,
+    Thread,
+)
 from app.main import app
 from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
@@ -51,7 +58,9 @@ class MockReActAgent:
 def access_token(user: Account) -> str:
     """Generate a valid JWT access token for testing."""
     payload = {"user_id": user.id}
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
 
 
 @pytest.fixture
@@ -80,11 +89,13 @@ def client(database: AsyncDatabase):
 class TestListThreadsEndpoint:
     """Tests for GET /api/v1/chatbot/threads/"""
 
-    def test_list_threads_success(self, client: TestClient, access_token: str, thread: Thread):
+    def test_list_threads_success(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test successful thread listing."""
         response = client.get(
             url="/api/v1/chatbot/threads/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -98,20 +109,22 @@ class TestListThreadsEndpoint:
         """Test empty thread list."""
         response = client.get(
             url="/api/v1/chatbot/threads/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == []
 
-    async def test_list_threads_with_valid_order_by_asc(self, client: TestClient, access_token: str, thread_factory: ThreadFactory):
+    async def test_list_threads_with_valid_order_by_asc(
+        self, client: TestClient, access_token: str, thread_factory: ThreadFactory
+    ):
         """Test thread listing with valid order_by parameter (ascending)."""
         await thread_factory("Thread 1")
         await thread_factory("Thread 2")
 
         response = client.get(
             url="/api/v1/chatbot/threads/?order_by=created_at",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -121,14 +134,16 @@ class TestListThreadsEndpoint:
         assert len(threads) == 2
         assert threads[0].created_at <= threads[1].created_at
 
-    async def test_list_threads_with_valid_order_by_desc(self, client: TestClient, access_token: str, thread_factory: ThreadFactory):
+    async def test_list_threads_with_valid_order_by_desc(
+        self, client: TestClient, access_token: str, thread_factory: ThreadFactory
+    ):
         """Test thread listing with valid order_by parameter (descending)."""
         await thread_factory("Thread 1")
         await thread_factory("Thread 2")
 
         response = client.get(
             url="/api/v1/chatbot/threads/?order_by=-created_at",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -138,11 +153,13 @@ class TestListThreadsEndpoint:
         assert len(threads) == 2
         assert threads[0].created_at >= threads[1].created_at
 
-    def test_list_threads_with_invalid_order_by(self, client: TestClient, access_token: str):
+    def test_list_threads_with_invalid_order_by(
+        self, client: TestClient, access_token: str
+    ):
         """Test thread listing with invalid order_by returns 400."""
         response = client.get(
             url="/api/v1/chatbot/threads/?order_by=id",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -161,7 +178,7 @@ class TestCreateThreadEndpoint:
         response = client.post(
             url="/api/v1/chatbot/threads/",
             json={"title": "Mock Title"},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -175,7 +192,7 @@ class TestCreateThreadEndpoint:
         response = client.post(
             url="/api/v1/chatbot/threads/",
             json={},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -183,8 +200,7 @@ class TestCreateThreadEndpoint:
     def test_create_thread_unauthorized(self, client: TestClient):
         """Test thread creation unauthorized returns 401."""
         response = client.post(
-            url="/api/v1/chatbot/threads/",
-            json={"title": "Mock Title"}
+            url="/api/v1/chatbot/threads/", json={"title": "Mock Title"}
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -192,11 +208,13 @@ class TestCreateThreadEndpoint:
 class TestDeleteThreadEndpoint:
     """Tests for DELETE /api/v1/chatbot/threads/{thread_id}/"""
 
-    def test_delete_thread_success(self, client: TestClient, access_token: str, thread: Thread):
+    def test_delete_thread_success(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test successful thread deletion."""
         response = client.delete(
             url=f"/api/v1/chatbot/threads/{thread.id}/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
 
@@ -204,7 +222,7 @@ class TestDeleteThreadEndpoint:
         """Test deleting non-existent thread returns 404."""
         response = client.delete(
             url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -217,13 +235,15 @@ class TestDeleteThreadEndpoint:
 class TestListMessagesEndpoint:
     """Tests for GET /api/v1/chatbot/threads/{thread_id}/messages/"""
 
-    async def test_list_messages_success(self, client: TestClient, access_token: str, messages_factory: MessagesFactory):
+    async def test_list_messages_success(
+        self, client: TestClient, access_token: str, messages_factory: MessagesFactory
+    ):
         """Test successful message listing."""
         user_message, assistant_message = await messages_factory()
 
         response = client.get(
             url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -233,32 +253,38 @@ class TestListMessagesEndpoint:
         assert isinstance(messages, list)
         assert len(messages) == 2
 
-    def test_list_messages_empty(self, client: TestClient, access_token: str, thread: Thread):
+    def test_list_messages_empty(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test empty message list."""
         response = client.get(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == []
 
-    def test_list_messages_thread_not_found(self, client: TestClient, access_token: str):
+    def test_list_messages_thread_not_found(
+        self, client: TestClient, access_token: str
+    ):
         """Test listing messages for non-existent thread returns 404."""
         response = client.get(
             url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/messages/",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    async def test_list_messages_with_valid_order_by_asc(self, client: TestClient, access_token: str, messages_factory: MessagesFactory):
+    async def test_list_messages_with_valid_order_by_asc(
+        self, client: TestClient, access_token: str, messages_factory: MessagesFactory
+    ):
         """Test messages with valid order_by parameter (ascending)."""
         user_message, _ = await messages_factory()
 
         response = client.get(
             url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/?order_by=created_at",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -268,13 +294,15 @@ class TestListMessagesEndpoint:
         assert len(messages) == 2
         assert messages[0].created_at <= messages[1].created_at
 
-    async def test_list_messages_with_valid_order_by_desc(self, client: TestClient, access_token: str, messages_factory: MessagesFactory):
+    async def test_list_messages_with_valid_order_by_desc(
+        self, client: TestClient, access_token: str, messages_factory: MessagesFactory
+    ):
         """Test messages with valid order_by parameter (descending)."""
         user_message, _ = await messages_factory()
 
         response = client.get(
             url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/?order_by=-created_at",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -284,11 +312,13 @@ class TestListMessagesEndpoint:
         assert len(messages) == 2
         assert messages[0].created_at >= messages[1].created_at
 
-    def test_list_messages_with_invalid_order_by(self, client: TestClient, access_token: str, thread: Thread):
+    def test_list_messages_with_invalid_order_by(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test messages with invalid order_by returns 400."""
         response = client.get(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages/?order_by=id",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -302,12 +332,14 @@ class TestListMessagesEndpoint:
 class TestSendMessageEndpoint:
     """Tests for POST /api/v1/chatbot/threads/{thread_id}/messages/"""
 
-    def test_send_message_success(self, client: TestClient, access_token: str, thread: Thread):
+    def test_send_message_success(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test successful message sending (streaming response)."""
         response = client.post(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
             json={"content": "Hello, chatbot!"},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -321,13 +353,16 @@ class TestSendMessageEndpoint:
 
         assert len(events) >= 1
         assert events[-1].type == "complete"
+        assert events[-1].data.run_id is not None
 
-    def test_send_message_missing_content(self, client: TestClient, access_token: str, thread: Thread):
+    def test_send_message_missing_content(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
         """Test sending message without content field."""
         response = client.post(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
             json={},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -336,23 +371,25 @@ class TestSendMessageEndpoint:
         """Test sending message unauthorized returns 401."""
         response = client.post(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
-            json={"content": "Hello, chatbot!"}
+            json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestUpsertFeedbackEndpoint:
-    """Tests for PUT /api/v1/chatbot/messages/{message_id}/feedbacks/"""
+    """Tests for PUT /api/v1/chatbot/messages/{message_id}/feedback/"""
 
-    def test_create_feedback_success(self, client: TestClient, access_token: str, assistant_message: Message):
+    def test_create_feedback_success(
+        self, client: TestClient, access_token: str, assistant_message: Message
+    ):
         """Test successful feedback creation."""
         rating = FeedbackRating.POSITIVE
         comments = "Great response!"
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedbacks/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
             json={"rating": rating.value, "comments": comments},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -364,14 +401,16 @@ class TestUpsertFeedbackEndpoint:
         assert feedback.comments == comments
         assert feedback.updated_at is None
 
-    def test_create_feedback_without_comments(self, client: TestClient, access_token: str, assistant_message: Message):
+    def test_create_feedback_without_comments(
+        self, client: TestClient, access_token: str, assistant_message: Message
+    ):
         """Test feedback creation without comments."""
         rating = FeedbackRating.NEGATIVE
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedbacks/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
             json={"rating": rating.value},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -383,15 +422,17 @@ class TestUpsertFeedbackEndpoint:
         assert feedback.comments is None
         assert feedback.updated_at is None
 
-    def test_update_feedback_success(self, client: TestClient, access_token: str, feedback: Feedback):
+    def test_update_feedback_success(
+        self, client: TestClient, access_token: str, feedback: Feedback
+    ):
         """Test successful feedback update."""
         original_comments = feedback.comments
         new_comments = "Updated comments"
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{feedback.message_id}/feedbacks/",
+            url=f"/api/v1/chatbot/messages/{feedback.message_id}/feedback/",
             json={"rating": feedback.rating, "comments": new_comments},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -405,19 +446,23 @@ class TestUpsertFeedbackEndpoint:
         assert updated_feedback.created_at == feedback.created_at
         assert updated_feedback.updated_at is not None
 
-    def test_upsert_feedback_missing_rating(self, client: TestClient, access_token: str, assistant_message: Message):
+    def test_upsert_feedback_missing_rating(
+        self, client: TestClient, access_token: str, assistant_message: Message
+    ):
         """Test feedback upsert missing rating field."""
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedbacks/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
             json={"comments": "Great response!"},
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
-    def test_upsert_feedback_unauthorized(self, client: TestClient, assistant_message: Message):
+    def test_upsert_feedback_unauthorized(
+        self, client: TestClient, assistant_message: Message
+    ):
         """Test feedback upsert unauthorized returns 401."""
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedbacks/",
-            json={"rating": FeedbackRating.POSITIVE.value}
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
+            json={"rating": FeedbackRating.POSITIVE.value},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

@@ -5,9 +5,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.database import AsyncDatabase, init_database
-from app.db.models import (Feedback, FeedbackCreate, FeedbackRating,
-                           FeedbackSyncStatus, MessageCreate, Thread,
-                           ThreadCreate)
+from app.db.models import (
+    Feedback,
+    FeedbackCreate,
+    FeedbackRating,
+    FeedbackSyncStatus,
+    MessageCreate,
+    Thread,
+    ThreadCreate,
+)
 from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
 
@@ -36,7 +42,9 @@ async def test_init_database(async_engine: AsyncEngine):
 class TestAsyncDatabaseThread:
     """Tests for Thread CRUD operations."""
 
-    async def test_create_thread_success(self, database: AsyncDatabase, thread_create: ThreadCreate):
+    async def test_create_thread_success(
+        self, database: AsyncDatabase, thread_create: ThreadCreate
+    ):
         """Test successful thread creation."""
         thread = await database.create_thread(thread_create)
 
@@ -60,7 +68,9 @@ class TestAsyncDatabaseThread:
 
         assert thread is None
 
-    async def test_get_threads(self, database: AsyncDatabase, thread_factory: ThreadFactory):
+    async def test_get_threads(
+        self, database: AsyncDatabase, thread_factory: ThreadFactory
+    ):
         """Test getting all threads for a user."""
         thread_1 = await thread_factory("Mock Thread 1")
         thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
@@ -70,23 +80,31 @@ class TestAsyncDatabaseThread:
         assert isinstance(threads, list)
         assert len(threads) == 2
 
-    async def test_get_threads_ordered_asc(self, database: AsyncDatabase, thread_factory: ThreadFactory):
+    async def test_get_threads_ordered_asc(
+        self, database: AsyncDatabase, thread_factory: ThreadFactory
+    ):
         """Test threads ordering."""
         thread_1 = await thread_factory("Mock Thread 1")
         thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
 
-        threads = await database.get_threads(user_id=thread_1.user_id, order_by="created_at")
+        threads = await database.get_threads(
+            user_id=thread_1.user_id, order_by="created_at"
+        )
 
         assert isinstance(threads, list)
         assert len(threads) == 2
         assert threads[0].created_at <= threads[1].created_at
 
-    async def test_get_threads_ordered_desc(self, database: AsyncDatabase, thread_factory: ThreadFactory):
+    async def test_get_threads_ordered_desc(
+        self, database: AsyncDatabase, thread_factory: ThreadFactory
+    ):
         """Test threads ordering."""
         thread_1 = await thread_factory("Mock Thread 1")
         thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
 
-        threads = await database.get_threads(user_id=thread_1.user_id, order_by="-created_at")
+        threads = await database.get_threads(
+            user_id=thread_1.user_id, order_by="-created_at"
+        )
 
         assert isinstance(threads, list)
         assert len(threads) == 2
@@ -109,13 +127,18 @@ class TestAsyncDatabaseThread:
 class TestAsyncDatabaseMessage:
     """Tests for Message CRUD operations."""
 
-    async def test_create_user_message(self, database: AsyncDatabase, user_message_create: MessageCreate):
+    async def test_create_user_message(
+        self, database: AsyncDatabase, user_message_create: MessageCreate
+    ):
         """Test successful user message creation."""
         message = await database.create_message(user_message_create)
 
         assert message.id == user_message_create.id
         assert message.thread_id == user_message_create.thread_id
-        assert message.user_message_id is None and user_message_create.user_message_id is None
+        assert (
+            message.user_message_id is None
+            and user_message_create.user_message_id is None
+        )
         assert message.model_uri == user_message_create.model_uri
         assert message.role == user_message_create.role
         assert message.content == user_message_create.content
@@ -124,7 +147,9 @@ class TestAsyncDatabaseMessage:
         assert message.status == user_message_create.status
         assert isinstance(message.created_at, datetime)
 
-    async def test_create_assistant_message(self, database: AsyncDatabase, assistant_message_create: MessageCreate):
+    async def test_create_assistant_message(
+        self, database: AsyncDatabase, assistant_message_create: MessageCreate
+    ):
         """Test successful assistant message creation."""
         message = await database.create_message(assistant_message_create)
 
@@ -140,7 +165,9 @@ class TestAsyncDatabaseMessage:
         assert message.status == assistant_message_create.status
         assert isinstance(message.created_at, datetime)
 
-    async def test_get_messages(self, database: AsyncDatabase, messages_factory: MessagesFactory):
+    async def test_get_messages(
+        self, database: AsyncDatabase, messages_factory: MessagesFactory
+    ):
         """Test getting all messages for a thread."""
         user_message, assistant_message = await messages_factory()
 
@@ -149,31 +176,49 @@ class TestAsyncDatabaseMessage:
         assert isinstance(messages, list)
         assert len(messages) == 2
 
-    async def test_get_messages_ordered_asc(self, database: AsyncDatabase, messages_factory: MessagesFactory):
+    async def test_get_messages_ordered_asc(
+        self, database: AsyncDatabase, messages_factory: MessagesFactory
+    ):
         """Test getting all messages for a thread."""
         user_message, assistant_message = await messages_factory()
 
-        messages = await database.get_messages(user_message.thread_id, order_by="created_at")
+        messages = await database.get_messages(
+            user_message.thread_id, order_by="created_at"
+        )
 
         assert isinstance(messages, list)
         assert len(messages) == 2
         assert messages[0].created_at <= messages[1].created_at
 
-    async def test_get_messages_ordered_desc(self, database: AsyncDatabase, messages_factory: MessagesFactory):
+    async def test_get_messages_ordered_desc(
+        self, database: AsyncDatabase, messages_factory: MessagesFactory
+    ):
         """Test getting all messages for a thread."""
         user_message, assistant_message = await messages_factory()
 
-        messages = await database.get_messages(user_message.thread_id, order_by="-created_at")
+        messages = await database.get_messages(
+            user_message.thread_id, order_by="-created_at"
+        )
 
         assert isinstance(messages, list)
         assert len(messages) == 2
         assert messages[0].created_at >= messages[1].created_at
 
+    async def test_get_messages_not_found(
+        self, database: AsyncDatabase, thread: Thread
+    ):
+        """Test getting all messages for a thread without messages."""
+        messages = await database.get_messages(thread.id)
+        assert isinstance(messages, list)
+        assert len(messages) == 0
+
 
 class TestAsyncDatabaseFeedback:
     """Tests for Feedback CRUD operations."""
 
-    async def test_upsert_feedback_create(self, database: AsyncDatabase, feedback_create: FeedbackCreate):
+    async def test_upsert_feedback_create(
+        self, database: AsyncDatabase, feedback_create: FeedbackCreate
+    ):
         """Test creating new feedback."""
         feedback, created = await database.upsert_feedback(feedback_create)
 
@@ -184,7 +229,9 @@ class TestAsyncDatabaseFeedback:
         assert isinstance(feedback.id, uuid.UUID)
         assert isinstance(feedback.created_at, datetime)
 
-    async def test_upsert_feedback_update(self, database: AsyncDatabase,  feedback: Feedback):
+    async def test_upsert_feedback_update(
+        self, database: AsyncDatabase, feedback: Feedback
+    ):
         """Test updating existing feedback."""
         feedback_create = FeedbackCreate(
             message_id=feedback.message_id,
@@ -202,7 +249,9 @@ class TestAsyncDatabaseFeedback:
         assert created is False
         assert isinstance(updated_feedback.updated_at, datetime)
 
-    async def test_update_feedback_sync_status_success(self, database: AsyncDatabase, feedback: Feedback):
+    async def test_update_feedback_sync_status_success(
+        self, database: AsyncDatabase, feedback: Feedback
+    ):
         """Test updating feedback sync status."""
         synced_at = datetime.now()
 
