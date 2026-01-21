@@ -55,9 +55,11 @@ class MessageStatus(str, Enum):
 
 class MessageCreate(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    thread_id: uuid.UUID = Field(foreign_key="chatbot.thread.id", index=True)
+    thread_id: uuid.UUID = Field(
+        foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.thread.id", index=True
+    )
     user_message_id: uuid.UUID | None = Field(
-        default=None, foreign_key="chatbot.message.id"
+        default=None, foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.message.id"
     )
     model_uri: str
     role: MessageRole = Field(
@@ -110,7 +112,7 @@ class FeedbackPayload(SQLModel):
 
 class FeedbackCreate(FeedbackPayload):
     message_id: uuid.UUID = Field(
-        foreign_key="chatbot.message.id", unique=True, index=True
+        foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.message.id", unique=True, index=True
     )
 
 

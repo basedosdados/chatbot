@@ -77,11 +77,11 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["thread_id"],
-            ["chatbot.thread.id"],
+            [f"{chatbot}.thread.id"],
         ),
         sa.ForeignKeyConstraint(
             ["user_message_id"],
-            ["chatbot.message.id"],
+            [f"{chatbot}.message.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
         schema=chatbot,
@@ -118,7 +118,7 @@ def upgrade() -> None:
         sa.Column("synced_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(
             ["message_id"],
-            ["chatbot.message.id"],
+            [f"{chatbot}.message.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
         schema=chatbot,
