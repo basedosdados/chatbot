@@ -9,10 +9,16 @@ from google.cloud import bigquery as bq
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
-from app.agent.tools import (BDToolkit, ToolError, ToolOutput,
-                             decode_table_values, execute_bigquery_sql,
-                             get_dataset_details, handle_tool_errors,
-                             search_datasets)
+from app.agent.tools import (
+    BDToolkit,
+    ToolError,
+    ToolOutput,
+    decode_table_values,
+    execute_bigquery_sql,
+    get_dataset_details,
+    handle_tool_errors,
+    search_datasets,
+)
 from app.settings import settings
 
 
@@ -39,7 +45,7 @@ class TestHandleToolErrors:
         def failing_function():
             error = BadRequest(
                 message="Some bad request",
-                errors=[{"reason": "testReason", "message": "Test message"}]
+                errors=[{"reason": "testReason", "message": "Test message"}],
             )
             raise error
 
@@ -72,7 +78,9 @@ class TestHandleToolErrors:
 
         @handle_tool_errors
         def failing_function():
-            raise ToolError("Custom error", error_type="CUSTOM", instructions="Try again")
+            raise ToolError(
+                "Custom error", error_type="CUSTOM", instructions="Try again"
+            )
 
         output = ToolOutput.model_validate(json.loads(failing_function()))
 
@@ -104,7 +112,7 @@ class TestHandleToolErrors:
         def failing_function():
             error = BadRequest(
                 message="Some bad request",
-                errors=[{"reason": "testReason", "message": "Test message"}]
+                errors=[{"reason": "testReason", "message": "Test message"}],
             )
             raise error
 
@@ -159,6 +167,7 @@ class TestToolOutput:
 
 class TestSearchDatasets:
     """Tests for search_datasets tool."""
+
     SEARCH_ENDPOINT = f"{settings.BASEDOSDADOS_BASE_URL}/search/"
 
     @respx.mock
@@ -217,6 +226,7 @@ class TestSearchDatasets:
 
 class TestGetDatasetDetails:
     """Tests for get_dataset_details tool."""
+
     GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 
     @pytest.fixture
@@ -233,7 +243,11 @@ class TestGetDatasetDetails:
                                 "description": "Dataset description",
                                 "tags": {"edges": [{"node": {"name": "tag1"}}]},
                                 "themes": {"edges": [{"node": {"name": "theme1"}}]},
-                                "organizations": {"edges": [{"node": {"name": "org1", "slug": "org1_slug"}}]},
+                                "organizations": {
+                                    "edges": [
+                                        {"node": {"name": "org1", "slug": "org1_slug"}}
+                                    ]
+                                },
                                 "tables": {
                                     "edges": [
                                         {
@@ -242,7 +256,10 @@ class TestGetDatasetDetails:
                                                 "name": "Test Table",
                                                 "slug": "test_table",
                                                 "description": "Table description",
-                                                "temporalCoverage": {"start": "2020", "end": "2023"},
+                                                "temporalCoverage": {
+                                                    "start": "2020",
+                                                    "end": "2023",
+                                                },
                                                 "cloudTables": {
                                                     "edges": [
                                                         {
@@ -261,7 +278,9 @@ class TestGetDatasetDetails:
                                                                 "id": "col-1",
                                                                 "name": "column_name",
                                                                 "description": "Column description",
-                                                                "bigqueryType": {"name": "COLUMN_TYPE"},
+                                                                "bigqueryType": {
+                                                                    "name": "COLUMN_TYPE"
+                                                                },
                                                             }
                                                         }
                                                     ]
@@ -368,7 +387,10 @@ class TestGetDatasetDetails:
                                                 "name": "Test Table",
                                                 "slug": "test_table",
                                                 "description": "Table description",
-                                                "temporalCoverage": {"start": "2020", "end": "2023"},
+                                                "temporalCoverage": {
+                                                    "start": "2020",
+                                                    "end": "2023",
+                                                },
                                                 "cloudTables": {
                                                     "edges": [
                                                         {
@@ -387,7 +409,9 @@ class TestGetDatasetDetails:
                                                                 "id": "col-1",
                                                                 "name": "column_name",
                                                                 "description": "Column description",
-                                                                "bigqueryType": {"name": "COLUMN_TYPE"},
+                                                                "bigqueryType": {
+                                                                    "name": "COLUMN_TYPE"
+                                                                },
                                                             }
                                                         }
                                                     ]
@@ -435,7 +459,11 @@ class TestGetDatasetDetails:
                                 "description": "Dataset description",
                                 "tags": {"edges": [{"node": {"name": "tag1"}}]},
                                 "themes": {"edges": [{"node": {"name": "theme1"}}]},
-                                "organizations": {"edges": [{"node": {"name": "org1", "slug": "org1_slug"}}]},
+                                "organizations": {
+                                    "edges": [
+                                        {"node": {"name": "org1", "slug": "org1_slug"}}
+                                    ]
+                                },
                                 "tables": {
                                     "edges": [
                                         {
@@ -444,7 +472,10 @@ class TestGetDatasetDetails:
                                                 "name": "Test Table",
                                                 "slug": "test_table",
                                                 "description": "Table description",
-                                                "temporalCoverage": {"start": "2020", "end": "2023"},
+                                                "temporalCoverage": {
+                                                    "start": "2020",
+                                                    "end": "2023",
+                                                },
                                                 "cloudTables": {"edges": []},
                                                 "columns": {
                                                     "edges": [
@@ -453,7 +484,9 @@ class TestGetDatasetDetails:
                                                                 "id": "col-1",
                                                                 "name": "column_name",
                                                                 "description": "Column description",
-                                                                "bigqueryType": {"name": "COLUMN_TYPE"},
+                                                                "bigqueryType": {
+                                                                    "name": "COLUMN_TYPE"
+                                                                },
                                                             }
                                                         }
                                                     ]
@@ -485,7 +518,9 @@ class TestGetDatasetDetails:
     def test_get_dataset_details_dataset_not_found(self):
         """Test error when dataset is not found."""
         respx.post(self.GRAPHQL_URL).mock(
-            return_value=httpx.Response(200, json={"data": {"allDataset": {"edges": []}}})
+            return_value=httpx.Response(
+                200, json={"data": {"allDataset": {"edges": []}}}
+            )
         )
 
         result = get_dataset_details.invoke({"dataset_id": "nonexistent"})
@@ -495,7 +530,10 @@ class TestGetDatasetDetails:
         assert output.results is None
         assert output.error_details.message == "Dataset nonexistent not found"
         assert output.error_details.error_type == "DATASET_NOT_FOUND"
-        assert output.error_details.instructions == "Verify the dataset ID from `search_datasets` results"
+        assert (
+            output.error_details.instructions
+            == "Verify the dataset ID from `search_datasets` results"
+        )
 
 
 class TestExecuteBigQuerySQL:
@@ -503,12 +541,7 @@ class TestExecuteBigQuerySQL:
 
     @pytest.fixture
     def mock_config(self) -> dict:
-        return {
-            "configurable": {
-                "thread_id": "test-thread",
-                "user_id": "test-user"
-            }
-        }
+        return {"configurable": {"thread_id": "test-thread", "user_id": "test-user"}}
 
     def test_successful_query(self, mocker: MockerFixture, mock_config: dict):
         """Test successful SELECT query execution."""
@@ -519,9 +552,14 @@ class TestExecuteBigQuerySQL:
         mock_query_job.result.return_value = [{"col1": "value1"}, {"col1": "value2"}]
 
         mock_bigquery_client = MagicMock(spec=bq.Client)
-        mock_bigquery_client.query.side_effect = [mock_dry_run_query_job, mock_query_job]
+        mock_bigquery_client.query.side_effect = [
+            mock_dry_run_query_job,
+            mock_query_job,
+        ]
 
-        mocker.patch("app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "SELECT * FROM project.dataset.table", "config": mock_config}
@@ -541,7 +579,9 @@ class TestExecuteBigQuerySQL:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_dry_run_query_job
 
-        mocker.patch("app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "DELETE FROM project.dataset.table", "config": mock_config}
@@ -552,8 +592,14 @@ class TestExecuteBigQuerySQL:
         assert output.status == "error"
         assert output.results is None
         assert output.error_details.error_type == "FORBIDDEN_STATEMENT"
-        assert output.error_details.message == "Query aborted: Statement DELETE is forbidden."
-        assert output.error_details.instructions == "Your access is strictly read-only. Use only SELECT statements."
+        assert (
+            output.error_details.message
+            == "Query aborted: Statement DELETE is forbidden."
+        )
+        assert (
+            output.error_details.instructions
+            == "Your access is strictly read-only. Use only SELECT statements."
+        )
 
 
 class TestDecodeTableValues:
@@ -561,12 +607,7 @@ class TestDecodeTableValues:
 
     @pytest.fixture
     def mock_config(self) -> dict:
-        return {
-            "configurable": {
-                "thread_id": "test-thread",
-                "user_id": "test-user"
-            }
-        }
+        return {"configurable": {"thread_id": "test-thread", "user_id": "test-user"}}
 
     def test_decode_all_columns(self, mocker: MockerFixture, mock_config: dict):
         """Test decoding all columns from a table."""
@@ -579,7 +620,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_query_job
 
-        mocker.patch("app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {"table_gcp_id": "project.dataset.table", "config": mock_config}
@@ -602,7 +645,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_query_job
 
-        mocker.patch("app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {
@@ -623,13 +668,15 @@ class TestDecodeTableValues:
         """Test error when dictionary table doesn't exist."""
         error = NotFound(
             message="Table not found",
-            errors=[{"reason": "notFound", "message": "Test message"}]
+            errors=[{"reason": "notFound", "message": "Test message"}],
         )
 
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = error
 
-        mocker.patch("app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.get_bigquery_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {"table_gcp_id": "project.dataset.table", "config": mock_config}
@@ -641,7 +688,10 @@ class TestDecodeTableValues:
         assert output.results is None
         assert output.error_details.error_type == "notFound"
         assert output.error_details.message == "Test message"
-        assert output.error_details.instructions == "Dictionary table not found for this dataset."
+        assert (
+            output.error_details.instructions
+            == "Dictionary table not found for this dataset."
+        )
 
     def test_invalid_table_reference(self, mock_config: dict):
         """Test error when table reference format is invalid."""
@@ -655,7 +705,10 @@ class TestDecodeTableValues:
         assert output.results is None
         assert output.error_details.error_type == "INVALID_TABLE_REFERENCE"
         assert output.error_details.message == "Invalid table reference: 'table'"
-        assert output.error_details.instructions == "Provide a valid table reference in the format `project.dataset.table`"
+        assert (
+            output.error_details.instructions
+            == "Provide a valid table reference in the format `project.dataset.table`"
+        )
 
 
 class TestBDToolkit:

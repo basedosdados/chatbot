@@ -5,8 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_mock import MockerFixture
 
-from app.api.dependencies.feedback import (LangSmithFeedbackSender,
-                                           get_feedback_sender)
+from app.api.dependencies.feedback import LangSmithFeedbackSender, get_feedback_sender
 from app.db.models import Feedback, FeedbackRating, FeedbackSyncStatus
 
 
@@ -29,7 +28,9 @@ class TestLangSmithFeedbackSender:
         mock_langsmith_client.return_value = MagicMock()
         return LangSmithFeedbackSender()
 
-    def test_create_feedback_success(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_create_feedback_success(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test successful feedback creation on LangSmith."""
         result = sender._create_langsmith_feedback(mock_feedback)
 
@@ -43,7 +44,9 @@ class TestLangSmithFeedbackSender:
             comment=mock_feedback.comments,
         )
 
-    def test_create_feedback_failure(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_create_feedback_failure(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test failed feedback creation on LangSmith."""
         sender.client.create_feedback.side_effect = Exception("API Error")
 
@@ -52,7 +55,9 @@ class TestLangSmithFeedbackSender:
         assert result is False
         sender.client.create_feedback.assert_called_once()
 
-    def test_update_feedback_success(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_update_feedback_success(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test successful feedback update on LangSmith."""
         result = sender._update_langsmith_feedback(mock_feedback)
 
@@ -64,7 +69,9 @@ class TestLangSmithFeedbackSender:
             comment=mock_feedback.comments,
         )
 
-    def test_update_feedback_failure(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_update_feedback_failure(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test failed feedback update on LangSmith."""
         sender.client.update_feedback.side_effect = Exception("API Error")
 
@@ -73,7 +80,9 @@ class TestLangSmithFeedbackSender:
         assert result is False
         sender.client.update_feedback.assert_called_once()
 
-    def test_send_feedback_create_success(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_send_feedback_create_success(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test send_feedback for new feedback (created=True) with success."""
         sync_status, synced_at = sender.send_feedback(mock_feedback, created=True)
 
@@ -81,7 +90,9 @@ class TestLangSmithFeedbackSender:
         assert isinstance(synced_at, datetime)
         sender.client.create_feedback.assert_called_once()
 
-    def test_send_feedback_create_failure(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_send_feedback_create_failure(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test send_feedback for new feedback (created=True) with failure."""
         sender.client.create_feedback.side_effect = Exception("API Error")
 
@@ -91,7 +102,9 @@ class TestLangSmithFeedbackSender:
         assert isinstance(synced_at, datetime)
         sender.client.create_feedback.assert_called_once()
 
-    def test_send_feedback_update_success(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_send_feedback_update_success(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test send_feedback for existing feedback (created=False) with success."""
         sync_status, synced_at = sender.send_feedback(mock_feedback, created=False)
 
@@ -99,7 +112,9 @@ class TestLangSmithFeedbackSender:
         assert isinstance(synced_at, datetime)
         sender.client.update_feedback.assert_called_once()
 
-    def test_send_feedback_update_failure(self, sender: LangSmithFeedbackSender, mock_feedback: Feedback):
+    def test_send_feedback_update_failure(
+        self, sender: LangSmithFeedbackSender, mock_feedback: Feedback
+    ):
         """Test send_feedback for existing feedback (created=False) with failure."""
         sender.client.update_feedback.side_effect = Exception("API Error")
 

@@ -74,7 +74,9 @@ class ErrorMessage:
     )
 
 
-def _truncate_json(json_string: str, max_list_len: int=10, max_str_len: int=300) -> str:
+def _truncate_json(
+    json_string: str, max_list_len: int = 10, max_str_len: int = 300
+) -> str:
     """Iteratively truncates a serialized JSON object by shortening lists and strings
     and adding human-readable placeholders.
 
@@ -112,7 +114,8 @@ def _truncate_json(json_string: str, max_list_len: int=10, max_str_len: int=300)
             if isinstance(item, str):
                 if len(item) > max_str_len:
                     truncated_str = (
-                        item[:max_str_len] + f"... ({len(item) - max_str_len} more characters)"
+                        item[:max_str_len]
+                        + f"... ({len(item) - max_str_len} more characters)"
                     )
                     current_node[key_or_idx] = truncated_str
 
@@ -156,7 +159,9 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         if message.tool_calls:
             event_type = "tool_call"
             tool_calls = [
-                ToolCall(id=tool_call["id"], name=tool_call["name"], args=tool_call["args"])
+                ToolCall(
+                    id=tool_call["id"], name=tool_call["name"], args=tool_call["args"]
+                )
                 for tool_call in message.tool_calls
             ]
         else:
@@ -176,8 +181,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         # multiple parallel tool calls
         elif isinstance(updates, list):
             tool_messages: list[ToolMessage] = [
-                update["messages"][0] for update in updates
-                if "messages" in update
+                update["messages"][0] for update in updates if "messages" in update
             ]
 
         # defensive handling (langgraph should only output dicts and lists)
@@ -191,10 +195,13 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 tool_name=message.name,
                 content=_truncate_json(message.content),
                 artifact=message.artifact,
-            ) for message in tool_messages
+            )
+            for message in tool_messages
         ]
 
-        return StreamEvent(type="tool_output", data=EventData(tool_outputs=tool_outputs))
+        return StreamEvent(
+            type="tool_output", data=EventData(tool_outputs=tool_outputs)
+        )
     return None
 
 
@@ -255,12 +262,13 @@ async def stream_response(
         status = MessageStatus.SUCCESS
 
         yield StreamEvent(
-            type="final_answer",
-            data=EventData(content=assistant_message)
+            type="final_answer", data=EventData(content=assistant_message)
         ).to_sse()
 
     except google_api_exceptions.InvalidArgument:
-        logger.exception("Agent execution failed with Google API InvalidArgument error:")
+        logger.exception(
+            "Agent execution failed with Google API InvalidArgument error:"
+        )
 
         assistant_message = ErrorMessage.UNEXPECTED
 
@@ -270,12 +278,13 @@ async def stream_response(
             model = init_chat_model(settings.MODEL_URI)
             total_tokens = model.get_num_tokens_from_messages(agent_state["messages"])
 
-            if total_tokens >= model.profile.get("max_input_tokens", settings.MAX_TOKENS):
+            if total_tokens >= model.profile.get(
+                "max_input_tokens", settings.MAX_TOKENS
+            ):
                 assistant_message = ErrorMessage.CONTEXT_OVERFLOW
 
         yield StreamEvent(
-            type="error",
-            data=EventData(error_details={"message": assistant_message})
+            type="error", data=EventData(error_details={"message": assistant_message})
         ).to_sse()
 
     except Exception:
@@ -286,8 +295,7 @@ async def stream_response(
         status = MessageStatus.ERROR
 
         yield StreamEvent(
-            type="error",
-            data=EventData(error_details={"message": assistant_message})
+            type="error", data=EventData(error_details={"message": assistant_message})
         ).to_sse()
 
     message_create = MessageCreate(
@@ -304,7 +312,4 @@ async def stream_response(
 
     message_pair = await database.create_message(message_create)
 
-    yield StreamEvent(
-        type="complete",
-        data=EventData(run_id=message_pair.id)
-    ).to_sse()
+    yield StreamEvent(type="complete", data=EventData(run_id=message_pair.id)).to_sse()

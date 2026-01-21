@@ -1,6 +1,14 @@
 from collections.abc import Callable
-from typing import (Annotated, AsyncIterator, Generic, Iterator, Literal,
-                    Sequence, Type, TypedDict)
+from typing import (
+    Annotated,
+    AsyncIterator,
+    Generic,
+    Iterator,
+    Literal,
+    Sequence,
+    Type,
+    TypedDict,
+)
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
@@ -57,7 +65,9 @@ class ReActAgent(Generic[StateT]):
         self.model = model.bind_tools(self.tools)
 
         if self.system_message:
-            self.model_runnable = (lambda messages: [self.system_message] + messages) | self.model
+            self.model_runnable = (
+                lambda messages: [self.system_message] + messages
+            ) | self.model
         else:
             self.model_runnable = self.model
 
@@ -65,7 +75,9 @@ class ReActAgent(Generic[StateT]):
 
         self.graph = self._compile(state_schema, start_hook)
 
-    def _call_model(self, state: StateT, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    def _call_model(
+        self, state: StateT, config: RunnableConfig
+    ) -> dict[str, list[BaseMessage]]:
         """Calls the LLM on a message list.
 
         Args:
@@ -86,8 +98,10 @@ class ReActAgent(Generic[StateT]):
             return {"messages": []}
 
         if (
-            is_last_step and response.tool_calls or
-            remaining_steps < 2 and response.tool_calls
+            is_last_step
+            and response.tool_calls
+            or remaining_steps < 2
+            and response.tool_calls
         ):
             return {
                 "messages": [
@@ -103,7 +117,9 @@ class ReActAgent(Generic[StateT]):
 
         return {"messages": [response]}
 
-    async def _acall_model(self, state: StateT, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    async def _acall_model(
+        self, state: StateT, config: RunnableConfig
+    ) -> dict[str, list[BaseMessage]]:
         """Asynchronously calls the LLM on a message list.
 
         Args:
@@ -124,8 +140,10 @@ class ReActAgent(Generic[StateT]):
             return {"messages": []}
 
         if (
-            is_last_step and response.tool_calls or
-            remaining_steps < 2 and response.tool_calls
+            is_last_step
+            and response.tool_calls
+            or remaining_steps < 2
+            and response.tool_calls
         ):
             return {
                 "messages": [
@@ -142,9 +160,7 @@ class ReActAgent(Generic[StateT]):
         return {"messages": [response]}
 
     def _compile(
-        self,
-        state_schema: Type[StateT],
-        start_hook: Callable[[StateT], dict] | None
+        self, state_schema: Type[StateT], start_hook: Callable[[StateT], dict] | None
     ) -> CompiledStateGraph:
         """Compiles the state graph into a LangChain Runnable.
 
@@ -159,7 +175,9 @@ class ReActAgent(Generic[StateT]):
         """  # noqa: E501
         graph = StateGraph(state_schema)
 
-        graph.add_node(self.agent_node, RunnableLambda(self._call_model, self._acall_model))
+        graph.add_node(
+            self.agent_node, RunnableLambda(self._call_model, self._acall_model)
+        )
         graph.add_node(self.tools_node, ToolNode(self.tools))
 
         if start_hook is not None:
@@ -191,7 +209,9 @@ class ReActAgent(Generic[StateT]):
         """
         return self.graph.invoke(input=input, config=config)
 
-    async def ainvoke(self, input: dict, config: RunnableConfig | None = None) -> StateT:
+    async def ainvoke(
+        self, input: dict, config: RunnableConfig | None = None
+    ) -> StateT:
         """Asynchronously runs the compiled graph with an optional configuration.
 
         Args:
@@ -201,7 +221,10 @@ class ReActAgent(Generic[StateT]):
         Returns:
             StateT: The last output of the graph run.
         """
-        return await self.graph.ainvoke(input=input, config=config,)
+        return await self.graph.ainvoke(
+            input=input,
+            config=config,
+        )
 
     def stream(
         self,

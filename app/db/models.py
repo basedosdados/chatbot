@@ -25,7 +25,9 @@ class ThreadPayload(SQLModel):
 
 
 class ThreadCreate(ThreadPayload):
-    user_id: int = Field(foreign_key=f"{settings.PG_SCHEMA_WEBSITE}.account.id", index=True)
+    user_id: int = Field(
+        foreign_key=f"{settings.PG_SCHEMA_WEBSITE}.account.id", index=True
+    )
 
 
 class Thread(ThreadCreate, table=True):
@@ -54,16 +56,26 @@ class MessageStatus(str, Enum):
 class MessageCreate(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     thread_id: uuid.UUID = Field(foreign_key="chatbot.thread.id", index=True)
-    user_message_id: uuid.UUID | None = Field(default=None, foreign_key="chatbot.message.id")
+    user_message_id: uuid.UUID | None = Field(
+        default=None, foreign_key="chatbot.message.id"
+    )
     model_uri: str
     role: MessageRole = Field(
-        sa_column=Column(SAEnum(MessageRole, schema=settings.PG_SCHEMA_CHATBOT), nullable=False),
+        sa_column=Column(
+            SAEnum(MessageRole, schema=settings.PG_SCHEMA_CHATBOT), nullable=False
+        ),
     )
     content: str
-    artifacts: JsonValue | None = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
-    events: JsonValue | None = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
+    artifacts: JsonValue | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True))
+    )
+    events: JsonValue | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True))
+    )
     status: MessageStatus = Field(
-        sa_column=Column(SAEnum(MessageStatus, schema=settings.PG_SCHEMA_CHATBOT), nullable=False),
+        sa_column=Column(
+            SAEnum(MessageStatus, schema=settings.PG_SCHEMA_CHATBOT), nullable=False
+        ),
         default=MessageStatus.SUCCESS,
     )
 
@@ -97,7 +109,9 @@ class FeedbackPayload(SQLModel):
 
 
 class FeedbackCreate(FeedbackPayload):
-    message_id: uuid.UUID = Field(foreign_key="chatbot.message.id", unique=True, index=True)
+    message_id: uuid.UUID = Field(
+        foreign_key="chatbot.message.id", unique=True, index=True
+    )
 
 
 class FeedbackPublic(FeedbackCreate):
@@ -113,7 +127,10 @@ class Feedback(FeedbackCreate, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None)
     sync_status: FeedbackSyncStatus = Field(
-        sa_column=Column(SAEnum(FeedbackSyncStatus, schema=settings.PG_SCHEMA_CHATBOT), nullable=False),
+        sa_column=Column(
+            SAEnum(FeedbackSyncStatus, schema=settings.PG_SCHEMA_CHATBOT),
+            nullable=False,
+        ),
         default=FeedbackSyncStatus.PENDING,
     )
     synced_at: datetime | None = Field(default=None)

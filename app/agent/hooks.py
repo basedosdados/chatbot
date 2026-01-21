@@ -1,7 +1,6 @@
 from langchain.messages import RemoveMessage
 from langchain_core.messages.base import BaseMessage
-from langchain_core.messages.utils import (count_tokens_approximately,
-                                           trim_messages)
+from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from app.agent.types import StateT
@@ -27,9 +26,4 @@ def trim_messages_before_agent(state: StateT) -> dict[str, BaseMessage]:
         allow_partial=False,
     )
 
-    return {
-        "messages": [
-            RemoveMessage(id=REMOVE_ALL_MESSAGES),
-            *remaining_messages
-        ]
-    }
+    return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *remaining_messages]}

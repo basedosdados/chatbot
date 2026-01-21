@@ -17,6 +17,7 @@ from app.settings import settings
 
 setup_logger()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover
     await init_database(engine)
@@ -24,10 +25,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     # Connection kwargs defined according to:
     # https://github.com/langchain-ai/langgraph/issues/2887
     # https://langchain-ai.github.io/langgraph/how-tos/persistence_postgres
-    conn_kwargs = {
-        "autocommit": True,
-        "prepare_threshold": 0
-    }
+    conn_kwargs = {"autocommit": True, "prepare_threshold": 0}
 
     model = init_chat_model(
         model=settings.MODEL_URI,
@@ -36,9 +34,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     )
 
     async with AsyncConnectionPool(
-        conninfo=settings.PG_URL,
-        max_size=8,
-        kwargs=conn_kwargs
+        conninfo=settings.PG_URL, max_size=8, kwargs=conn_kwargs
     ) as pool:
         checkpointer = AsyncPostgresSaver(pool)
 
@@ -58,13 +54,16 @@ async def lifespan(app: FastAPI):  # pragma: no cover
 
     await engine.dispose()
 
+
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(api_router)
 
+
 @app.get("/")
 async def redirect_root_to_docs():
     return RedirectResponse("/docs")
+
 
 @app.get("/health")
 async def health_check():

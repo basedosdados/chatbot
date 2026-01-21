@@ -11,7 +11,7 @@ from app.db.models import Feedback, FeedbackSyncStatus
 class LangSmithFeedbackSender:
     """A wrapper to send feedbacks to LangSmith."""
 
-    def __init__(self, api_url: str|None = None, api_key: str|None = None):
+    def __init__(self, api_url: str | None = None, api_key: str | None = None):
         self.client = Client(
             api_url=api_url,
             api_key=api_key,
@@ -34,7 +34,7 @@ class LangSmithFeedbackSender:
                 key="helpfulness",
                 feedback_id=feedback.id,
                 score=feedback.rating,
-                comment=feedback.comments
+                comment=feedback.comments,
             )
             self.logger.info(
                 f"Successfully created feedback {feedback.id} "
@@ -61,7 +61,7 @@ class LangSmithFeedbackSender:
             self.client.update_feedback(
                 feedback_id=feedback.id,
                 score=feedback.rating,
-                comment=feedback.comments
+                comment=feedback.comments,
             )
             self.logger.info(
                 f"Successfully updated feedback {feedback.id} "
@@ -75,7 +75,9 @@ class LangSmithFeedbackSender:
             )
             return False
 
-    def send_feedback(self, feedback: Feedback, created: bool) -> tuple[FeedbackSyncStatus, datetime]:
+    def send_feedback(
+        self, feedback: Feedback, created: bool
+    ) -> tuple[FeedbackSyncStatus, datetime]:
         """Create or update a feedback on LangSmith.
 
         Args:
@@ -87,7 +89,9 @@ class LangSmithFeedbackSender:
         else:
             success = self._update_langsmith_feedback(feedback)
 
-        sync_status = FeedbackSyncStatus.SUCCESS if success else FeedbackSyncStatus.FAILED
+        sync_status = (
+            FeedbackSyncStatus.SUCCESS if success else FeedbackSyncStatus.FAILED
+        )
         synced_at = datetime.now()
 
         return sync_status, synced_at

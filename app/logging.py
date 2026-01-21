@@ -18,6 +18,7 @@ def _format(record):
         "<cyan>%s:{function}:{line}</> - {message}\n{exception}" % keyname
     )
 
+
 def setup_logger():
     # Remove loguru default handler
     logger.remove()
@@ -28,5 +29,5 @@ def setup_logger():
         format=_format,
         backtrace=settings.LOG_BACKTRACE,
         diagnose=settings.LOG_DIAGNOSE,
-        enqueue=settings.LOG_ENQUEUE
+        enqueue=settings.LOG_ENQUEUE,
     )

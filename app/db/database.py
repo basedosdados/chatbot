@@ -4,12 +4,23 @@ from uuid import UUID
 
 from loguru import logger
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (AsyncEngine, AsyncSession,
-                                    async_sessionmaker, create_async_engine)
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlmodel import SQLModel, select
 
-from app.db.models import (Feedback, FeedbackCreate, Message, MessageCreate,
-                           FeedbackSyncStatus, Thread, ThreadCreate)
+from app.db.models import (
+    Feedback,
+    FeedbackCreate,
+    FeedbackSyncStatus,
+    Message,
+    MessageCreate,
+    Thread,
+    ThreadCreate,
+)
 from app.settings import settings
 
 T = TypeVar("T", bound=SQLModel)
@@ -26,7 +37,9 @@ async def init_database(engine: AsyncEngine):
         engine: An AsyncEngine instance.
     """
     async with engine.begin() as conn:
-        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}"))
+        await conn.execute(
+            text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}")
+        )
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
@@ -98,7 +111,9 @@ class AsyncDatabase:
 
         return thread
 
-    async def get_threads(self, user_id: int, order_by: str | None = None) -> list[Thread]:
+    async def get_threads(
+        self, user_id: int, order_by: str | None = None
+    ) -> list[Thread]:
         """Get all threads that belongs to a user.
 
         Args:
@@ -108,7 +123,9 @@ class AsyncDatabase:
         Returns:
             list[Thread]: A list of Thread objects.
         """
-        query = select(Thread).where(Thread.user_id == user_id, Thread.deleted.is_(False))
+        query = select(Thread).where(
+            Thread.user_id == user_id, Thread.deleted.is_(False)
+        )
         query = self._apply_order_by(query, Thread, order_by)
         results = await self.session.execute(query)
         threads = results.scalars().all()
@@ -156,7 +173,9 @@ class AsyncDatabase:
 
         return message_pair
 
-    async def get_messages(self, thread_id: str | UUID, order_by: str | None = None) -> list[Message]:
+    async def get_messages(
+        self, thread_id: str | UUID, order_by: str | None = None
+    ) -> list[Message]:
         """Get all message pairs that belongs to a thread.
 
         Args:
@@ -174,7 +193,9 @@ class AsyncDatabase:
         return messages
 
     # ==================================== Feedback ====================================
-    async def upsert_feedback(self, feedback_create: FeedbackCreate) -> tuple[Feedback, bool]:
+    async def upsert_feedback(
+        self, feedback_create: FeedbackCreate
+    ) -> tuple[Feedback, bool]:
         """Upsert a feedback into the feedback table, i.e., if there is already a feedback associated
         with the message pair ID, it is updated. Otherwise, it is created.
 
@@ -194,8 +215,7 @@ class AsyncDatabase:
 
         if db_feedback is not None:
             feedback_data = feedback_create.model_dump(
-                exclude_unset=True,
-                exclude={"message_id"}
+                exclude_unset=True, exclude={"message_id"}
             )
 
             db_feedback.sqlmodel_update(feedback_data)
@@ -215,7 +235,10 @@ class AsyncDatabase:
         return db_feedback, created
 
     async def update_feedback_sync_status(
-        self, feedback_id: str | UUID, sync_status: FeedbackSyncStatus, synced_at: datetime
+        self,
+        feedback_id: str | UUID,
+        sync_status: FeedbackSyncStatus,
+        synced_at: datetime,
     ) -> Feedback | None:
         """Update the sync_status and synced_at attributes of an existing feedback.
 

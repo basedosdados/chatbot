@@ -10,8 +10,12 @@ from langgraph.errors import GraphRecursionError
 from pytest_mock import MockerFixture
 
 from app.api.schemas import ConfigDict
-from app.api.streaming import (ErrorMessage, _process_chunk, _truncate_json,
-                               stream_response)
+from app.api.streaming import (
+    ErrorMessage,
+    _process_chunk,
+    _truncate_json,
+    stream_response,
+)
 from app.db.models import Message, MessageRole, MessageStatus
 
 
@@ -34,7 +38,9 @@ class TestTruncateJSON:
         data = {"long_string": "a" * self.STR_LONG_LEN}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_str_len=self.STR_MAX_LEN)
-        expected_str = "a" * self.STR_MAX_LEN + f"... ({self.STR_REMAINING} more characters)"
+        expected_str = (
+            "a" * self.STR_MAX_LEN + f"... ({self.STR_REMAINING} more characters)"
+        )
         expected_json = self._format_json({"long_string": expected_str})
         assert truncated == expected_json
 
@@ -42,7 +48,9 @@ class TestTruncateJSON:
         data = {"long_list": list(range(self.LIST_LONG_LEN))}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_list_len=self.LIST_MAX_LEN)
-        expected_list = list(range(self.LIST_MAX_LEN)) + [f"... ({self.LIST_REMAINING} more items)"]
+        expected_list = list(range(self.LIST_MAX_LEN)) + [
+            f"... ({self.LIST_REMAINING} more items)"
+        ]
         expected_json = self._format_json({"long_list": expected_list})
         assert truncated == expected_json
 
@@ -50,19 +58,27 @@ class TestTruncateJSON:
         data = {
             "short_string": "a" * 100,
             "nested_list": [
-                {"short_string": "b" * 100, "long_string": "c" * self.STR_LONG_LEN, "int": 1, "float": 1.0}
+                {
+                    "short_string": "b" * 100,
+                    "long_string": "c" * self.STR_LONG_LEN,
+                    "int": 1,
+                    "float": 1.0,
+                }
                 for _ in range(self.LIST_LONG_LEN)
             ],
             "nested_dict": {"long_string": "d" * self.STR_LONG_LEN},
         }
         json_string = json.dumps(data)
-        truncated = _truncate_json(json_string, max_list_len=self.LIST_MAX_LEN, max_str_len=self.STR_MAX_LEN)
+        truncated = _truncate_json(
+            json_string, max_list_len=self.LIST_MAX_LEN, max_str_len=self.STR_MAX_LEN
+        )
         expected_data = {
             "short_string": "a" * 100,
             "nested_list": [
                 {
                     "short_string": "b" * 100,
-                    "long_string": "c" * self.STR_MAX_LEN + f"... ({self.STR_REMAINING} more characters)",
+                    "long_string": "c" * self.STR_MAX_LEN
+                    + f"... ({self.STR_REMAINING} more characters)",
                     "int": 1,
                     "float": 1.0,
                 }
@@ -70,7 +86,8 @@ class TestTruncateJSON:
             ]
             + [f"... ({self.LIST_REMAINING} more items)"],
             "nested_dict": {
-                "long_string": "d" * self.STR_MAX_LEN + f"... ({self.STR_REMAINING} more characters)"
+                "long_string": "d" * self.STR_MAX_LEN
+                + f"... ({self.STR_REMAINING} more characters)"
             },
         }
         expected_json = self._format_json(expected_data)
@@ -107,7 +124,11 @@ class TestProcessChunk:
                     AIMessage(
                         content="Let me search for that.",
                         tool_calls=[
-                            {"id": "call_123", "name": "search", "args": {"query": "foo"}}
+                            {
+                                "id": "call_123",
+                                "name": "search",
+                                "args": {"query": "foo"},
+                            }
                         ],
                     )
                 ]
@@ -138,7 +159,11 @@ class TestProcessChunk:
                     AIMessage(
                         content="I'll search both.",
                         tool_calls=[
-                            {"id": "call_1", "name": "search", "args": {"query": "foo"}},
+                            {
+                                "id": "call_1",
+                                "name": "search",
+                                "args": {"query": "foo"},
+                            },
                             {"id": "call_2", "name": "lookup", "args": {"id": "123"}},
                         ],
                     )
@@ -156,13 +181,7 @@ class TestProcessChunk:
 
     def test_agent_chunk_final_answer(self):
         """Test agent chunk without tool calls returns final_answer event."""
-        chunk = {
-            "agent": {
-                "messages": [
-                    AIMessage(content="Here is your answer.")
-                ]
-            }
-        }
+        chunk = {"agent": {"messages": [AIMessage(content="Here is your answer.")]}}
 
         event = _process_chunk(chunk)
 
@@ -350,57 +369,72 @@ class TestStreamResponse:
         return events
 
     async def test_stream_response_happy_path(
-        self, mock_database, mock_user_message, mock_config, mock_thread_id, mock_model_uri
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
     ):
         """Test successful streaming: skips 'values' mode, collects artifacts, yields all events."""
         mock_agent = MagicMock()
 
         async def mock_astream(*args, **kwargs):
-            yield "updates", {
-                "agent": {
-                    "messages": [
-                        AIMessage(
-                            content="Let me search.",
-                            tool_calls=[
-                                {"id": "call_1", "name": "search", "args": {}},
-                                {"id": "call_2", "name": "lookup", "args": {}},
-                            ],
-                        )
-                    ]
-                }
-            }
+            yield (
+                "updates",
+                {
+                    "agent": {
+                        "messages": [
+                            AIMessage(
+                                content="Let me search.",
+                                tool_calls=[
+                                    {"id": "call_1", "name": "search", "args": {}},
+                                    {"id": "call_2", "name": "lookup", "args": {}},
+                                ],
+                            )
+                        ]
+                    }
+                },
+            )
             yield "values", {"messages": ["msg1"]}
-            yield "updates", {"unknown_node": {}}  # Unrecognized chunk, _process_chunk returns None
-            yield "updates", {
-                "tools": [
-                    {
-                        "messages": [
-                            ToolMessage(
-                                content='{"result": "data"}',
-                                tool_call_id="call_1",
-                                name="search",
-                                status="success",
-                                artifact={"url": "http://example.com"},
-                            )
-                        ]
-                    },
-                    {
-                        "messages": [
-                            ToolMessage(
-                                content='{"id": "123"}',
-                                tool_call_id="call_2",
-                                name="lookup",
-                                status="success",
-                                artifact=None,  # No artifact
-                            )
-                        ]
-                    },
-                ]
-            }
+            yield (
+                "updates",
+                {"unknown_node": {}},
+            )  # Unrecognized chunk, _process_chunk returns None
+            yield (
+                "updates",
+                {
+                    "tools": [
+                        {
+                            "messages": [
+                                ToolMessage(
+                                    content='{"result": "data"}',
+                                    tool_call_id="call_1",
+                                    name="search",
+                                    status="success",
+                                    artifact={"url": "http://example.com"},
+                                )
+                            ]
+                        },
+                        {
+                            "messages": [
+                                ToolMessage(
+                                    content='{"id": "123"}',
+                                    tool_call_id="call_2",
+                                    name="lookup",
+                                    status="success",
+                                    artifact=None,  # No artifact
+                                )
+                            ]
+                        },
+                    ]
+                },
+            )
             yield "values", {"messages": ["msg1", "msg2"]}
-            yield "updates", {
-                "agent": {"messages": [AIMessage(content="Here is your answer.")]}
-            }
+            yield (
+                "updates",
+                {"agent": {"messages": [AIMessage(content="Here is your answer.")]}},
+            )
             yield "values", {"messages": ["msg1", "msg2", "msg3"]}
 
         mock_agent.astream = mock_astream
@@ -424,10 +458,17 @@ class TestStreamResponse:
 
         mock_database.create_message.assert_called_once()
         call_args = mock_database.create_message.call_args[0][0]
-        assert call_args.artifacts == [{"url": "http://example.com"}]  # Only one artifact collected
+        assert call_args.artifacts == [
+            {"url": "http://example.com"}
+        ]  # Only one artifact collected
 
     async def test_stream_response_generic_exception(
-        self, mock_database, mock_user_message, mock_config, mock_thread_id, mock_model_uri
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
     ):
         """Test generic exception yields error event."""
         mock_agent = MagicMock()
@@ -459,7 +500,12 @@ class TestStreamResponse:
         assert call_args.content == ErrorMessage.UNEXPECTED
 
     async def test_stream_response_graph_recursion_error(
-        self, mock_database, mock_user_message, mock_config, mock_thread_id, mock_model_uri
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
     ):
         """Test GraphRecursionError sets graceful message without error status."""
         mock_agent = MagicMock()
@@ -493,7 +539,12 @@ class TestStreamResponse:
         assert call_args.content == ErrorMessage.GRAPH_RECURSION_LIMIT_REACHED
 
     async def test_stream_response_google_api_error(
-        self, mock_database, mock_user_message, mock_config, mock_thread_id, mock_model_uri
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
     ):
         """Test Google API InvalidArgument yields error event."""
         mock_agent = MagicMock()
@@ -530,7 +581,7 @@ class TestStreamResponse:
         mock_user_message,
         mock_config,
         mock_thread_id,
-        mock_model_uri
+        mock_model_uri,
     ):
         """Test Google API error with agent_state set but tokens below limit."""
         mock_agent = MagicMock()
@@ -573,7 +624,7 @@ class TestStreamResponse:
         mock_user_message,
         mock_config,
         mock_thread_id,
-        mock_model_uri
+        mock_model_uri,
     ):
         """Test Google API error with context window exceeded."""
         mock_agent = MagicMock()
@@ -585,7 +636,9 @@ class TestStreamResponse:
         mock_agent.astream = mock_astream
 
         mock_model = MagicMock()
-        mock_model.get_num_tokens_from_messages.return_value = 9_999_999  # Exceeds limit
+        mock_model.get_num_tokens_from_messages.return_value = (
+            9_999_999  # Exceeds limit
+        )
         mock_model.profile.get.return_value = 1_048_576  # Gemini context window
         mocker.patch("app.api.streaming.init_chat_model", return_value=mock_model)
 

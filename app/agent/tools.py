@@ -163,7 +163,10 @@ class ToolError(Exception):
     """Custom exception for tool-specific errors."""
 
     def __init__(
-        self, message: str, error_type: str | None = None, instructions: str | None = None
+        self,
+        message: str,
+        error_type: str | None = None,
+        instructions: str | None = None,
     ):
         super().__init__(message)
         self.error_type = error_type
@@ -233,7 +236,9 @@ def handle_tool_errors(
                     message = e.errors[0].get("message", message)
 
                 error_details = ErrorDetails(
-                    error_type=reason, message=message, instructions=instructions.get(reason)
+                    error_type=reason,
+                    message=message,
+                    instructions=instructions.get(reason),
                 )
             except ToolError as e:
                 error_details = ErrorDetails(
@@ -242,9 +247,9 @@ def handle_tool_errors(
             except Exception as e:
                 error_details = ErrorDetails(message=f"Unexpected error: {e}")
 
-            tool_output = ToolOutput(status="error", error_details=error_details).model_dump(
-                exclude_none=True
-            )
+            tool_output = ToolOutput(
+                status="error", error_details=error_details
+            ).model_dump(exclude_none=True)
             return json.dumps(tool_output, ensure_ascii=False, indent=2)
 
         return wrapper
@@ -299,7 +304,9 @@ def search_datasets(query: str) -> str:
         )
         overviews.append(dataset_overview.model_dump())
 
-    tool_output = ToolOutput(status="success", results=overviews).model_dump(exclude_none=True)
+    tool_output = ToolOutput(status="success", results=overviews).model_dump(
+        exclude_none=True
+    )
     return json.dumps(tool_output, ensure_ascii=False, indent=2)
 
 
@@ -450,7 +457,9 @@ def get_dataset_details(dataset_id: str) -> str:
         usage_guide=usage_guide,
     ).model_dump()
 
-    tool_output = ToolOutput(status="success", results=dataset).model_dump(exclude_none=True)
+    tool_output = ToolOutput(status="success", results=dataset).model_dump(
+        exclude_none=True
+    )
     return json.dumps(tool_output, ensure_ascii=False, indent=2)
 
 
@@ -501,19 +510,25 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 
-    job_config = bq.QueryJobConfig(maximum_bytes_billed=LIMIT_BIGQUERY_QUERY, labels=labels)
+    job_config = bq.QueryJobConfig(
+        maximum_bytes_billed=LIMIT_BIGQUERY_QUERY, labels=labels
+    )
     query_job = client.query(sql_query, job_config=job_config)
 
     rows = query_job.result()
     results = [dict(row) for row in rows]
 
-    tool_output = ToolOutput(status="success", results=results).model_dump(exclude_none=True)
+    tool_output = ToolOutput(status="success", results=results).model_dump(
+        exclude_none=True
+    )
     return json.dumps(tool_output, ensure_ascii=False, default=str)
 
 
 @tool
 @handle_tool_errors(
-    instructions={GoogleAPIError.NOT_FOUND: ("Dictionary table not found for this dataset.")}
+    instructions={
+        GoogleAPIError.NOT_FOUND: ("Dictionary table not found for this dataset.")
+    }
 )
 def decode_table_values(
     table_gcp_id: str,
@@ -572,12 +587,13 @@ def decode_table_values(
     rows = query_job.result()
     results = [dict(row) for row in rows]
 
-    tool_output = ToolOutput(status="success", results=results).model_dump(exclude_none=True)
+    tool_output = ToolOutput(status="success", results=results).model_dump(
+        exclude_none=True
+    )
     return json.dumps(tool_output, ensure_ascii=False, default=str)
 
 
 class BDToolkit:
-
     @staticmethod
     def get_tools() -> list[BaseTool]:
         """Return all available tools for Base dos Dados database interaction.

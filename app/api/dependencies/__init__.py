@@ -12,5 +12,5 @@ __all__ = [
     "get_database",
     "get_feedback_sender",
     "get_session",
-    "get_user_id"
+    "get_user_id",
 ]
