@@ -9,9 +9,14 @@ PostgresDsnStr = Annotated[PostgresDsn, AfterValidator(str)]
 
 
 class Settings(BaseSettings):
+    # ============================================================
+    # ==                    General settings                    ==
+    # ============================================================
     API_PREFIX: str = Field(description="The api prefix, e.g., /api/v1")
 
-    # =================== Database settings ====================
+    # ============================================================
+    # ==                   Database settings                    ==
+    # ============================================================
     PG_URL: PostgresDsnStr = Field(description="PostgreSQL database URL.")
     SQLALCHEMY_PG_URL: PostgresDsnStr = Field(
         description="PostgreSQL database URL for SQLAlchemy."
@@ -19,7 +24,9 @@ class Settings(BaseSettings):
     PG_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
     PG_SCHEMA_WEBSITE: str = Field(description="PostgreSQL website database schema.")
 
-    # =================== BD Backend settings ==================
+    # ============================================================
+    # ==                Website Backend settings                ==
+    # ============================================================
     BASEDOSDADOS_BASE_URL: str = Field(
         default="https://backend.basedosdados.org",
         description="Base URL for the basedados backend.",
@@ -31,7 +38,9 @@ class Settings(BaseSettings):
         description="Secret key used for signing and verifying JWT tokens. Keep it secret. Keep it safe."
     )
 
-    # =================== Google Cloud settings ================
+    # ============================================================
+    # ==                 Google Cloud settings                  ==
+    # ============================================================
     GOOGLE_BIGQUERY_PROJECT: str = Field(description="Google BigQuery project ID.")
     GOOGLE_SERVICE_ACCOUNT: str = Field(
         description="Path to a google service account with required permissions."
@@ -45,7 +54,9 @@ class Settings(BaseSettings):
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
 
-    # =================== Model settings =======================
+    # ============================================================
+    # ==                      LLM settings                      ==
+    # ============================================================
     MODEL_URI: str = Field(
         description=(
             "Defines the LLM to be used. Refer to the LangChain docs for valid values: "
@@ -67,14 +78,18 @@ class Settings(BaseSettings):
         ),
     )
 
-    # =================== LangSmith settings ===================
+    # ============================================================
+    # ==                   LangSmith settings                   ==
+    # ============================================================
     LANGSMITH_TRACING: bool = Field(
         default=True, description="Whether to enable tracing to LangSmith."
     )
     LANGSMITH_API_KEY: str = Field(description="LangSmith API key.")
     LANGSMITH_PROJECT: str = Field(description="LangSmith project name.")
 
-    # =================== Logging settings =====================
+    # ============================================================
+    # ==                    Logging settings                    ==
+    # ============================================================
     LOG_LEVEL: str = Field(
         default="INFO", description="The minimum severity level for logging messages."
     )
