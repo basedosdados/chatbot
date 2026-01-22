@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.chatbot.name }}
+  labels:
+    app.kubernetes.io/component: basedosdados-chatbot
+    app.kubernetes.io/name: {{ .Values.chatbot.name }}
+  annotations:
+    rollme: {{ randAlphaNum 5 | quote }}
+spec:
+  replicas: {{ .Values.chatbot.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 50%
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: basedosdados-chatbot
+      app.kubernetes.io/name: {{ .Values.chatbot.name }}
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: basedosdados-chatbot
+        app.kubernetes.io/name: {{ .Values.chatbot.name }}
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
+    spec:
+      containers:
+        - name: basedosdados-chatbot
+          image: "{{ .Values.chatbot.image.name }}:{{ .Values.chatbot.image.tag }}"
+          imagePullPolicy: {{ .Values.chatbot.image.pullPolicy }}
+          ports:
+            - name: fastapi
+              containerPort: 8000
+          volumeMounts:
+            - name: chatbot-sa
+              mountPath: /var/secrets/
+              readOnly: true
+          env:
+            - name: PG_HOST
+              value: {{ .Values.chatbot.sharedDatabase.host | quote }}
+            - name: PG_PORT
+              value: {{ .Values.chatbot.sharedDatabase.port | quote }}
+            - name: PG_USER
+              value: {{ .Values.chatbot.sharedDatabase.user | quote }}
+            - name: PG_DB
+              value: {{ .Values.chatbot.sharedDatabase.name | quote }}
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.chatbot.sharedDatabase.passwordSecret | quote }}
+                  key: password
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.chatbot.sharedEnvSecret | quote }}
+                  key: DJANGO_SECRET_KEY
+          envFrom:
+            - secretRef:
+                name: {{ .Values.chatbot.envSecret | quote }}
+          resources:
+            {{- toYaml .Values.chatbot.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: chatbot-sa
+          secret:
+            secretName: {{ .Values.chatbot.envSecret | quote }}
+            items:
+              - key: CHATBOT_SA
+                path: chatbot-sa.json
+      restartPolicy: Always
