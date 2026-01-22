@@ -1,0 +1,60 @@
+name: Test Chatbot
+
+on:
+  pull_request:
+    paths: ["**.py"]
+  # Allow manual execution from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  test-chatbot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.24"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: |
+          cd backend
+          uv run pytest
+        # Minimal environment configuration required for test execution
+        env:
+          # API prefix (must be the same prefix used in the API router)
+          API_PREFIX: /api/v1
+
+          # Mock database connection strings and schemas
+          PG_URL: postgresql://mock:mock@localhost:5432/mock
+          SQLALCHEMY_PG_URL: postgresql+psycopg://mock:mock@localhost:5432/mock
+          PG_SCHEMA_WEBSITE: public
+          PG_SCHEMA_CHATBOT: chatbot
+
+          # Mock JWT configuration
+          JWT_ALGORITHM: HS256
+          JWT_SECRET_KEY: mock-jwt-secret-key
+
+          # Mock Google BigQuery configuration
+          GOOGLE_BIGQUERY_PROJECT: mock-bigquery-project
+          GOOGLE_SERVICE_ACCOUNT: /tmp/mock-service-account.json
+
+          # Mock LLM configuration
+          MODEL_URI: mock-model-uri
+          MODEL_TEMPERATURE: 0.0
+          MAX_TOKENS: 4096
+
+          # Mock LangSmith configuration
+          LANGSMITH_TRACING: false
+          LANGSMITH_API_KEY: mock-langsmith-api-key
+          LANGSMITH_PROJECT: mock-langsmith-project
