@@ -15,4 +15,4 @@ printf "${BOLD}${CYAN}> Running database migrations...${RESET}\n"
 alembic upgrade head
 
 printf "\n${BOLD}${CYAN}> Starting FastAPI server...${RESET}"
-exec fastapi run --workers 3 app/main.py
+exec fastapi run --workers 2 app/main.py
