@@ -1,5 +1,5 @@
 from functools import cached_property
-from typing import Annotated
+from typing import Annotated, Literal
 
 from google.oauth2.service_account import Credentials
 from pydantic import AfterValidator, Field, PostgresDsn, computed_field
@@ -9,10 +9,7 @@ PostgresDsnStr = Annotated[PostgresDsn, AfterValidator(str)]
 
 
 class Settings(BaseSettings):
-    # ============================================================
-    # ==                    General settings                    ==
-    # ============================================================
-    API_PREFIX: str = Field(description="The api prefix, e.g., /api/v1")
+    API_PREFIX: Literal["/api/v1"] = "/api/v1"
 
     # ============================================================
     # ==                   Database settings                    ==
