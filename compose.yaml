@@ -1,0 +1,49 @@
+name: chatbot
+
+services:
+  api:
+    build: .
+    command: uv run fastapi dev --host 0.0.0.0 app/main.py
+    env_file: .env
+    environment:
+      # Enable dev dependencies for local development
+      - UV_NO_DEV=0
+    ports:
+      - 8000:8000
+    develop:
+      # Live-reload configuration for local development
+      # Ref: https://docs.docker.com/compose/how-tos/file-watch
+      watch:
+        # Sync the working directory with the `/app` directory in the container
+        - action: sync
+          path: .
+          target: /app
+          # Exclude the host virtual environment to avoid
+          # platform mismatches and invalid symlinks
+          ignore:
+            - .venv/
+        # Rebuild the image when dependencies change
+        - action: rebuild
+          path: ./uv.lock
+    volumes:
+      # Mount Google Cloud credentials (read-only)
+      - $HOME/.basedosdados/credentials:/root/.basedosdados/credentials:ro
+    deploy:
+      # Limit local resources to match our pod resources
+      resources:
+        reservations:
+          cpus: '0.25'
+          memory: 1G
+        limits:
+          cpus: '0.5'
+          memory: 2G
+    networks:
+      - db_network
+    container_name: chatbot-api
+
+# External network for database connectivity,
+# created by our website backend service
+# Ref: https://github.com/basedosdados/backend
+networks:
+  db_network:
+    external: true
