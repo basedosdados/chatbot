@@ -27,7 +27,7 @@ services:
           path: ./uv.lock
     volumes:
       # Mount Google Cloud credentials (read-only)
-      - $HOME/.basedosdados/credentials:/root/.basedosdados/credentials:ro
+      - ${HOME}/.basedosdados/credentials:/app/credentials:ro
     deploy:
       # Limit local resources to match our pod resources
       resources:
