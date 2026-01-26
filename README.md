@@ -89,10 +89,11 @@ cp .env.example .env
 ```bash
 docker compose up --watch
 ```
+
 **Com o script `run-local.sh`:**
 ```bash
 ./scripts/run-local.sh
 ```
+
 > [!NOTE]
 > Caso opte pelo script, altere `DB_HOST` para `localhost` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
-
