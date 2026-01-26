@@ -52,6 +52,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.chatbot.sharedDatabase.passwordSecret | quote }}
                   key: password
+            - name: JWT_ALGORITHM
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.chatbot.sharedEnvSecret | quote }}
+                  key: DJANGO_JWT_ALGORITHM
             - name: JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
