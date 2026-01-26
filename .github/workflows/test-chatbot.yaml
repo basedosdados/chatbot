@@ -32,14 +32,10 @@ jobs:
           uv run pytest
         # Minimal environment configuration required for test execution
         env:
-          # API prefix (must be the same prefix used in the API router)
-          API_PREFIX: /api/v1
-
           # Mock database connection strings and schemas
-          PG_URL: postgresql://mock:mock@localhost:5432/mock
-          SQLALCHEMY_PG_URL: postgresql+psycopg://mock:mock@localhost:5432/mock
-          PG_SCHEMA_WEBSITE: public
-          PG_SCHEMA_CHATBOT: chatbot
+          DB_URL: postgresql://mock:mock@localhost:5432/mock
+          SQLALCHEMY_DB_URL: postgresql+psycopg://mock:mock@localhost:5432/mock
+          DB_SCHEMA_CHATBOT: chatbot
 
           # Mock JWT configuration
           JWT_ALGORITHM: HS256
