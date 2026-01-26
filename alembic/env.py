@@ -32,7 +32,7 @@ def include_name(name, type_, parent_names):
     prevents unnecessary reflection of unmanaged schemas.
     """
     if type_ == "schema":
-        return name == settings.PG_SCHEMA_CHATBOT
+        return name == settings.DB_SCHEMA_CHATBOT
     return True
 
 
@@ -44,7 +44,7 @@ def include_object(object, name, type_, reflected, compare_to):
     """
     if type_ != "table":
         return True
-    return object.schema == settings.PG_SCHEMA_CHATBOT
+    return object.schema == settings.DB_SCHEMA_CHATBOT
 
 
 def run_migrations_offline() -> None:
@@ -60,11 +60,11 @@ def run_migrations_offline() -> None:
 
     """
     context.configure(
-        url=settings.SQLALCHEMY_PG_URL,
+        url=settings.SQLALCHEMY_DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        version_table_schema=settings.PG_SCHEMA_CHATBOT,
+        version_table_schema=settings.DB_SCHEMA_CHATBOT,
         include_name=include_name,
         include_object=include_object,
         include_schemas=True,
@@ -82,7 +82,7 @@ def run_migrations_online() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.SQLALCHEMY_PG_URL
+    configuration["sqlalchemy.url"] = settings.SQLALCHEMY_DB_URL
 
     connectable = engine_from_config(
         configuration,
@@ -92,14 +92,14 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         connection.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}")
+            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
         )
         connection.commit()
 
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            version_table_schema=settings.PG_SCHEMA_CHATBOT,
+            version_table_schema=settings.DB_SCHEMA_CHATBOT,
             include_name=include_name,
             include_object=include_object,
             include_schemas=True,

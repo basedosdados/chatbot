@@ -30,7 +30,7 @@ async def test_init_database(async_engine: AsyncEngine):
                 WHERE schemaname = :schema
                 """,
             ),
-            {"schema": settings.PG_SCHEMA_CHATBOT},
+            {"schema": settings.DB_SCHEMA_CHATBOT},
         )
         tables = {row[0] for row in result.all()}
 

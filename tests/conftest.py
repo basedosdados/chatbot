@@ -52,7 +52,7 @@ async def database(async_engine: AsyncEngine):
     """Create a AsyncDatabase instance connected to the test PostgreSQL container."""
     async with async_engine.begin() as conn:
         await conn.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}")
+            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
         )
         await conn.run_sync(SQLModel.metadata.create_all)
 

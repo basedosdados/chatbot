@@ -14,12 +14,12 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                   Database settings                    ==
     # ============================================================
-    PG_URL: PostgresDsnStr = Field(description="PostgreSQL database URL.")
-    SQLALCHEMY_PG_URL: PostgresDsnStr = Field(
+    DB_URL: PostgresDsnStr = Field(description="PostgreSQL database URL.")
+    SQLALCHEMY_DB_URL: PostgresDsnStr = Field(
         description="PostgreSQL database URL for SQLAlchemy."
     )
-    PG_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
-    PG_SCHEMA_WEBSITE: str = Field(description="PostgreSQL website database schema.")
+    DB_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
+    DB_SCHEMA_WEBSITE: str = Field(description="PostgreSQL website database schema.")
 
     # ============================================================
     # ==                Website Backend settings                ==

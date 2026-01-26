@@ -12,7 +12,7 @@ from app.settings import settings
 # Stub table for the Django-managed 'account' table in the website schema.
 class Account(SQLModel, table=True):
     __tablename__ = "account"
-    __table_args__ = {"schema": settings.PG_SCHEMA_WEBSITE}
+    __table_args__ = {"schema": settings.DB_SCHEMA_WEBSITE}
 
     id: int = Field(primary_key=True)
 
@@ -26,12 +26,12 @@ class ThreadPayload(SQLModel):
 
 class ThreadCreate(ThreadPayload):
     user_id: int = Field(
-        foreign_key=f"{settings.PG_SCHEMA_WEBSITE}.account.id", index=True
+        foreign_key=f"{settings.DB_SCHEMA_WEBSITE}.account.id", index=True
     )
 
 
 class Thread(ThreadCreate, table=True):
-    __table_args__ = {"schema": settings.PG_SCHEMA_CHATBOT}
+    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
@@ -56,15 +56,15 @@ class MessageStatus(str, Enum):
 class MessageCreate(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     thread_id: uuid.UUID = Field(
-        foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.thread.id", index=True
+        foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.thread.id", index=True
     )
     user_message_id: uuid.UUID | None = Field(
-        default=None, foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.message.id"
+        default=None, foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.message.id"
     )
     model_uri: str
     role: MessageRole = Field(
         sa_column=Column(
-            SAEnum(MessageRole, schema=settings.PG_SCHEMA_CHATBOT), nullable=False
+            SAEnum(MessageRole, schema=settings.DB_SCHEMA_CHATBOT), nullable=False
         ),
     )
     content: str
@@ -76,14 +76,14 @@ class MessageCreate(SQLModel):
     )
     status: MessageStatus = Field(
         sa_column=Column(
-            SAEnum(MessageStatus, schema=settings.PG_SCHEMA_CHATBOT), nullable=False
+            SAEnum(MessageStatus, schema=settings.DB_SCHEMA_CHATBOT), nullable=False
         ),
         default=MessageStatus.SUCCESS,
     )
 
 
 class Message(MessageCreate, table=True):
-    __table_args__ = {"schema": settings.PG_SCHEMA_CHATBOT}
+    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
 
     created_at: datetime = Field(default_factory=datetime.now, index=True)
 
@@ -112,7 +112,7 @@ class FeedbackPayload(SQLModel):
 
 class FeedbackCreate(FeedbackPayload):
     message_id: uuid.UUID = Field(
-        foreign_key=f"{settings.PG_SCHEMA_CHATBOT}.message.id", unique=True, index=True
+        foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.message.id", unique=True, index=True
     )
 
 
@@ -123,14 +123,14 @@ class FeedbackPublic(FeedbackCreate):
 
 
 class Feedback(FeedbackCreate, table=True):
-    __table_args__ = {"schema": settings.PG_SCHEMA_CHATBOT}
+    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None)
     sync_status: FeedbackSyncStatus = Field(
         sa_column=Column(
-            SAEnum(FeedbackSyncStatus, schema=settings.PG_SCHEMA_CHATBOT),
+            SAEnum(FeedbackSyncStatus, schema=settings.DB_SCHEMA_CHATBOT),
             nullable=False,
         ),
         default=FeedbackSyncStatus.PENDING,

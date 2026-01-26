@@ -19,8 +19,8 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 # chatbot and website schemas
-chatbot = settings.PG_SCHEMA_CHATBOT
-website = settings.PG_SCHEMA_WEBSITE
+chatbot = settings.DB_SCHEMA_CHATBOT
+website = settings.DB_SCHEMA_WEBSITE
 
 
 def upgrade() -> None:

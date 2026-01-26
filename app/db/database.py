@@ -25,7 +25,7 @@ from app.settings import settings
 
 T = TypeVar("T", bound=SQLModel)
 
-engine = create_async_engine(settings.SQLALCHEMY_PG_URL)
+engine = create_async_engine(settings.SQLALCHEMY_DB_URL)
 
 sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -38,7 +38,7 @@ async def init_database(engine: AsyncEngine):
     """
     async with engine.begin() as conn:
         await conn.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.PG_SCHEMA_CHATBOT}")
+            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
         )
         await conn.run_sync(SQLModel.metadata.create_all)
 
