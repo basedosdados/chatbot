@@ -36,17 +36,6 @@ def include_name(name, type_, parent_names):
     return True
 
 
-def include_object(object, name, type_, reflected, compare_to):
-    """Filter which objects from model metadata Alembic should manage.
-
-    Required because we have a stub Account model in the code that
-    references {website_schema}.account - this filters it out from migrations.
-    """
-    if type_ != "table":
-        return True
-    return object.schema == settings.DB_SCHEMA_CHATBOT
-
-
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -66,7 +55,6 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         version_table_schema=settings.DB_SCHEMA_CHATBOT,
         include_name=include_name,
-        include_object=include_object,
         include_schemas=True,
     )
 
@@ -101,7 +89,6 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             version_table_schema=settings.DB_SCHEMA_CHATBOT,
             include_name=include_name,
-            include_object=include_object,
             include_schemas=True,
         )
 
