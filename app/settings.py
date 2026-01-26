@@ -101,7 +101,7 @@ class Settings(BaseSettings):
         ),
     )
     LOG_ENQUEUE: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Whether the messages to be logged should first pass through a multiprocessing-safe queue before reaching the sink. "
             "This is useful while logging to a file through multiple processes and also has the advantage of making logging calls non-blocking."
