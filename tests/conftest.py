@@ -9,7 +9,6 @@ from testcontainers.postgres import PostgresContainer
 
 from app.db.database import AsyncDatabase
 from app.db.models import (
-    Account,
     Feedback,
     FeedbackCreate,
     FeedbackRating,
@@ -69,24 +68,18 @@ async def database(async_engine: AsyncEngine):
 # User Fixtures
 # =============================================================
 @pytest_asyncio.fixture
-async def user(database: AsyncDatabase) -> Account:
-    """Mock user using the `Account` stub model."""
-    user = Account(id=1)
-
-    database.session.add(user)
-    await database.session.commit()
-    await database.session.refresh(user)
-
-    return user
+async def user_id() -> int:
+    """Mock user ID for testing."""
+    return 1
 
 
 # =============================================================
 # Thread Fixtures
 # =============================================================
 @pytest.fixture
-def thread_create(user: Account) -> ThreadCreate:
+def thread_create(user_id: int) -> ThreadCreate:
     """Mock ThreadCreate instance for testing."""
-    return ThreadCreate(title="Mock Thread", user_id=user.id)
+    return ThreadCreate(title="Mock Thread", user_id=user_id)
 
 
 @pytest_asyncio.fixture
@@ -96,11 +89,11 @@ async def thread(database: AsyncDatabase, thread_create: ThreadCreate) -> Thread
 
 
 @pytest_asyncio.fixture
-async def thread_factory(database: AsyncDatabase, user: Account) -> ThreadFactory:
+async def thread_factory(database: AsyncDatabase, user_id: int) -> ThreadFactory:
     """Factory to create multiple threads in a single test."""
 
     async def factory(title: str) -> Thread:
-        thread_create = ThreadCreate(title=title, user_id=user.id)
+        thread_create = ThreadCreate(title=title, user_id=user_id)
         thread = await database.create_thread(thread_create)
         return thread
 

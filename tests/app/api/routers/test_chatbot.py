@@ -12,7 +12,6 @@ from app.api.dependencies import get_database, get_feedback_sender
 from app.api.streaming import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
-    Account,
     Feedback,
     FeedbackPublic,
     FeedbackRating,
@@ -55,9 +54,9 @@ class MockReActAgent:
 
 
 @pytest.fixture
-def access_token(user: Account) -> str:
+def access_token(user_id: int) -> str:
     """Generate a valid JWT access token for testing."""
-    payload = {"user_id": user.id}
+    payload = {"user_id": user_id}
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
     )

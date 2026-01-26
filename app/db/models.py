@@ -9,14 +9,6 @@ from sqlmodel import JSON, Column, Field, Integer, Relationship, SQLModel
 from app.settings import settings
 
 
-# Stub table for the Django-managed 'account' table in the website schema.
-class Account(SQLModel, table=True):
-    __tablename__ = "account"
-    __table_args__ = {"schema": settings.DB_SCHEMA_WEBSITE}
-
-    id: int = Field(primary_key=True)
-
-
 # =============================================================================
 # ==                              Thread Models                              ==
 # =============================================================================
@@ -25,9 +17,7 @@ class ThreadPayload(SQLModel):
 
 
 class ThreadCreate(ThreadPayload):
-    user_id: int = Field(
-        foreign_key=f"{settings.DB_SCHEMA_WEBSITE}.account.id", index=True
-    )
+    user_id: int = Field(index=True)
 
 
 class Thread(ThreadCreate, table=True):

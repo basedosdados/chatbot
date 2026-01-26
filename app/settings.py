@@ -19,7 +19,6 @@ class Settings(BaseSettings):
         description="PostgreSQL database URL for SQLAlchemy."
     )
     DB_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
-    DB_SCHEMA_WEBSITE: str = Field(description="PostgreSQL website database schema.")
 
     # ============================================================
     # ==                Website Backend settings                ==
