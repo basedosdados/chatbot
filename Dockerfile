@@ -29,14 +29,11 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
-# Make run script executable
-RUN chmod +x /app/scripts/run.sh
-
 # Add virtual environment executables to PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Expose FastAPI server port
 EXPOSE 8000
 
-# Run migrations then start the server
-CMD ["/app/scripts/run.sh"]
+# Start FastAPI server
+CMD ["fastapi", "run" , "--workers", "2", "app/main.py"]
