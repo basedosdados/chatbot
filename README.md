@@ -27,7 +27,7 @@ API do chatbot da [Base dos Dados](https://basedosdados.org), a maior plataforma
 Para funcionar adequadamente, a API do chatbot depende da API do website da Base dos Dados, com a qual compartilha o banco de dados. Siga as instruções abaixo para executá-las na ordem correta.
 
 ### 1. Configuração da API do website
-Instale o [Docker](https://docs.docker.com/engine/install/). Em seguida, clone o repositório do [backend](https://github.com/basedosdados/backend) e entre nele:
+Instale o [Docker](https://docs.docker.com/engine/install/). Em seguida, clone o repositório do [backend](https://github.com/basedosdados/backend):
 ```bash
 git clone https://github.com/basedosdados/backend.git
 cd backend
@@ -53,10 +53,15 @@ Instale o [uv](https://docs.astral.sh/uv/getting-started/installation/):
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Clone o repositório do chatbot e entre nele:
+Clone o repositório do chatbot:
 ```bash
 git clone https://github.com/basedosdados/chatbot.git
 cd chatbot
+```
+
+Crie um ambiente virtual:
+```bash
+uv sync
 ```
 
 Instale os hooks de pre-commit:
@@ -85,7 +90,7 @@ cp .env.example .env
 > Além disso, você precisará de uma conta de serviço com acesso ao BigQuery e à VertexAI, chamada `chatbot-sa.json` e armazenada em `${HOME}/.basedosdados/credentials`.
 
 ### 3. Executando a API
-**Com docker compose (recomendado):**
+**Com o [Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) (recomendado):**
 ```bash
 docker compose up --watch
 ```
