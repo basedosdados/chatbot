@@ -95,10 +95,11 @@ cp .env.example .env
 docker compose up --watch
 ```
 
-**Com o script `run-local.sh`:**
-```bash
-./scripts/run-local.sh
+**Manualmente com o uv:**
+```
+uv run alembic upgrade head
+uv run fastapi dev --host 0.0.0.0 app/main.py
 ```
 
 > [!NOTE]
-> Caso opte pelo script, altere `DB_HOST` para `localhost` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
+> Caso opte por executar manualmente, altere `DB_HOST` para `localhost` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
