@@ -27,9 +27,7 @@ jobs:
         run: uv sync
 
       - name: Run tests
-        run: |
-          cd backend
-          uv run pytest
+        run: uv run pytest
         # Minimal environment configuration required for test execution
         env:
           # Mock database connection strings and schemas
