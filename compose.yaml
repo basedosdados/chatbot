@@ -40,6 +40,8 @@ services:
     volumes:
       # Mount Google Cloud credentials (read-only)
       - ${HOME}/.basedosdados/credentials:/app/credentials:ro
+    networks:
+      - db_network
     deploy:
       # Limit local resources to match our pod resources
       resources:
@@ -49,8 +51,6 @@ services:
         limits:
           cpus: '0.5'
           memory: 2G
-    networks:
-      - db_network
     container_name: chatbot-api
 
 # External network for database connectivity,
