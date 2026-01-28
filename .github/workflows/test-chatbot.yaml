@@ -27,7 +27,7 @@ jobs:
         run: uv sync
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest --cov
         # Minimal environment configuration required for test execution
         env:
           # Mock database connection strings and schemas
