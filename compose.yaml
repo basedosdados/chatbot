@@ -9,7 +9,7 @@ services:
       - db_network
     container_name: chatbot-migration
 
-  api:
+  chatbot-api:
     build: .
     command: fastapi dev --host 0.0.0.0 app/main.py
     env_file: .env
