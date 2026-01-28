@@ -39,15 +39,15 @@ spec:
               mountPath: /var/secrets/
               readOnly: true
           env:
-            - name: PG_HOST
+            - name: DB_HOST
               value: {{ .Values.chatbot.sharedDatabase.host | quote }}
-            - name: PG_PORT
+            - name: DB_PORT
               value: {{ .Values.chatbot.sharedDatabase.port | quote }}
-            - name: PG_USER
-              value: {{ .Values.chatbot.sharedDatabase.user | quote }}
-            - name: PG_DB
+            - name: DB_NAME
               value: {{ .Values.chatbot.sharedDatabase.name | quote }}
-            - name: PG_PASSWORD
+            - name: DB_USER
+              value: {{ .Values.chatbot.sharedDatabase.user | quote }}
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.chatbot.sharedDatabase.passwordSecret | quote }}
