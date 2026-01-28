@@ -86,14 +86,14 @@ def client(database: AsyncDatabase):
 
 
 class TestListThreadsEndpoint:
-    """Tests for GET /api/v1/chatbot/threads/"""
+    """Tests for GET /api/v1/chatbot/threads"""
 
     def test_list_threads_success(
         self, client: TestClient, access_token: str, thread: Thread
     ):
         """Test successful thread listing."""
         response = client.get(
-            url="/api/v1/chatbot/threads/",
+            url="/api/v1/chatbot/threads",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -107,7 +107,7 @@ class TestListThreadsEndpoint:
     def test_list_threads_empty(self, client: TestClient, access_token: str):
         """Test empty thread list."""
         response = client.get(
-            url="/api/v1/chatbot/threads/",
+            url="/api/v1/chatbot/threads",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -122,7 +122,7 @@ class TestListThreadsEndpoint:
         await thread_factory("Thread 2")
 
         response = client.get(
-            url="/api/v1/chatbot/threads/?order_by=created_at",
+            url="/api/v1/chatbot/threads?order_by=created_at",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -141,7 +141,7 @@ class TestListThreadsEndpoint:
         await thread_factory("Thread 2")
 
         response = client.get(
-            url="/api/v1/chatbot/threads/?order_by=-created_at",
+            url="/api/v1/chatbot/threads?order_by=-created_at",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -157,7 +157,7 @@ class TestListThreadsEndpoint:
     ):
         """Test thread listing with invalid order_by returns 400."""
         response = client.get(
-            url="/api/v1/chatbot/threads/?order_by=id",
+            url="/api/v1/chatbot/threads?order_by=id",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -165,17 +165,17 @@ class TestListThreadsEndpoint:
 
     def test_list_threads_unauthorized(self, client: TestClient):
         """Test thread listing unauthorized returns 401."""
-        response = client.get(url="/api/v1/chatbot/threads/")
+        response = client.get(url="/api/v1/chatbot/threads")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestCreateThreadEndpoint:
-    """Tests for POST /api/v1/chatbot/threads/"""
+    """Tests for POST /api/v1/chatbot/threads"""
 
     def test_create_thread_success(self, client: TestClient, access_token: str):
         """Test successful thread creation."""
         response = client.post(
-            url="/api/v1/chatbot/threads/",
+            url="/api/v1/chatbot/threads",
             json={"title": "Mock Title"},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -189,7 +189,7 @@ class TestCreateThreadEndpoint:
     def test_create_thread_missing_title(self, client: TestClient, access_token: str):
         """Test thread creation without title field."""
         response = client.post(
-            url="/api/v1/chatbot/threads/",
+            url="/api/v1/chatbot/threads",
             json={},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -199,20 +199,20 @@ class TestCreateThreadEndpoint:
     def test_create_thread_unauthorized(self, client: TestClient):
         """Test thread creation unauthorized returns 401."""
         response = client.post(
-            url="/api/v1/chatbot/threads/", json={"title": "Mock Title"}
+            url="/api/v1/chatbot/threads", json={"title": "Mock Title"}
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestDeleteThreadEndpoint:
-    """Tests for DELETE /api/v1/chatbot/threads/{thread_id}/"""
+    """Tests for DELETE /api/v1/chatbot/threads/{thread_id}"""
 
     def test_delete_thread_success(
         self, client: TestClient, access_token: str, thread: Thread
     ):
         """Test successful thread deletion."""
         response = client.delete(
-            url=f"/api/v1/chatbot/threads/{thread.id}/",
+            url=f"/api/v1/chatbot/threads/{thread.id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -220,19 +220,19 @@ class TestDeleteThreadEndpoint:
     def test_delete_thread_not_found(self, client: TestClient, access_token: str):
         """Test deleting non-existent thread returns 404."""
         response = client.delete(
-            url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/",
+            url=f"/api/v1/chatbot/threads/{uuid.uuid4()}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_delete_thread_unauthorized(self, client: TestClient):
         """Test thread deletion unauthorized returns 401."""
-        response = client.delete(url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/")
+        response = client.delete(url=f"/api/v1/chatbot/threads/{uuid.uuid4()}")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestListMessagesEndpoint:
-    """Tests for GET /api/v1/chatbot/threads/{thread_id}/messages/"""
+    """Tests for GET /api/v1/chatbot/threads/{thread_id}/messages"""
 
     async def test_list_messages_success(
         self, client: TestClient, access_token: str, messages_factory: MessagesFactory
@@ -241,7 +241,7 @@ class TestListMessagesEndpoint:
         user_message, assistant_message = await messages_factory()
 
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/",
+            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -257,7 +257,7 @@ class TestListMessagesEndpoint:
     ):
         """Test empty message list."""
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -269,7 +269,7 @@ class TestListMessagesEndpoint:
     ):
         """Test listing messages for non-existent thread returns 404."""
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/messages/",
+            url=f"/api/v1/chatbot/threads/{uuid.uuid4()}/messages",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -282,7 +282,7 @@ class TestListMessagesEndpoint:
         user_message, _ = await messages_factory()
 
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/?order_by=created_at",
+            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages?order_by=created_at",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -300,7 +300,7 @@ class TestListMessagesEndpoint:
         user_message, _ = await messages_factory()
 
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages/?order_by=-created_at",
+            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages?order_by=-created_at",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -316,7 +316,7 @@ class TestListMessagesEndpoint:
     ):
         """Test messages with invalid order_by returns 400."""
         response = client.get(
-            url=f"/api/v1/chatbot/threads/{thread.id}/messages/?order_by=id",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages?order_by=id",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -324,19 +324,19 @@ class TestListMessagesEndpoint:
 
     def test_list_messages_unauthorized(self, client: TestClient, thread: Thread):
         """Test message listing unauthorized returns 401."""
-        response = client.get(url=f"/api/v1/chatbot/threads/{thread.id}/messages/")
+        response = client.get(url=f"/api/v1/chatbot/threads/{thread.id}/messages")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestSendMessageEndpoint:
-    """Tests for POST /api/v1/chatbot/threads/{thread_id}/messages/"""
+    """Tests for POST /api/v1/chatbot/threads/{thread_id}/messages"""
 
     def test_send_message_success(
         self, client: TestClient, access_token: str, thread: Thread
     ):
         """Test successful message sending (streaming response)."""
         response = client.post(
-            url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
             json={"content": "Hello, chatbot!"},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -359,7 +359,7 @@ class TestSendMessageEndpoint:
     ):
         """Test sending message without content field."""
         response = client.post(
-            url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
             json={},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -369,14 +369,14 @@ class TestSendMessageEndpoint:
     def test_send_message_unauthorized(self, client: TestClient, thread: Thread):
         """Test sending message unauthorized returns 401."""
         response = client.post(
-            url=f"/api/v1/chatbot/threads/{thread.id}/messages/",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
             json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestUpsertFeedbackEndpoint:
-    """Tests for PUT /api/v1/chatbot/messages/{message_id}/feedback/"""
+    """Tests for PUT /api/v1/chatbot/messages/{message_id}/feedback"""
 
     def test_create_feedback_success(
         self, client: TestClient, access_token: str, assistant_message: Message
@@ -386,7 +386,7 @@ class TestUpsertFeedbackEndpoint:
         comments = "Great response!"
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
             json={"rating": rating.value, "comments": comments},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -407,7 +407,7 @@ class TestUpsertFeedbackEndpoint:
         rating = FeedbackRating.NEGATIVE
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
             json={"rating": rating.value},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -429,7 +429,7 @@ class TestUpsertFeedbackEndpoint:
         new_comments = "Updated comments"
 
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{feedback.message_id}/feedback/",
+            url=f"/api/v1/chatbot/messages/{feedback.message_id}/feedback",
             json={"rating": feedback.rating, "comments": new_comments},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -450,7 +450,7 @@ class TestUpsertFeedbackEndpoint:
     ):
         """Test feedback upsert missing rating field."""
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
             json={"comments": "Great response!"},
             headers={"Authorization": f"Bearer {access_token}"},
         )
@@ -461,7 +461,7 @@ class TestUpsertFeedbackEndpoint:
     ):
         """Test feedback upsert unauthorized returns 401."""
         response = client.put(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback/",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
             json={"rating": FeedbackRating.POSITIVE.value},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
