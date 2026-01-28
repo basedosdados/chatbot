@@ -58,6 +58,7 @@ addopts = [
 [tool.coverage.run]
 source = ["app"]
 branch = true
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 exclude_lines = [
