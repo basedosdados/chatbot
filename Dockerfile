@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.13-slim
 
 # Install uv by copying the binary from the official distroless Docker image
 COPY --from=ghcr.io/astral-sh/uv:0.9.24 /uv /uvx /bin/
