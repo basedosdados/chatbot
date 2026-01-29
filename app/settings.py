@@ -1,11 +1,9 @@
 from functools import cached_property
-from typing import Annotated, Literal
+from typing import Literal
 
 from google.oauth2.service_account import Credentials
-from pydantic import AfterValidator, Field, PostgresDsn, computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-PostgresDsnStr = Annotated[PostgresDsn, AfterValidator(str)]
 
 
 class Settings(BaseSettings):
@@ -14,11 +12,24 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                   Database settings                    ==
     # ============================================================
-    DB_URL: PostgresDsnStr = Field(description="PostgreSQL database URL.")
-    SQLALCHEMY_DB_URL: PostgresDsnStr = Field(
-        description="PostgreSQL database URL for SQLAlchemy."
-    )
+    DB_HOST: str = Field(description="PostgreSQL database host.")
+    DB_PORT: int = Field(default=5432, description="PostgreSQL database port.")
+    DB_NAME: str = Field(description="PostgreSQL database name.")
+    DB_USER: str = Field(description="PostgreSQL database user.")
+    DB_PASSWORD: str = Field(description="PostgreSQL database password.")
     DB_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
+
+    @computed_field
+    @property
+    def DB_URL(self) -> str:  # pragma: no cover
+        """PostgreSQL database URL."""
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    @computed_field
+    @property
+    def SQLALCHEMY_DB_URL(self) -> str:  # pragma: no cover
+        """PostgreSQL database URL for SQLAlchemy."""
+        return f"postgresql+psycopg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     # ============================================================
     # ==                Website Backend settings                ==
@@ -45,6 +56,7 @@ class Settings(BaseSettings):
     @computed_field
     @cached_property
     def GOOGLE_CREDENTIALS(self) -> Credentials:  # pragma: no cover
+        """Google Cloud credentials."""
         return Credentials.from_service_account_file(
             filename=self.GOOGLE_SERVICE_ACCOUNT,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
