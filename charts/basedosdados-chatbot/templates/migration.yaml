@@ -38,4 +38,5 @@ spec:
             - secretRef:
                 name: {{ .Values.chatbot.envSecret | quote }}
       restartPolicy: Never
+  activeDeadlineSeconds: 60
   backoffLimit: 3
