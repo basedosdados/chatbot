@@ -24,9 +24,9 @@ jobs:
           chatbot:
             image:
               tag: test
-            envSecret: test-secret
-            sharedEnvSecret: test-shared-secret
             envConfigMap: test-configmap
+            envSecret: test-secret
+            envSharedSecret: test-shared-secret
           EOF
 
       - name: Validate Helm template
@@ -35,7 +35,7 @@ jobs:
           chatbot:
             image:
               tag: test
-            envSecret: test-secret
-            sharedEnvSecret: test-shared-secret
             envConfigMap: test-configmap
+            envSecret: test-secret
+            envSharedSecret: test-shared-secret
           EOF
