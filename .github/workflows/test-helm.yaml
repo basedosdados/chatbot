@@ -26,6 +26,7 @@ jobs:
               tag: test
             envSecret: test-secret
             sharedEnvSecret: test-shared-secret
+            envConfigMap: test-configmap
           EOF
 
       - name: Validate Helm template
@@ -36,4 +37,5 @@ jobs:
               tag: test
             envSecret: test-secret
             sharedEnvSecret: test-shared-secret
+            envConfigMap: test-configmap
           EOF
