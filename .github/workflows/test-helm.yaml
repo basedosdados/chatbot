@@ -22,27 +22,18 @@ jobs:
         run: |
           cat << EOF | helm lint charts/basedosdados-chatbot --values -
           chatbot:
+            image:
+              tag: test
             envSecret: test-secret
             sharedEnvSecret: test-shared-secret
-            sharedDatabase:
-              host: test-db-host
-              port: 5432
-              name: test-db-name
-              user: test-db-user
-              passwordSecret: test-db-password
           EOF
 
       - name: Validate Helm template
         run: |
           cat << EOF | helm template test-release charts/basedosdados-chatbot --values -
           chatbot:
-            name: chatbot-api
+            image:
+              tag: test
             envSecret: test-secret
             sharedEnvSecret: test-shared-secret
-            sharedDatabase:
-              host: test-db-host
-              port: 5432
-              name: test-db-name
-              user: test-db-user
-              passwordSecret: test-db-password
           EOF
