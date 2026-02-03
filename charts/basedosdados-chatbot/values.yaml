@@ -27,3 +27,7 @@ chatbot:
   # Required: name of the shared Secret from basedosdados-api
   # containing Django Secret Key (e.g., api-prod-secrets)
   sharedEnvSecret: ""
+
+  # Required: name of the ConfigMap containing non-sensitive
+  # environment variables (e.g., chatbot-api-prod-config)
+  envConfigMap: ""

@@ -52,6 +52,8 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Values.chatbot.envSecret | quote }}
+            - configMapRef:
+                name: {{ .Values.chatbot.envConfigMap | quote }}
           resources:
             {{- toYaml .Values.chatbot.resources | nindent 12 }}
           livenessProbe:

@@ -48,12 +48,18 @@
           "type": "string",
           "minLength": 1,
           "description": "Name of the basedosdados api kubernetes secret"
+        },
+        "envConfigMap": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the ConfigMap containing non-sensitive env variables"
         }
       },
       "required": [
         "image",
         "envSecret",
-        "sharedEnvSecret"
+        "sharedEnvSecret",
+        "envConfigMap"
       ],
       "additionalProperties": false
     }

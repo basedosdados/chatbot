@@ -34,6 +34,8 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Values.chatbot.envSecret | quote }}
+            - configMapRef:
+                name: {{ .Values.chatbot.envConfigMap | quote }}
       restartPolicy: Never
   activeDeadlineSeconds: 300
   backoffLimit: 3
