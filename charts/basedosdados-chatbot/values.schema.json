@@ -44,7 +44,7 @@
           "minLength": 1,
           "description": "Name of the chatbot api kubernetes secret"
         },
-        "sharedEnvSecret": {
+        "envSharedSecret": {
           "type": "string",
           "minLength": 1,
           "description": "Name of the basedosdados api kubernetes secret"
@@ -57,9 +57,9 @@
       },
       "required": [
         "image",
+        "envConfigMap",
         "envSecret",
-        "sharedEnvSecret",
-        "envConfigMap"
+        "envSharedSecret"
       ],
       "additionalProperties": false
     }
