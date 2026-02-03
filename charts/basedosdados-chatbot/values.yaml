@@ -5,7 +5,7 @@ chatbot:
   # Deployment image
   image:
     name: ghcr.io/basedosdados/chatbot
-    tag: latest
+    tag: ""
     pullPolicy: Always
 
   # Number of replicas
