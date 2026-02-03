@@ -3,7 +3,6 @@ from typing import TypeVar
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -37,9 +36,6 @@ async def init_database(engine: AsyncEngine):
         engine: An AsyncEngine instance.
     """
     async with engine.begin() as conn:
-        await conn.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
-        )
         await conn.run_sync(SQLModel.metadata.create_all)
 
 

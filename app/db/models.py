@@ -6,8 +6,6 @@ from pydantic import JsonValue
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import JSON, Column, Field, Integer, Relationship, SQLModel
 
-from app.settings import settings
-
 
 # =============================================================================
 # ==                              Thread Models                              ==
@@ -21,8 +19,6 @@ class ThreadCreate(ThreadPayload):
 
 
 class Thread(ThreadCreate, table=True):
-    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
-
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     deleted: bool = Field(default=False)
@@ -45,17 +41,11 @@ class MessageStatus(str, Enum):
 
 class MessageCreate(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    thread_id: uuid.UUID = Field(
-        foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.thread.id", index=True
-    )
-    user_message_id: uuid.UUID | None = Field(
-        default=None, foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.message.id"
-    )
+    thread_id: uuid.UUID = Field(foreign_key="thread.id", index=True)
+    user_message_id: uuid.UUID | None = Field(default=None, foreign_key="message.id")
     model_uri: str
     role: MessageRole = Field(
-        sa_column=Column(
-            SAEnum(MessageRole, schema=settings.DB_SCHEMA_CHATBOT), nullable=False
-        ),
+        sa_column=Column(SAEnum(MessageRole), nullable=False),
     )
     content: str
     artifacts: JsonValue | None = Field(
@@ -65,16 +55,12 @@ class MessageCreate(SQLModel):
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
     status: MessageStatus = Field(
-        sa_column=Column(
-            SAEnum(MessageStatus, schema=settings.DB_SCHEMA_CHATBOT), nullable=False
-        ),
+        sa_column=Column(SAEnum(MessageStatus), nullable=False),
         default=MessageStatus.SUCCESS,
     )
 
 
 class Message(MessageCreate, table=True):
-    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
-
     created_at: datetime = Field(default_factory=datetime.now, index=True)
 
     thread: Thread = Relationship(back_populates="messages")
@@ -101,9 +87,7 @@ class FeedbackPayload(SQLModel):
 
 
 class FeedbackCreate(FeedbackPayload):
-    message_id: uuid.UUID = Field(
-        foreign_key=f"{settings.DB_SCHEMA_CHATBOT}.message.id", unique=True, index=True
-    )
+    message_id: uuid.UUID = Field(foreign_key="message.id", unique=True, index=True)
 
 
 class FeedbackPublic(FeedbackCreate):
@@ -113,14 +97,12 @@ class FeedbackPublic(FeedbackCreate):
 
 
 class Feedback(FeedbackCreate, table=True):
-    __table_args__ = {"schema": settings.DB_SCHEMA_CHATBOT}
-
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime | None = Field(default=None)
     sync_status: FeedbackSyncStatus = Field(
         sa_column=Column(
-            SAEnum(FeedbackSyncStatus, schema=settings.DB_SCHEMA_CHATBOT),
+            SAEnum(FeedbackSyncStatus),
             nullable=False,
         ),
         default=FeedbackSyncStatus.PENDING,

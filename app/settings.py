@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     DB_NAME: str = Field(description="PostgreSQL database name.")
     DB_USER: str = Field(description="PostgreSQL database user.")
     DB_PASSWORD: str = Field(description="PostgreSQL database password.")
-    DB_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
 
     @computed_field
     @property
