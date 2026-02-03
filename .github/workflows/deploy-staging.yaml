@@ -71,6 +71,7 @@ jobs:
                 memory: 2Gi
             envSecret: chatbot-api-staging-secrets
             sharedEnvSecret: api-staging-secrets
+            envConfigMap: chatbot-api-staging-config
           EOF
 
       - name: Deploy using Helm

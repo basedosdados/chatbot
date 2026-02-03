@@ -71,6 +71,7 @@ jobs:
                 memory: 2Gi
             envSecret: chatbot-api-prod-secrets
             sharedEnvSecret: api-prod-secrets
+            envConfigMap: chatbot-api-prod-config
           EOF
 
       - name: Deploy using Helm
