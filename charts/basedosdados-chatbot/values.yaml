@@ -27,11 +27,3 @@ chatbot:
   # Required: name of the shared Secret from basedosdados-api
   # containing Django Secret Key (e.g., api-prod-secrets)
   sharedEnvSecret: ""
-
-  # Required: info from the shared database with basedosdados-api
-  sharedDatabase:
-    host: ""
-    port: 0
-    name: ""
-    user: ""
-    passwordSecret: ""

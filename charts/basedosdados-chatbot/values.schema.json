@@ -48,52 +48,12 @@
           "type": "string",
           "minLength": 1,
           "description": "Name of the basedosdados api kubernetes secret"
-        },
-        "sharedDatabase": {
-          "type": "object",
-          "properties": {
-            "host": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Database host"
-            },
-            "port": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535,
-              "description": "Database port"
-            },
-            "name": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Database name"
-            },
-            "user": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Database user"
-            },
-            "passwordSecret": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Name of the kubernetes secret containing the database password"
-            }
-          },
-          "required": [
-              "host",
-              "port",
-              "name",
-              "user",
-              "passwordSecret"
-          ],
-          "additionalProperties": false
         }
       },
       "required": [
         "image",
         "envSecret",
-        "sharedEnvSecret",
-        "sharedDatabase"
+        "sharedEnvSecret"
       ],
       "additionalProperties": false
     }
