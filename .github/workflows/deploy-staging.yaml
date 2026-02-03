@@ -71,12 +71,6 @@ jobs:
                 memory: 2Gi
             envSecret: chatbot-api-staging-secrets
             sharedEnvSecret: api-staging-secrets
-            sharedDatabase:
-              host: cloud-sql-proxy
-              port: 5432
-              name: api_staging
-              user: api_staging
-              passwordSecret: api-staging-database-password
           EOF
 
       - name: Deploy using Helm
