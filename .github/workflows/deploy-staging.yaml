@@ -69,14 +69,9 @@ jobs:
               limits:
                 cpu: 500m
                 memory: 2Gi
+            envConfigMap: chatbot-api-staging-config
             envSecret: chatbot-api-staging-secrets
-            sharedEnvSecret: api-staging-secrets
-            sharedDatabase:
-              host: cloud-sql-proxy
-              port: 5432
-              name: api_staging
-              user: api_staging
-              passwordSecret: api-staging-database-password
+            envSharedSecret: api-staging-secrets
           EOF
 
       - name: Deploy using Helm

@@ -69,14 +69,9 @@ jobs:
               limits:
                 cpu: 500m
                 memory: 2Gi
+            envConfigMap: chatbot-api-prod-config
             envSecret: chatbot-api-prod-secrets
-            sharedEnvSecret: api-prod-secrets
-            sharedDatabase:
-              host: cloud-sql-proxy
-              port: 5432
-              name: api
-              user: api
-              passwordSecret: api-prod-database-password
+            envSharedSecret: api-prod-secrets
           EOF
 
       - name: Deploy using Helm

@@ -14,7 +14,6 @@ from app.db.models import (
     Thread,
     ThreadCreate,
 )
-from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
 
 
@@ -22,16 +21,7 @@ async def test_init_database(async_engine: AsyncEngine):
     await init_database(async_engine)
 
     async with async_engine.connect() as conn:
-        result = await conn.execute(
-            text(
-                """
-                SELECT tablename
-                FROM pg_tables
-                WHERE schemaname = :schema
-                """,
-            ),
-            {"schema": settings.DB_SCHEMA_CHATBOT},
-        )
+        result = await conn.execute(text("SELECT tablename FROM pg_tables"))
         tables = {row[0] for row in result.all()}
 
     assert "thread" in tables

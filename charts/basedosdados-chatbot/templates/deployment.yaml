@@ -39,30 +39,19 @@ spec:
               mountPath: /var/secrets/
               readOnly: true
           env:
-            - name: DB_HOST
-              value: {{ .Values.chatbot.sharedDatabase.host | quote }}
-            - name: DB_PORT
-              value: {{ .Values.chatbot.sharedDatabase.port | quote }}
-            - name: DB_NAME
-              value: {{ .Values.chatbot.sharedDatabase.name | quote }}
-            - name: DB_USER
-              value: {{ .Values.chatbot.sharedDatabase.user | quote }}
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.chatbot.sharedDatabase.passwordSecret | quote }}
-                  key: password
             - name: JWT_ALGORITHM
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.chatbot.sharedEnvSecret | quote }}
+                  name: {{ .Values.chatbot.envSharedSecret | quote }}
                   key: DJANGO_JWT_ALGORITHM
             - name: JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.chatbot.sharedEnvSecret | quote }}
+                  name: {{ .Values.chatbot.envSharedSecret | quote }}
                   key: DJANGO_SECRET_KEY
           envFrom:
+            - configMapRef:
+                name: {{ .Values.chatbot.envConfigMap | quote }}
             - secretRef:
                 name: {{ .Values.chatbot.envSecret | quote }}
           resources:

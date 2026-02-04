@@ -102,4 +102,4 @@ uv run fastapi dev --host 0.0.0.0 app/main.py
 ```
 
 > [!NOTE]
-> Caso opte por executar manualmente, altere `DB_HOST` para `localhost` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
+> Caso opte por executar manualmente, altere `DB_HOST` para `localhost`, `DB_PORT` para `5433` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
