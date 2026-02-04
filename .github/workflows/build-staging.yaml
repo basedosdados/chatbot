@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - staging
+    paths-ignore:
+      - "**/*.md"
   # Allow manual execution from the Actions tab
   workflow_dispatch:
 
