@@ -74,11 +74,10 @@ jobs:
             envSharedSecret: api-prod-secrets
           EOF
 
-      # NOTE: --force-conflicts is required because Helm v4 uses Server-Side Apply (SSA),
-      # which tracks field ownership. Without it, fields cause conflicts when their
-      # ownership differs from previous deploys.
-      # Caveat: This means Helm will override any external changes made to these fields.
-      # Ensure Helm is the single source of truth for this deployment.
+      # NOTE: --server-side=false disables Helm v4's Server-Side Apply (SSA) and uses
+      # Client-Side Apply (CSA) instead, which mirrors Helm v3 behavior. This is simpler
+      # for single-manager setups: fields removed from the template are deleted from the
+      # cluster, and there are no field ownership conflicts.
       - name: Deploy using Helm
         run: |
           helm upgrade \
@@ -87,5 +86,5 @@ jobs:
             --timeout 10m \
             --namespace website \
             --values values.yaml \
-            --force-conflicts \
+            --server-side false \
             chatbot-api-prod charts/basedosdados-chatbot
