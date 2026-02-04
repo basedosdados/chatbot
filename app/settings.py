@@ -1,5 +1,6 @@
 from functools import cached_property
 from typing import Literal
+from urllib.parse import quote
 
 from google.oauth2.service_account import Credentials
 from pydantic import Field, computed_field
@@ -22,13 +23,17 @@ class Settings(BaseSettings):
     @property
     def DB_URL(self) -> str:  # pragma: no cover
         """PostgreSQL database URL."""
-        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        user = quote(self.DB_USER, safe="")
+        password = quote(self.DB_PASSWORD, safe="")
+        return f"postgresql://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @computed_field
     @property
     def SQLALCHEMY_DB_URL(self) -> str:  # pragma: no cover
         """PostgreSQL database URL for SQLAlchemy."""
-        return f"postgresql+psycopg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        user = quote(self.DB_USER, safe="")
+        password = quote(self.DB_PASSWORD, safe="")
+        return f"postgresql+psycopg://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     # ============================================================
     # ==                Website Backend settings                ==
