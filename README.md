@@ -79,11 +79,6 @@ cp .env.example .env
 >
 > | API Chatbot | API Website |
 > |-------------|-------------|
-> | `DB_HOST` | `DB_HOST` |
-> | `DB_PORT` | `DB_PORT` |
-> | `DB_USER` | `DB_USER` |
-> | `DB_PASSWORD` | `DB_PASSWORD` |
-> | `DB_NAME` | `DB_NAME` |
 > | `JWT_ALGORITHM` | `DJANGO_JWT_ALGORITHM` |
 > | `JWT_SECRET_KEY` | `DJANGO_SECRET_KEY` |
 >
@@ -100,6 +95,8 @@ docker compose up --watch
 uv run alembic upgrade head
 uv run fastapi dev --host 0.0.0.0 app/main.py
 ```
-
 > [!NOTE]
-> Caso opte por executar manualmente, altere `DB_HOST` para `localhost`, `DB_PORT` para `5433` e `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
+> Caso opte por executar a API manualmente, você precisará configurar uma instância do PostgreSQL ou executar o serviço `database` do compose file com `docker compose up database`.
+> Em ambos os casos,<br>ajuste as variáveis `DB_*` no `.env` conforme necessário para conectar-se ao banco.
+> 
+> Além disso, aponte a variável `GOOGLE_SERVICE_ACCOUNT` para o caminho local da conta de serviço.
