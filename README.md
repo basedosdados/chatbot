@@ -96,7 +96,7 @@ uv run alembic upgrade head
 uv run fastapi dev --host 0.0.0.0 app/main.py
 ```
 > [!NOTE]
-> Caso opte por executar a API manualmente, você precisará configurar uma instância do PostgreSQL ou executar o serviço `database` do compose file com o comando `docker compose up database`. 
+> Caso opte por executar a API manualmente, você precisará configurar uma instância do PostgreSQL ou executar o serviço `database` do compose file com `docker compose up database`. 
 Em ambos os casos, ajuste as variáveis `DB_*` no `.env` conforme necessário para conectar-se ao banco.
 > 
-> Além disso, altere a variável `GOOGLE_SERVICE_ACCOUNT` para `${HOME}/.basedosdados/credentials/chatbot-sa.json`.
+> Além disso, aponte a variável `GOOGLE_SERVICE_ACCOUNT` para o caminho local da conta de serviço.
