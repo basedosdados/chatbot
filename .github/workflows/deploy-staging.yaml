@@ -74,7 +74,7 @@ jobs:
             envSharedSecret: api-staging-secrets
           EOF
 
-      # NOTE: --force-conflicts is required because Helm v4 uses Server-Side Apply (SSA)
+      # NOTE: --force-conflicts is required because Helm v4 uses Server-Side Apply (SSA),
       # which tracks field ownership. Without it, fields cause conflicts when their
       # ownership differs from previous deploys.
       # Caveat: This means Helm will override any external changes made to these fields.
