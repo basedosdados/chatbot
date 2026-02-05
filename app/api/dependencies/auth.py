@@ -3,18 +3,29 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from loguru import logger
 
 from app.settings import settings
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
 
-async def get_user_id(token: Annotated[str, Depends(oauth2_scheme)]) -> str:
+async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> int:
+    if settings.AUTH_DEV_MODE:
+        logger.warning(
+            "AUTH DEV MODE ENABLED: bypassing JWT validation, "
+            f"using user_id={settings.AUTH_DEV_USER_ID}",
+        )
+        return settings.AUTH_DEV_USER_ID
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if token is None:
+        raise credentials_exception
 
     try:
         payload: dict = jwt.decode(
