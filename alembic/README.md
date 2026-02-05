@@ -4,7 +4,7 @@
 
 2\. Gere o script de migração:
 ```bash
-alembic revision --autogenerate -m "alguma mensagem descritiva"
+uv run alembic revision --autogenerate -m "alguma mensagem descritiva"
 ```
 
 > [!WARNING]
@@ -12,7 +12,7 @@ alembic revision --autogenerate -m "alguma mensagem descritiva"
 
 3\. Execute o script de migração:
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 > [!WARNING]
