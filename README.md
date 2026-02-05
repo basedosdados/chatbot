@@ -24,48 +24,17 @@ API do chatbot da [Base dos Dados](https://basedosdados.org), a maior plataforma
 - **[uv](https://docs.astral.sh/uv/)** para gerenciamento de dependências.
 
 ## Configuração do Ambiente de Desenvolvimento
-Para funcionar adequadamente, a API do chatbot depende da API do website da Base dos Dados, com a qual compartilha o banco de dados. Siga as instruções abaixo para executá-las na ordem correta.
 
-### 1. Configuração da API do website
-Instale o [Docker](https://docs.docker.com/engine/install/). Em seguida, clone o repositório do [backend](https://github.com/basedosdados/backend):
-```bash
-git clone https://github.com/basedosdados/backend.git
-cd backend
-```
-
-Configure o ambiente de acordo com as [instruções do repositório](https://github.com/basedosdados/backend?tab=readme-ov-file#configura%C3%A7%C3%A3o-do-ambiente-de-desenvolvimento) e execute utilizando o docker compose:
-```bash
-docker compose up
-```
-
-> [!IMPORTANT]
-> O backend do website deve ser executado **antes** da API do chatbot.
-
-> [!TIP]
-> Caso deseje, você pode executar o backend em segundo plano:
-> ```bash
-> docker compose up -d
-> ```
-
-### 2. Configuração da API do chatbot
-Instale o [uv](https://docs.astral.sh/uv/getting-started/installation/):
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Clone o repositório do chatbot:
+### 1. Pré-requisitos
+Instale o [Docker](https://docs.docker.com/engine/install/) e o [uv](https://docs.astral.sh/uv/getting-started/installation/). Em seguida, clone o repositório do chatbot:
 ```bash
 git clone https://github.com/basedosdados/chatbot.git
 cd chatbot
 ```
 
-Crie um ambiente virtual:
+Crie um ambiente virtual e instale os hooks de pre-commit:
 ```bash
 uv sync
-```
-
-Instale os hooks de pre-commit:
-```bash
 pre-commit install
 ```
 
@@ -75,14 +44,19 @@ cp .env.example .env
 ```
 
 > [!IMPORTANT]
-> As seguintes variáveis devem ser **idênticas** entre as APIs:
->
-> | API Chatbot | API Website |
-> |-------------|-------------|
-> | `JWT_ALGORITHM` | `DJANGO_JWT_ALGORITHM` |
-> | `JWT_SECRET_KEY` | `DJANGO_SECRET_KEY` |
->
-> Além disso, você precisará de uma conta de serviço com acesso ao BigQuery e à VertexAI, chamada `chatbot-sa.json` e armazenada em `${HOME}/.basedosdados/credentials`.
+> Você precisará de uma conta de serviço com acesso ao BigQuery e à VertexAI, chamada `chatbot-sa.json` e armazenada em `${HOME}/.basedosdados/credentials`.
+
+### 2. Modo de desenvolvimento independente
+Por padrão, a API do chatbot exige um token JWT válido emitido pela API do website. Para desenvolvimento local sem depender da API do website, habilite o modo de autenticação de desenvolvedor no arquivo `.env`:
+```bash
+AUTH_DEV_MODE=true
+AUTH_DEV_USER_ID=1
+```
+> [!NOTE]
+> O modo de autenticação de desenvolvedor só funciona quando `ENVIRONMENT=development`.
+
+> [!WARNING]
+> O modo de autenticação de desenvolvedor ignora a validação do token JWT e retorna o ID definido por `AUTH_DEV_USER_ID` para todas as requisições. **Nunca habilite em produção.**
 
 ### 3. Executando a API
 **Com o [Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) (recomendado):**
@@ -91,12 +65,54 @@ docker compose up --watch
 ```
 
 **Manualmente com o uv:**
-```
+```bash
 uv run alembic upgrade head
 uv run fastapi dev --host 0.0.0.0 app/main.py
 ```
 > [!NOTE]
 > Caso opte por executar a API manualmente, você precisará configurar uma instância do PostgreSQL ou executar o serviço `database` do compose file com `docker compose up database`.
 > Em ambos os casos,<br>ajuste as variáveis `DB_*` no `.env` conforme necessário para conectar-se ao banco.
-> 
+>
 > Além disso, aponte a variável `GOOGLE_SERVICE_ACCOUNT` para o caminho local da conta de serviço.
+
+## Executando a Aplicação Completa (Full Stack)
+Para testar a integração completa com o frontend e a API do website, siga as instruções abaixo.
+
+### 1. Configuração da API do website
+Clone o repositório do [backend](https://github.com/basedosdados/backend):
+```bash
+git clone https://github.com/basedosdados/backend.git
+cd backend
+```
+
+Configure e execute de acordo com as [instruções do repositório](https://github.com/basedosdados/backend?tab=readme-ov-file#configura%C3%A7%C3%A3o-do-ambiente-de-desenvolvimento).
+
+### 2. Configuração da API do chatbot
+Desabilite o modo de autenticação de desenvolvedor e configure as variáveis `JWT_*` no arquivo `.env` da API do chatbot:
+```bash
+AUTH_DEV_MODE=false
+JWT_ALGORITHM=jwt-algorithm
+JWT_SECRET_KEY=jwt-secret-key
+```
+
+> [!IMPORTANT]
+> As seguintes variáveis devem ser **idênticas** entre as APIs:
+>
+> | API Chatbot | API Website |
+> |-------------|-------------|
+> | `JWT_ALGORITHM` | `DJANGO_JWT_ALGORITHM` |
+> | `JWT_SECRET_KEY` | `DJANGO_SECRET_KEY` |
+
+Execute a API do chatbot:
+```bash
+docker compose up --watch
+```
+
+### 3. Configuração do frontend
+Clone o repositório [chatbot-frontend](https://github.com/basedosdados/chatbot-frontend):
+```bash
+git clone git@github.com:basedosdados/chatbot-frontend.git
+cd chatbot-frontend
+```
+
+Configure e execute de acordo com as [instruções do repositório](https://github.com/basedosdados/chatbot-frontend?tab=readme-ov-file#interface-do-chatbot-da-bd-feita-com-streamlit).

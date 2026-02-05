@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from loguru import logger
 from psycopg_pool import AsyncConnectionPool
 
 from app.agent import ReActAgent
@@ -20,6 +21,18 @@ setup_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover
+    if settings.AUTH_DEV_MODE and settings.ENVIRONMENT == "development":
+        logger.warning(
+            "AUTH DEV MODE ENABLED: JWT validation is bypassed, "
+            f"all requests will use user_id={settings.AUTH_DEV_USER_ID}"
+        )
+
+    if settings.AUTH_DEV_MODE and settings.ENVIRONMENT != "development":
+        logger.warning(
+            f"AUTH_DEV_MODE is enabled but ENVIRONMENT is '{settings.ENVIRONMENT}'. "
+            "Auth dev mode will be ignored."
+        )
+
     await init_database(engine)
 
     # Connection kwargs defined according to:

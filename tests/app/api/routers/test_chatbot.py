@@ -53,6 +53,15 @@ class MockReActAgent:
         return
 
 
+@pytest.fixture(autouse=True)
+def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
+    """Ensure auth dev mode is disabled for all tests in this module."""
+    monkeypatch.setattr(
+        "app.api.dependencies.auth.settings",
+        settings.model_copy(update={"AUTH_DEV_MODE": False}),
+    )
+
+
 @pytest.fixture
 def access_token(user_id: int) -> str:
     """Generate a valid JWT access token for testing."""

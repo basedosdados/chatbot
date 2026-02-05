@@ -11,6 +11,29 @@ class Settings(BaseSettings):
     API_PREFIX: Literal["/api/v1"] = "/api/v1"
 
     # ============================================================
+    # ==                  Environment settings                  ==
+    # ============================================================
+    ENVIRONMENT: Literal["development", "staging", "production"] = Field(
+        default="production",
+        description="The environment the application is running in.",
+    )
+
+    # ============================================================
+    # ==                     Auth Dev Mode                      ==
+    # ============================================================
+    AUTH_DEV_MODE: bool = Field(
+        default=False,
+        description=(
+            "When enabled, bypasses JWT validation and returns AUTH_DEV_USER_ID for all requests. "
+            "Only works when ENVIRONMENT is set to 'development'. "
+            "WARNING: Must NEVER be enabled in production."
+        ),
+    )
+    AUTH_DEV_USER_ID: int = Field(
+        default=1, description="The user ID to return when AUTH_DEV_MODE is enabled."
+    )
+
+    # ============================================================
     # ==                   Database settings                    ==
     # ============================================================
     DB_HOST: str = Field(description="PostgreSQL database host.")
