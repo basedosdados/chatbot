@@ -64,7 +64,7 @@ class TestGetUserId:
 
         assert e.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    async def test_no_token_raises_401(self):
+    async def test_missing_token_raises_401(self):
         """Test missing token raises 401."""
         with pytest.raises(HTTPException) as e:
             await get_user_id(None)
@@ -75,7 +75,9 @@ class TestGetUserId:
 class TestAuthDevMode:
     """Tests for AUTH_DEV_MODE functionality."""
 
-    async def test_dev_mode_works_with_token(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_auth_dev_mode_works_with_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test dev mode bypasses JWT validation and returns configured user ID."""
         dev_user_id = 1
 
@@ -94,7 +96,9 @@ class TestAuthDevMode:
 
         assert result == dev_user_id
 
-    async def test_dev_mode_works_without_token(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_auth_dev_mode_works_without_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test dev mode bypasses JWT validation even when no token is provided."""
         dev_user_id = 1
 
@@ -113,7 +117,7 @@ class TestAuthDevMode:
 
         assert result == dev_user_id
 
-    async def test_dev_mode_ignored_in_production(
+    async def test_auth_dev_mode_ignored_in_production(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that dev mode is ignored when ENVIRONMENT is 'production'."""
@@ -129,7 +133,9 @@ class TestAuthDevMode:
 
         assert e.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    async def test_dev_mode_ignored_in_staging(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_auth_dev_mode_ignored_in_staging(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test that dev mode is ignored when ENVIRONMENT is 'staging'."""
         monkeypatch.setattr(
             "app.api.dependencies.auth.settings",
@@ -143,7 +149,7 @@ class TestAuthDevMode:
 
         assert e.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    async def test_dev_mode_ignored_when_not_development(
+    async def test_auth_dev_mode_ignored_when_not_development(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that dev mode is ignored when ENVIRONMENT is not 'development'."""
@@ -159,7 +165,7 @@ class TestAuthDevMode:
 
         assert e.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    async def test_dev_mode_disabled_invalid_token(
+    async def test_auth_dev_mode_disabled_invalid_token(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that with dev mode disabled, invalid token raises 401."""
@@ -173,7 +179,7 @@ class TestAuthDevMode:
 
         assert e.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    async def test_dev_mode_disabled_missing_token(
+    async def test_auth_dev_mode_disabled_missing_token(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test that with dev mode disabled, missing token raises 401."""
