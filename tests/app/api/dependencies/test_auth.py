@@ -10,7 +10,7 @@ class TestGetUserId:
     """Tests for get_user_id dependency."""
 
     @pytest.fixture(autouse=True)
-    def disable_dev_mode(self, monkeypatch: pytest.MonkeyPatch):
+    def disable_auth_dev_mode(self, monkeypatch: pytest.MonkeyPatch):
         """Ensure auth dev mode is disabled for all tests in this class."""
         monkeypatch.setattr(
             "app.api.dependencies.auth.settings",
