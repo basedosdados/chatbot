@@ -11,12 +11,18 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
 
 async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> int:
-    if settings.AUTH_DEV_MODE:
+    if settings.AUTH_DEV_MODE and settings.ENVIRONMENT == "development":
         logger.warning(
             "AUTH DEV MODE ENABLED: bypassing JWT validation, "
             f"using user_id={settings.AUTH_DEV_USER_ID}",
         )
         return settings.AUTH_DEV_USER_ID
+
+    if settings.AUTH_DEV_MODE and settings.ENVIRONMENT != "development":
+        logger.warning(
+            f"AUTH_DEV_MODE is enabled but ENVIRONMENT is '{settings.ENVIRONMENT}'. "
+            "Auth dev mode will be ignored."
+        )
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
