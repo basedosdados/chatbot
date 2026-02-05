@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -243,7 +243,7 @@ class TestAsyncDatabaseFeedback:
         self, database: AsyncDatabase, feedback: Feedback
     ):
         """Test updating feedback sync status."""
-        synced_at = datetime.now()
+        synced_at = datetime.now(timezone.utc)
 
         feedback_synced = await database.update_feedback_sync_status(
             feedback_id=feedback.id,
@@ -260,7 +260,7 @@ class TestAsyncDatabaseFeedback:
         feedback_synced = await database.update_feedback_sync_status(
             feedback_id=uuid.uuid4(),
             sync_status=FeedbackSyncStatus.SUCCESS,
-            synced_at=datetime.now(),
+            synced_at=datetime.now(timezone.utc),
         )
 
         assert feedback_synced is None

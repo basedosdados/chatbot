@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TypeVar
 from uuid import UUID
 
@@ -24,7 +24,10 @@ from app.settings import settings
 
 T = TypeVar("T", bound=SQLModel)
 
-engine = create_async_engine(settings.SQLALCHEMY_DB_URL)
+engine = create_async_engine(
+    url=settings.SQLALCHEMY_DB_URL,
+    connect_args={"options": "-c timezone=utc"},
+)
 
 sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -215,7 +218,7 @@ class AsyncDatabase:
             )
 
             db_feedback.sqlmodel_update(feedback_data)
-            db_feedback.updated_at = datetime.now()
+            db_feedback.updated_at = datetime.now(timezone.utc)
             db_feedback.sync_status = FeedbackSyncStatus.PENDING
             self.session.add(db_feedback)
             await self.session.commit()
