@@ -39,6 +39,11 @@
           "type": "object",
           "description": "Kubernetes resource requests and limits"
         },
+        "envConfigMap": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the ConfigMap containing non-sensitive env variables"
+        },
         "envSecret": {
           "type": "string",
           "minLength": 1,
@@ -48,11 +53,6 @@
           "type": "string",
           "minLength": 1,
           "description": "Name of the basedosdados api kubernetes secret"
-        },
-        "envConfigMap": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Name of the ConfigMap containing non-sensitive env variables"
         }
       },
       "required": [
