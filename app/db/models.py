@@ -90,7 +90,7 @@ class FeedbackSyncStatus(str, Enum):
 
 
 class FeedbackPayload(SQLModel):
-    rating: FeedbackRating = Field(sa_column=Column(Integer))
+    rating: FeedbackRating = Field(sa_column=Column(Integer, nullable=False))
     comments: str | None = Field(default=None)
 
 
