@@ -1,4 +1,4 @@
-"""Make ratings non-nullable.
+"""Make feedback ratings non-nullable.
 
 Revision ID: f593c35b86e7
 Revises: c0135b4524b9
