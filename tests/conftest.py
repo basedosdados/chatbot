@@ -39,7 +39,9 @@ async def async_engine(
 ) -> AsyncGenerator[AsyncEngine, None]:
     """Create an async engine connected to the test PostgreSQL container."""
     postgres_url = postgres_container.get_connection_url()
-    engine = create_async_engine(postgres_url, echo=False)
+    engine = create_async_engine(
+        url=postgres_url, connect_args={"options": "-c timezone=utc"}
+    )
     yield engine
     await engine.dispose()
 

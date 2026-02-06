@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import JsonValue
 from sqlalchemy import Enum as SAEnum
-from sqlmodel import JSON, Column, Field, Integer, Relationship, SQLModel
+from sqlmodel import JSON, TIMESTAMP, Column, Field, Integer, Relationship, SQLModel
 
 
 # =============================================================================
@@ -20,7 +20,11 @@ class ThreadCreate(ThreadPayload):
 
 class Thread(ThreadCreate, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_type=TIMESTAMP(timezone=True),
+        index=True,
+    )
     deleted: bool = Field(default=False)
 
     messages: list["Message"] = Relationship(back_populates="thread")
@@ -61,7 +65,11 @@ class MessageCreate(SQLModel):
 
 
 class Message(MessageCreate, table=True):
-    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_type=TIMESTAMP(timezone=True),
+        index=True,
+    )
 
     thread: Thread = Relationship(back_populates="messages")
     feedback: "Feedback" = Relationship(back_populates="message")
@@ -98,8 +106,14 @@ class FeedbackPublic(FeedbackCreate):
 
 class Feedback(FeedbackCreate, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_type=TIMESTAMP(timezone=True),
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_type=TIMESTAMP(timezone=True),
+    )
     sync_status: FeedbackSyncStatus = Field(
         sa_column=Column(
             SAEnum(FeedbackSyncStatus),
@@ -107,6 +121,9 @@ class Feedback(FeedbackCreate, table=True):
         ),
         default=FeedbackSyncStatus.PENDING,
     )
-    synced_at: datetime | None = Field(default=None)
+    synced_at: datetime | None = Field(
+        default=None,
+        sa_type=TIMESTAMP(timezone=True),
+    )
 
     message: Message = Relationship(back_populates="feedback")

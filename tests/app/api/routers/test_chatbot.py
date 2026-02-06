@@ -1,6 +1,6 @@
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import jwt
 import pytest
@@ -26,7 +26,7 @@ from tests.conftest import MessagesFactory, ThreadFactory
 
 class MockLangSmithFeedbackSender:
     def send_feedback(self, feedback: Feedback, created: bool):
-        return FeedbackSyncStatus.SUCCESS, datetime.now()
+        return FeedbackSyncStatus.SUCCESS, datetime.now(timezone.utc)
 
 
 class MockReActAgent:
