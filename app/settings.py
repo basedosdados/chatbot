@@ -1,10 +1,12 @@
 from functools import cached_property
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from google.oauth2.service_account import Credentials
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
 class Settings(BaseSettings):
@@ -36,11 +38,11 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                   Database settings                    ==
     # ============================================================
-    DB_HOST: str = Field(description="PostgreSQL database host.")
+    DB_HOST: NonEmptyStr = Field(description="PostgreSQL database host.")
     DB_PORT: int = Field(description="PostgreSQL database port.")
-    DB_NAME: str = Field(description="PostgreSQL database name.")
-    DB_USER: str = Field(description="PostgreSQL database user.")
-    DB_PASSWORD: str = Field(description="PostgreSQL database password.")
+    DB_NAME: NonEmptyStr = Field(description="PostgreSQL database name.")
+    DB_USER: NonEmptyStr = Field(description="PostgreSQL database user.")
+    DB_PASSWORD: NonEmptyStr = Field(description="PostgreSQL database password.")
 
     @computed_field
     @property
@@ -65,18 +67,20 @@ class Settings(BaseSettings):
         default="https://backend.basedosdados.org",
         description="Base URL for the basedados backend.",
     )
-    JWT_ALGORITHM: str = Field(
+    JWT_ALGORITHM: NonEmptyStr = Field(
         description="Algorithm used for signing and and verifying JWT tokens."
     )
-    JWT_SECRET_KEY: str = Field(
+    JWT_SECRET_KEY: NonEmptyStr = Field(
         description="Secret key used for signing and verifying JWT tokens. Keep it secret. Keep it safe."
     )
 
     # ============================================================
     # ==                 Google Cloud settings                  ==
     # ============================================================
-    GOOGLE_BIGQUERY_PROJECT: str = Field(description="Google BigQuery project ID.")
-    GOOGLE_SERVICE_ACCOUNT: str = Field(
+    GOOGLE_BIGQUERY_PROJECT: NonEmptyStr = Field(
+        description="Google BigQuery project ID."
+    )
+    GOOGLE_SERVICE_ACCOUNT: NonEmptyStr = Field(
         description="Path to a google service account with required permissions."
     )
 
@@ -92,7 +96,7 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                      LLM settings                      ==
     # ============================================================
-    MODEL_URI: str = Field(
+    MODEL_URI: NonEmptyStr = Field(
         description=(
             "Defines the LLM to be used. Refer to the LangChain docs for valid values: "
             "https://reference.langchain.com/python/langchain/models/#langchain.chat_models.init_chat_model."
@@ -119,8 +123,8 @@ class Settings(BaseSettings):
     LANGSMITH_TRACING: bool = Field(
         default=True, description="Whether to enable tracing to LangSmith."
     )
-    LANGSMITH_API_KEY: str = Field(description="LangSmith API key.")
-    LANGSMITH_PROJECT: str = Field(description="LangSmith project name.")
+    LANGSMITH_API_KEY: NonEmptyStr = Field(description="LangSmith API key.")
+    LANGSMITH_PROJECT: NonEmptyStr = Field(description="LangSmith project name.")
 
     # ============================================================
     # ==                    Logging settings                    ==
