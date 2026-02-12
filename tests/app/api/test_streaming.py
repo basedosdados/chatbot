@@ -527,8 +527,6 @@ class TestStreamResponse:
             )
         )
 
-        print(f"{events = }")
-
         assert len(events) == 2
         assert '"type":"final_answer"' in events[0]
         assert ErrorMessage.GRAPH_RECURSION_LIMIT_REACHED in events[0]
