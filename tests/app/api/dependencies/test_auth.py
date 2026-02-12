@@ -1,3 +1,5 @@
+import uuid
+
 import jwt
 import pytest
 from fastapi import HTTPException, status
@@ -19,10 +21,10 @@ class TestGetUserId:
 
     async def test_valid_token(self):
         """Test decoding a valid JWT token."""
-        user_id = 1
+        user_id = str(uuid.uuid4())
 
         token = jwt.encode(
-            {"user_id": user_id},
+            {"uuid": user_id},
             key=settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
