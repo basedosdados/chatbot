@@ -30,10 +30,12 @@ jobs:
         run: uv run pytest --cov
         # Minimal environment configuration required for test execution
         env:
-          # Mock database connection strings and schemas
-          DB_URL: postgresql://mock:mock@localhost:5432/mock
-          SQLALCHEMY_DB_URL: postgresql+psycopg://mock:mock@localhost:5432/mock
-          DB_SCHEMA_CHATBOT: chatbot
+          # Mock database configuration
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: mock
+          DB_USER: mock
+          DB_PASSWORD: mock
 
           # Mock JWT configuration
           JWT_ALGORITHM: HS256

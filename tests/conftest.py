@@ -1,8 +1,8 @@
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from testcontainers.postgres import PostgresContainer
@@ -19,7 +19,6 @@ from app.db.models import (
     Thread,
     ThreadCreate,
 )
-from app.settings import settings
 
 type ThreadFactory = Callable[[str], Awaitable[Thread]]
 type MessagesFactory = Callable[[], Awaitable[tuple[Message, Message]]]
@@ -41,7 +40,9 @@ async def async_engine(
 ) -> AsyncGenerator[AsyncEngine, None]:
     """Create an async engine connected to the test PostgreSQL container."""
     postgres_url = postgres_container.get_connection_url()
-    engine = create_async_engine(postgres_url, echo=False)
+    engine = create_async_engine(
+        url=postgres_url, connect_args={"options": "-c timezone=utc"}
+    )
     yield engine
     await engine.dispose()
 
@@ -50,9 +51,6 @@ async def async_engine(
 async def database(async_engine: AsyncEngine):
     """Create a AsyncDatabase instance connected to the test PostgreSQL container."""
     async with async_engine.begin() as conn:
-        await conn.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
-        )
         await conn.run_sync(SQLModel.metadata.create_all)
 
     sessionmaker = async_sessionmaker(async_engine, expire_on_commit=False)
@@ -68,9 +66,9 @@ async def database(async_engine: AsyncEngine):
 # User Fixtures
 # =============================================================
 @pytest_asyncio.fixture
-async def user_id() -> int:
+async def user_id() -> str:
     """Mock user ID for testing."""
-    return 1
+    return str(uuid.uuid4())
 
 
 # =============================================================

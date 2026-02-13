@@ -5,7 +5,7 @@ chatbot:
   # Deployment image
   image:
     name: ghcr.io/basedosdados/chatbot
-    tag: latest
+    tag: ""
     pullPolicy: Always
 
   # Number of replicas
@@ -20,18 +20,14 @@ chatbot:
       cpu: 500m
       memory: 2Gi
 
+  # Required: name of the ConfigMap containing non-sensitive
+  # environment variables (e.g., chatbot-api-prod-config)
+  envConfigMap: ""
+
   # Required: name of the Secret containing chatbot-specific
   # environment variables (e.g., chatbot-api-prod-secrets)
   envSecret: ""
 
   # Required: name of the shared Secret from basedosdados-api
   # containing Django Secret Key (e.g., api-prod-secrets)
-  sharedEnvSecret: ""
-
-  # Required: info from the shared database with basedosdados-api
-  sharedDatabase:
-    host: ""
-    port: 0
-    name: ""
-    user: ""
-    passwordSecret: ""
+  envSharedSecret: ""

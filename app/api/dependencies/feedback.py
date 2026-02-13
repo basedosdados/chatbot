@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends
@@ -92,7 +92,7 @@ class LangSmithFeedbackSender:
         sync_status = (
             FeedbackSyncStatus.SUCCESS if success else FeedbackSyncStatus.FAILED
         )
-        synced_at = datetime.now()
+        synced_at = datetime.now(timezone.utc)
 
         return sync_status, synced_at
 

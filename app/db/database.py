@@ -1,9 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TypeVar
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -25,7 +24,10 @@ from app.settings import settings
 
 T = TypeVar("T", bound=SQLModel)
 
-engine = create_async_engine(settings.SQLALCHEMY_DB_URL)
+engine = create_async_engine(
+    url=settings.SQLALCHEMY_DB_URL,
+    connect_args={"options": "-c timezone=utc"},
+)
 
 sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -37,9 +39,6 @@ async def init_database(engine: AsyncEngine):
         engine: An AsyncEngine instance.
     """
     async with engine.begin() as conn:
-        await conn.execute(
-            text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA_CHATBOT}")
-        )
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
@@ -219,7 +218,7 @@ class AsyncDatabase:
             )
 
             db_feedback.sqlmodel_update(feedback_data)
-            db_feedback.updated_at = datetime.now()
+            db_feedback.updated_at = datetime.now(timezone.utc)
             db_feedback.sync_status = FeedbackSyncStatus.PENDING
             self.session.add(db_feedback)
             await self.session.commit()

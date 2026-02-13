@@ -19,24 +19,23 @@ spec:
         - name: basedosdados-chatbot-migration
           image: "{{ .Values.chatbot.image.name }}:{{ .Values.chatbot.image.tag }}"
           imagePullPolicy: {{ .Values.chatbot.image.pullPolicy }}
-          command: ["alembic", "upgrade", "head"]
+          command: ["./scripts/migrate.sh"]
           env:
-            - name: DB_HOST
-              value: {{ .Values.chatbot.sharedDatabase.host | quote }}
-            - name: DB_PORT
-              value: {{ .Values.chatbot.sharedDatabase.port | quote }}
-            - name: DB_NAME
-              value: {{ .Values.chatbot.sharedDatabase.name | quote }}
-            - name: DB_USER
-              value: {{ .Values.chatbot.sharedDatabase.user | quote }}
-            - name: DB_PASSWORD
+            - name: JWT_ALGORITHM
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.chatbot.sharedDatabase.passwordSecret | quote }}
-                  key: password
+                  name: {{ .Values.chatbot.envSharedSecret | quote }}
+                  key: DJANGO_JWT_ALGORITHM
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.chatbot.envSharedSecret | quote }}
+                  key: DJANGO_SECRET_KEY
           envFrom:
+            - configMapRef:
+                name: {{ .Values.chatbot.envConfigMap | quote }}
             - secretRef:
                 name: {{ .Values.chatbot.envSecret | quote }}
       restartPolicy: Never
-  activeDeadlineSeconds: 60
+  activeDeadlineSeconds: 300
   backoffLimit: 3
