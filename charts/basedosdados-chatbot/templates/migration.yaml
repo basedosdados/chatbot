@@ -19,7 +19,7 @@ spec:
         - name: basedosdados-chatbot-migration
           image: "{{ .Values.chatbot.image.name }}:{{ .Values.chatbot.image.tag }}"
           imagePullPolicy: {{ .Values.chatbot.image.pullPolicy }}
-          command: ["alembic", "upgrade", "head"]
+          command: ["./scripts/migrate.sh"]
           env:
             - name: JWT_ALGORITHM
               valueFrom:
