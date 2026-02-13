@@ -24,7 +24,7 @@ services:
 
   migration:
     build: .
-    command: alembic upgrade head
+    command: ./scripts/migrate.sh
     env_file: .env
     depends_on:
       database:
