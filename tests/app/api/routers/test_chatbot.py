@@ -63,9 +63,9 @@ def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def access_token(user_id: int) -> str:
+def access_token(user_id: str) -> str:
     """Generate a valid JWT access token for testing."""
-    payload = {"user_id": user_id}
+    payload = {"uuid": user_id}
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
     )

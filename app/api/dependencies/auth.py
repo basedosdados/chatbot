@@ -40,7 +40,7 @@ async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> i
             algorithms=[settings.JWT_ALGORITHM],
         )
 
-        user_id = payload.get("user_id")
+        user_id = payload.get("uuid")
 
         if user_id is None:
             raise credentials_exception

@@ -15,7 +15,7 @@ class ThreadPayload(SQLModel):
 
 
 class ThreadCreate(ThreadPayload):
-    user_id: int = Field(index=True)
+    user_id: uuid.UUID = Field(index=True)
 
 
 class Thread(ThreadCreate, table=True):

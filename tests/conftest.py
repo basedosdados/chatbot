@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
@@ -65,9 +66,9 @@ async def database(async_engine: AsyncEngine):
 # User Fixtures
 # =============================================================
 @pytest_asyncio.fixture
-async def user_id() -> int:
+async def user_id() -> str:
     """Mock user ID for testing."""
-    return 1
+    return str(uuid.uuid4())
 
 
 # =============================================================
