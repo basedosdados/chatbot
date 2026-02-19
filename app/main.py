@@ -14,10 +14,10 @@ from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.tools import BDToolkit
 from app.api.main import api_router
 from app.db.database import engine, init_database
-from app.log_config import setup_logger
+from app.log_config import setup_logging
 from app.settings import settings
 
-setup_logger()
+setup_logging()
 
 
 @asynccontextmanager
