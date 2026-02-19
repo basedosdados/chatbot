@@ -1,8 +1,17 @@
+import logging
 import sys
 
 from loguru import logger
 
 from app.settings import settings
+
+
+class EndpointFilter(logging.Filter):
+    def __init__(self, excluded_endpoints: list[str]):
+        self.excluded_endpoints = excluded_endpoints
+
+    def filter(self, record: logging.LogRecord):
+        return not any(ep in record.getMessage() for ep in self.excluded_endpoints)
 
 
 def _format(record):
@@ -19,8 +28,11 @@ def _format(record):
     )
 
 
-def setup_logger():
-    # Remove loguru default handler
+def setup_logging():
+    logging.getLogger("uvicorn.access").addFilter(
+        EndpointFilter(excluded_endpoints=["/health"])
+    )
+
     logger.remove()
 
     logger.add(

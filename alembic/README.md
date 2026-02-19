@@ -1,18 +1,18 @@
 # Migração do Banco de Dados
 
-1\. Crie a variável de ambiente `SQLALCHEMY_DB_URL` contendo a URL para o banco de dados.
+1\. Configure as variáveis de ambiente `DB_*` para conectar-se ao banco de dados.
 
 2\. Gere o script de migração:
 ```bash
-alembic revision --autogenerate -m "alguma mensagem descritiva"
+uv run alembic revision --autogenerate -m "alguma mensagem descritiva"
 ```
 
 > [!WARNING]
-> Revise cuidadosamente o script de migração gerado antes de executá-lo. Ajustes manuais podem ser necessários para garantir que ele funcione corretamente.
+> Revise cuidadosamente o script de migração antes de executá-lo. Ajustes manuais podem ser necessários para garantir que ele funcione corretamente.
 
 3\. Execute o script de migração:
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 > [!WARNING]

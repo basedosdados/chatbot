@@ -1,22 +1,48 @@
-name: chatbot
+name: chatbot-bd
 
 services:
+  database:
+    image: postgres:13-alpine
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      # Use host port 5433 because port 5432
+      # may already be in use by our website backend
+      - 5433:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+    container_name: chatbot-database
+
   migration:
     build: .
-    command: alembic upgrade head
+    command: ./scripts/migrate.sh
     env_file: .env
-    networks:
-      - db_network
+    depends_on:
+      database:
+        condition: service_healthy
+        restart: true
     container_name: chatbot-migration
 
   chatbot-api:
     build: .
-    command: fastapi dev --host 0.0.0.0 app/main.py
+    command: uvicorn app.main:app --host 0.0.0.0 --reload
     env_file: .env
     environment:
       # Enable dev dependencies for local development
       - UV_NO_DEV=0
     depends_on:
+      database:
+        condition: service_healthy
+        restart: true
       # Run database migrations before starting the API
       migration:
         condition: service_completed_successfully
@@ -40,8 +66,6 @@ services:
     volumes:
       # Mount Google Cloud credentials (read-only)
       - ${HOME}/.basedosdados/credentials:/app/credentials:ro
-    networks:
-      - db_network
     deploy:
       # Limit local resources to match our pod resources
       resources:
@@ -53,9 +77,5 @@ services:
           memory: 2G
     container_name: chatbot-api
 
-# External network for database connectivity,
-# created by our website backend service
-# Ref: https://github.com/basedosdados/backend
-networks:
-  db_network:
-    external: true
+volumes:
+  pgdata:

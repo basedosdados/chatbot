@@ -1,24 +1,64 @@
 from functools import cached_property
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from google.oauth2.service_account import Credentials
-from pydantic import AfterValidator, Field, PostgresDsn, computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PostgresDsnStr = Annotated[PostgresDsn, AfterValidator(str)]
+NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
 class Settings(BaseSettings):
     API_PREFIX: Literal["/api/v1"] = "/api/v1"
 
     # ============================================================
+    # ==                  Environment settings                  ==
+    # ============================================================
+    ENVIRONMENT: Literal["development", "staging", "production"] = Field(
+        default="production",
+        description="The environment the application is running in.",
+    )
+
+    # ============================================================
+    # ==                     Auth Dev Mode                      ==
+    # ============================================================
+    AUTH_DEV_MODE: bool = Field(
+        default=False,
+        description=(
+            "When enabled, bypasses JWT validation and returns AUTH_DEV_USER_ID for all requests. "
+            "Only works when ENVIRONMENT is set to 'development'. "
+            "WARNING: Must NEVER be enabled in production."
+        ),
+    )
+    AUTH_DEV_USER_ID: int = Field(
+        default=1, description="The user ID to return when AUTH_DEV_MODE is enabled."
+    )
+
+    # ============================================================
     # ==                   Database settings                    ==
     # ============================================================
-    DB_URL: PostgresDsnStr = Field(description="PostgreSQL database URL.")
-    SQLALCHEMY_DB_URL: PostgresDsnStr = Field(
-        description="PostgreSQL database URL for SQLAlchemy."
-    )
-    DB_SCHEMA_CHATBOT: str = Field(description="PostgreSQL chatbot database schema.")
+    DB_HOST: NonEmptyStr = Field(description="PostgreSQL database host.")
+    DB_PORT: int = Field(description="PostgreSQL database port.")
+    DB_NAME: NonEmptyStr = Field(description="PostgreSQL database name.")
+    DB_USER: NonEmptyStr = Field(description="PostgreSQL database user.")
+    DB_PASSWORD: NonEmptyStr = Field(description="PostgreSQL database password.")
+
+    @computed_field
+    @property
+    def DB_URL(self) -> str:  # pragma: no cover
+        """PostgreSQL database URL."""
+        user = quote(self.DB_USER, safe="")
+        password = quote(self.DB_PASSWORD, safe="")
+        return f"postgresql://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    @computed_field
+    @property
+    def SQLALCHEMY_DB_URL(self) -> str:  # pragma: no cover
+        """PostgreSQL database URL for SQLAlchemy."""
+        user = quote(self.DB_USER, safe="")
+        password = quote(self.DB_PASSWORD, safe="")
+        return f"postgresql+psycopg://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     # ============================================================
     # ==                Website Backend settings                ==
@@ -27,24 +67,27 @@ class Settings(BaseSettings):
         default="https://backend.basedosdados.org",
         description="Base URL for the basedados backend.",
     )
-    JWT_ALGORITHM: str = Field(
+    JWT_ALGORITHM: NonEmptyStr = Field(
         description="Algorithm used for signing and and verifying JWT tokens."
     )
-    JWT_SECRET_KEY: str = Field(
+    JWT_SECRET_KEY: NonEmptyStr = Field(
         description="Secret key used for signing and verifying JWT tokens. Keep it secret. Keep it safe."
     )
 
     # ============================================================
     # ==                 Google Cloud settings                  ==
     # ============================================================
-    GOOGLE_BIGQUERY_PROJECT: str = Field(description="Google BigQuery project ID.")
-    GOOGLE_SERVICE_ACCOUNT: str = Field(
+    GOOGLE_BIGQUERY_PROJECT: NonEmptyStr = Field(
+        description="Google BigQuery project ID."
+    )
+    GOOGLE_SERVICE_ACCOUNT: NonEmptyStr = Field(
         description="Path to a google service account with required permissions."
     )
 
     @computed_field
     @cached_property
     def GOOGLE_CREDENTIALS(self) -> Credentials:  # pragma: no cover
+        """Google Cloud credentials."""
         return Credentials.from_service_account_file(
             filename=self.GOOGLE_SERVICE_ACCOUNT,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -53,7 +96,7 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                      LLM settings                      ==
     # ============================================================
-    MODEL_URI: str = Field(
+    MODEL_URI: NonEmptyStr = Field(
         description=(
             "Defines the LLM to be used. Refer to the LangChain docs for valid values: "
             "https://reference.langchain.com/python/langchain/models/#langchain.chat_models.init_chat_model."
@@ -80,8 +123,8 @@ class Settings(BaseSettings):
     LANGSMITH_TRACING: bool = Field(
         default=True, description="Whether to enable tracing to LangSmith."
     )
-    LANGSMITH_API_KEY: str = Field(description="LangSmith API key.")
-    LANGSMITH_PROJECT: str = Field(description="LangSmith project name.")
+    LANGSMITH_API_KEY: NonEmptyStr = Field(description="LangSmith API key.")
+    LANGSMITH_PROJECT: NonEmptyStr = Field(description="LangSmith project name.")
 
     # ============================================================
     # ==                    Logging settings                    ==

@@ -1,6 +1,6 @@
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import jwt
 import pytest
@@ -26,7 +26,7 @@ from tests.conftest import MessagesFactory, ThreadFactory
 
 class MockLangSmithFeedbackSender:
     def send_feedback(self, feedback: Feedback, created: bool):
-        return FeedbackSyncStatus.SUCCESS, datetime.now()
+        return FeedbackSyncStatus.SUCCESS, datetime.now(timezone.utc)
 
 
 class MockReActAgent:
@@ -53,10 +53,19 @@ class MockReActAgent:
         return
 
 
+@pytest.fixture(autouse=True)
+def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
+    """Ensure auth dev mode is disabled for all tests in this module."""
+    monkeypatch.setattr(
+        "app.api.dependencies.auth.settings",
+        settings.model_copy(update={"AUTH_DEV_MODE": False}),
+    )
+
+
 @pytest.fixture
-def access_token(user_id: int) -> str:
+def access_token(user_id: str) -> str:
     """Generate a valid JWT access token for testing."""
-    payload = {"user_id": user_id}
+    payload = {"uuid": user_id}
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
     )
