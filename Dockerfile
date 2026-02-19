@@ -36,4 +36,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 # Start FastAPI server
-CMD ["fastapi", "run" , "--workers", "2", "app/main.py"]
+CMD ["uvicorn", "app.main:app" , "--host", "0.0.0.0", "--workers", "2"]

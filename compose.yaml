@@ -34,7 +34,7 @@ services:
 
   chatbot-api:
     build: .
-    command: fastapi dev --host 0.0.0.0 app/main.py
+    command: uvicorn app.main:app --host 0.0.0.0 --reload
     env_file: .env
     environment:
       # Enable dev dependencies for local development
