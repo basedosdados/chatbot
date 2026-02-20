@@ -27,6 +27,7 @@ T = TypeVar("T", bound=SQLModel)
 engine = create_async_engine(
     url=settings.SQLALCHEMY_DB_URL,
     connect_args={"options": "-c timezone=utc"},
+    pool_pre_ping=True,
 )
 
 sessionmaker = async_sessionmaker(engine, expire_on_commit=False)

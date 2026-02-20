@@ -50,10 +50,12 @@ cp .env.example .env
 Por padrão, a API do chatbot exige um token JWT válido emitido pela API do website. Para desenvolvimento local sem depender da API do website, habilite o modo de autenticação de desenvolvedor no arquivo `.env`:
 ```bash
 AUTH_DEV_MODE=true
-AUTH_DEV_USER_ID=1
+AUTH_DEV_USER_ID=uuid
 ```
 > [!NOTE]
 > O modo de autenticação de desenvolvedor só funciona quando `ENVIRONMENT=development`.
+> 
+> `AUTH_DEV_USER_ID` é opcional. Configure-o para simular um usuário específico durante o desenvolvimento (deve ser um UUID válido). Caso não seja fornecido, um UUID fixo será utilizado.
 
 > [!WARNING]
 > O modo de autenticação de desenvolvedor ignora a validação do token JWT e retorna o ID definido por `AUTH_DEV_USER_ID` para todas as requisições. **Nunca habilite em produção.**
