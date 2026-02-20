@@ -1,3 +1,4 @@
+import uuid
 from functools import cached_property
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -31,8 +32,9 @@ class Settings(BaseSettings):
             "WARNING: Must NEVER be enabled in production."
         ),
     )
-    AUTH_DEV_USER_ID: int = Field(
-        default=1, description="The user ID to return when AUTH_DEV_MODE is enabled."
+    AUTH_DEV_USER_ID: str = Field(
+        default_factory=lambda: str(uuid.uuid5(uuid.NAMESPACE_DNS, "dev-user-id")),
+        description="The user ID to return when AUTH_DEV_MODE is enabled.",
     )
 
     # ============================================================
