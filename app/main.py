@@ -53,7 +53,12 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         )
 
         async with AsyncConnectionPool(
-            conninfo=settings.DB_URL, max_size=8, kwargs=conn_kwargs
+            conninfo=settings.DB_URL,
+            kwargs=conn_kwargs,
+            min_size=0,
+            max_size=4,
+            max_idle=300,
+            check=AsyncConnectionPool.check_connection,
         ) as pool:
             checkpointer = AsyncPostgresSaver(pool)
 

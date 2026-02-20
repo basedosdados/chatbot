@@ -81,7 +81,7 @@ class TestAuthDevMode:
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test dev mode bypasses JWT validation and returns configured user ID."""
-        dev_user_id = 1
+        dev_user_id = str(uuid.uuid4())
 
         monkeypatch.setattr(
             "app.api.dependencies.auth.settings",
@@ -102,7 +102,7 @@ class TestAuthDevMode:
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """Test dev mode bypasses JWT validation even when no token is provided."""
-        dev_user_id = 1
+        dev_user_id = str(uuid.uuid4())
 
         monkeypatch.setattr(
             "app.api.dependencies.auth.settings",
