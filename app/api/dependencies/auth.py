@@ -1,3 +1,4 @@
+import time
 from typing import Annotated
 
 import httpx
@@ -19,7 +20,7 @@ async def _verify_token(token: str) -> bool:
             }
         }
     """
-
+    start = time.perf_counter()
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -32,6 +33,9 @@ async def _verify_token(token: str) -> bool:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to verify user access",
         )
+    finally:
+        elapsed = time.perf_counter() - start
+        logger.info(f"Token verification elapsed time: {elapsed:.4f}s")
 
     payload = response.json()["data"]["verifyToken"]["payload"]
     return payload["has_chatbot_access"]
