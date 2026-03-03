@@ -54,7 +54,7 @@ AUTH_DEV_USER_ID=uuid
 ```
 > [!NOTE]
 > O modo de autenticação de desenvolvedor só funciona quando `ENVIRONMENT=development`.
-> 
+>
 > `AUTH_DEV_USER_ID` é opcional. Configure-o para simular um usuário específico durante o desenvolvimento (deve ser um UUID válido). Caso não seja fornecido, um UUID fixo será utilizado.
 
 > [!WARNING]
