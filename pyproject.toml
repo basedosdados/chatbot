@@ -59,6 +59,7 @@ addopts = [
 source = ["app"]
 branch = true
 concurrency = ["thread", "greenlet"]
+omit = ["app/log_config.py"]
 
 [tool.coverage.report]
 exclude_lines = [

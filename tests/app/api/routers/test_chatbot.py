@@ -62,6 +62,16 @@ def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def mock_verify_token(monkeypatch: pytest.MonkeyPatch):
+    """Mock _verify_token to bypass the external API call."""
+
+    async def _verify_token(token: str) -> bool:
+        return True
+
+    monkeypatch.setattr("app.api.dependencies.auth._verify_token", _verify_token)
+
+
 @pytest.fixture
 def access_token(user_id: str) -> str:
     """Generate a valid JWT access token for testing."""
