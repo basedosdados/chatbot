@@ -90,9 +90,14 @@ cd backend
 Configure e execute de acordo com as [instruções do repositório](https://github.com/basedosdados/backend?tab=readme-ov-file#configura%C3%A7%C3%A3o-do-ambiente-de-desenvolvimento).
 
 ### 2. Configuração da API do chatbot
-Desabilite o modo de autenticação de desenvolvedor e configure as variáveis `JWT_*` no arquivo `.env` da API do chatbot:
+Desabilite o modo de autenticação de desenvolvedor:
 ```bash
 AUTH_DEV_MODE=false
+```
+
+Configure as variáveis de autenticação e a URL base da API do website no arquivo `.env` da API do chatbot:
+```bash
+BASEDOSDADOS_BASE_URL='http://api:8000'
 JWT_ALGORITHM=jwt-algorithm
 JWT_SECRET_KEY=jwt-secret-key
 ```
