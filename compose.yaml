@@ -66,6 +66,9 @@ services:
     volumes:
       # Mount Google Cloud credentials (read-only)
       - ${HOME}/.basedosdados/credentials:/app/credentials:ro
+    networks:
+      - default
+      - api_network
     deploy:
       # Limit local resources to match our pod resources
       resources:
@@ -79,3 +82,9 @@ services:
 
 volumes:
   pgdata:
+
+# External network for website api connectivity
+# Ref: https://github.com/basedosdados/backend
+networks:
+  api_network:
+    external: true

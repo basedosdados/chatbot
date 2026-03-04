@@ -1,5 +1,7 @@
+import time
 from typing import Annotated
 
+import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -8,6 +10,36 @@ from loguru import logger
 from app.settings import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
+
+_http_client = httpx.AsyncClient()
+
+
+async def _verify_token(token: str) -> bool:
+    query = """
+        mutation verifyToken($token: String!) {
+            verifyToken(token: $token) {
+                payload
+            }
+        }
+    """
+    start = time.perf_counter()
+    try:
+        response = await _http_client.post(
+            f"{settings.BASEDOSDADOS_BASE_URL}/graphql",
+            json={"query": query, "variables": {"token": token}},
+        )
+        response.raise_for_status()
+    except (httpx.HTTPStatusError, httpx.ConnectError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to verify user access",
+        )
+    finally:
+        elapsed = time.perf_counter() - start
+        logger.info(f"Token verification elapsed time: {elapsed:.4f}s")
+
+    payload = response.json()["data"]["verifyToken"]["payload"]
+    return payload["has_chatbot_access"]
 
 
 async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> int:
@@ -47,6 +79,12 @@ async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> i
 
     except jwt.exceptions.InvalidTokenError:
         raise credentials_exception
+
+    if not await _verify_token(token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not have chatbot access",
+        )
 
     return user_id
 
