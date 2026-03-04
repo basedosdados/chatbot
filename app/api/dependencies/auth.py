@@ -11,6 +11,8 @@ from app.settings import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
+_http_client = httpx.AsyncClient()
+
 
 async def _verify_token(token: str) -> bool:
     query = """
@@ -22,11 +24,10 @@ async def _verify_token(token: str) -> bool:
     """
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{settings.BASEDOSDADOS_BASE_URL}/graphql",
-                json={"query": query, "variables": {"token": token}},
-            )
+        response = await _http_client.post(
+            f"{settings.BASEDOSDADOS_BASE_URL}/graphql",
+            json={"query": query, "variables": {"token": token}},
+        )
         response.raise_for_status()
     except (httpx.HTTPStatusError, httpx.ConnectError):
         raise HTTPException(

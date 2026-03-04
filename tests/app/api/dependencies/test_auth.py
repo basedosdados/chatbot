@@ -1,6 +1,5 @@
 import uuid
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import jwt
@@ -14,12 +13,6 @@ from app.settings import settings
 class TestVerifyToken:
     """Tests for _verify_token function."""
 
-    def _mock_client(self, mock_response: Any):
-        """Create a mock httpx.AsyncClient context manager."""
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        return mock_client
-
     def _mock_graphql_response(self, has_access: bool):
         """Create a mock response for the GraphQL endpoint."""
         mock_response = MagicMock()
@@ -28,31 +21,35 @@ class TestVerifyToken:
         }
         return mock_response
 
-    async def test_returns_true_when_user_has_access(self):
+    async def test_returns_true_when_user_has_access(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test returns True when user has chatbot access."""
         mock_response = self._mock_graphql_response(has_access=True)
-        mock_client = self._mock_client(mock_response)
+        monkeypatch.setattr(
+            "app.api.dependencies.auth._http_client",
+            MagicMock(post=AsyncMock(return_value=mock_response)),
+        )
 
-        with patch("app.api.dependencies.auth.httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value = mock_client
-
-            result = await _verify_token("valid-token")
+        result = await _verify_token("valid-token")
 
         assert result is True
 
-    async def test_returns_false_when_user_lacks_access(self):
+    async def test_returns_false_when_user_lacks_access(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test returns False when user lacks chatbot access."""
         mock_response = self._mock_graphql_response(has_access=False)
-        mock_client = self._mock_client(mock_response)
+        monkeypatch.setattr(
+            "app.api.dependencies.auth._http_client",
+            MagicMock(post=AsyncMock(return_value=mock_response)),
+        )
 
-        with patch("app.api.dependencies.auth.httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value = mock_client
-
-            result = await _verify_token("valid-token")
+        result = await _verify_token("valid-token")
 
         assert result is False
 
-    async def test_raises_503_on_http_error(self):
+    async def test_raises_503_on_http_error(self, monkeypatch: pytest.MonkeyPatch):
         """Test raises 503 when GraphQL endpoint returns HTTP error."""
         mock_response = MagicMock()
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -60,26 +57,27 @@ class TestVerifyToken:
             request=httpx.Request("POST", "http://test"),
             response=mock_response,
         )
-        mock_client = self._mock_client(mock_response)
+        monkeypatch.setattr(
+            "app.api.dependencies.auth._http_client",
+            MagicMock(post=AsyncMock(return_value=mock_response)),
+        )
 
-        with patch("app.api.dependencies.auth.httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value = mock_client
-
-            with pytest.raises(HTTPException) as e:
-                await _verify_token("valid-token")
+        with pytest.raises(HTTPException) as e:
+            await _verify_token("valid-token")
 
         assert e.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
-    async def test_raises_503_on_connect_error(self):
+    async def test_raises_503_on_connect_error(self, monkeypatch: pytest.MonkeyPatch):
         """Test raises 503 when GraphQL endpoint is unreachable."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = httpx.ConnectError("Connection refused")
+        monkeypatch.setattr(
+            "app.api.dependencies.auth._http_client",
+            MagicMock(
+                post=AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+            ),
+        )
 
-        with patch("app.api.dependencies.auth.httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value = mock_client
-
-            with pytest.raises(HTTPException) as e:
-                await _verify_token("valid-token")
+        with pytest.raises(HTTPException) as e:
+            await _verify_token("valid-token")
 
         assert e.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 

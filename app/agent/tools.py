@@ -104,6 +104,9 @@ query getDatasetDetails($id: ID!) {
 }
 """
 
+# Shared client for making HTTP requests.
+_http_client = httpx.Client(timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT))
+
 
 class GoogleAPIError:
     """Constants for expected Google API error types."""
@@ -278,12 +281,10 @@ def search_datasets(query: str) -> str:
     Strategy: Start with broad terms like "censo", "ibge", "inep", "rais", then get specific if needed.
     Next step: Use `get_dataset_details()` with returned dataset IDs.
     """  # noqa: E501
-    with httpx.Client() as client:
-        response = client.get(
-            url=SEARCH_URL,
-            params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
-            timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT),
-        )
+    response = _http_client.get(
+        url=SEARCH_URL,
+        params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
+    )
 
     response.raise_for_status()
     data: dict = response.json()
@@ -333,15 +334,13 @@ def get_dataset_details(dataset_id: str) -> str:
 
     Next step: Use `execute_bigquery_sql()` to execute queries.
     """  # noqa: E501
-    with httpx.Client() as client:
-        response = client.post(
-            url=GRAPHQL_URL,
-            json={
-                "query": DATASET_DETAILS_QUERY,
-                "variables": {"id": dataset_id},
-            },
-            timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT),
-        )
+    response = _http_client.post(
+        url=GRAPHQL_URL,
+        json={
+            "query": DATASET_DETAILS_QUERY,
+            "variables": {"id": dataset_id},
+        },
+    )
 
     response.raise_for_status()
     data: dict[str, dict[str, dict]] = response.json()
@@ -436,11 +435,7 @@ def get_dataset_details(dataset_id: str) -> str:
     if gcp_dataset_id is not None:
         filename = gcp_dataset_id.replace("_", "-")
 
-        with httpx.Client() as client:
-            response = client.get(
-                url=f"{BASE_USAGE_GUIDE_URL}/{filename}.md",
-                timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT),
-            )
+        response = _http_client.get(f"{BASE_USAGE_GUIDE_URL}/{filename}.md")
 
         if response.status_code == httpx.codes.OK:
             usage_guide = response.text.strip()
