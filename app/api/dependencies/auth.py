@@ -29,9 +29,10 @@ async def _is_user_authorized(token: str) -> bool:
         )
         response.raise_for_status()
     except (httpx.HTTPStatusError, httpx.ConnectError):
+        logger.exception("Authorization service unreachable:")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to verify user access",
+            detail="Authorization service unavailable",
         )
 
     payload = response.json()["data"]["verifyToken"]["payload"]
@@ -79,7 +80,7 @@ async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> i
     if not await _is_user_authorized(token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User does not have chatbot access",
+            detail="User is not authorized to access this resource",
         )
 
     return user_id
