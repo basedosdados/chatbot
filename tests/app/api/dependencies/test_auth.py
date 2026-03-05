@@ -6,12 +6,12 @@ import jwt
 import pytest
 from fastapi import HTTPException, status
 
-from app.api.dependencies.auth import _verify_token, get_user_id
+from app.api.dependencies.auth import _is_user_authorized, get_user_id
 from app.settings import settings
 
 
 class TestVerifyToken:
-    """Tests for _verify_token function."""
+    """Tests for _is_user_authorized function."""
 
     def _mock_graphql_response(self, has_access: bool):
         """Create a mock response for the GraphQL endpoint."""
@@ -31,7 +31,7 @@ class TestVerifyToken:
             MagicMock(post=AsyncMock(return_value=mock_response)),
         )
 
-        result = await _verify_token("valid-token")
+        result = await _is_user_authorized("token")
 
         assert result is True
 
@@ -45,7 +45,7 @@ class TestVerifyToken:
             MagicMock(post=AsyncMock(return_value=mock_response)),
         )
 
-        result = await _verify_token("valid-token")
+        result = await _is_user_authorized("token")
 
         assert result is False
 
@@ -63,7 +63,7 @@ class TestVerifyToken:
         )
 
         with pytest.raises(HTTPException) as e:
-            await _verify_token("valid-token")
+            await _is_user_authorized("token")
 
         assert e.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -77,7 +77,7 @@ class TestVerifyToken:
         )
 
         with pytest.raises(HTTPException) as e:
-            await _verify_token("valid-token")
+            await _is_user_authorized("token")
 
         assert e.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -97,11 +97,11 @@ class TestGetUserId:
         """Test decoding a valid JWT token with chatbot access."""
         user_id = str(uuid.uuid4())
 
-        async def mock_verify_token(token: str) -> bool:
+        async def mock_is_user_authorized(token: str) -> bool:
             return True
 
         monkeypatch.setattr(
-            "app.api.dependencies.auth._verify_token", mock_verify_token
+            "app.api.dependencies.auth._is_user_authorized", mock_is_user_authorized
         )
 
         token = jwt.encode(
@@ -120,11 +120,11 @@ class TestGetUserId:
         """Test valid JWT token but user lacks chatbot access raises 403."""
         user_id = str(uuid.uuid4())
 
-        async def mock_verify_token(token: str) -> bool:
+        async def mock_is_user_authorized(token: str) -> bool:
             return False
 
         monkeypatch.setattr(
-            "app.api.dependencies.auth._verify_token", mock_verify_token
+            "app.api.dependencies.auth._is_user_authorized", mock_is_user_authorized
         )
 
         token = jwt.encode(
@@ -138,20 +138,17 @@ class TestGetUserId:
 
         assert e.value.status_code == status.HTTP_403_FORBIDDEN
 
-    async def test_verify_token_service_unavailable(
+    async def test_is_user_authorized_service_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        """Test that 503 is raised when token verification service is unavailable."""
+        """Test that 503 is raised when user authorization service is unavailable."""
         user_id = str(uuid.uuid4())
 
-        async def mock_verify_token(token: str) -> bool:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Unable to verify user access",
-            )
+        async def mock_is_user_authorized(token: str) -> bool:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE)
 
         monkeypatch.setattr(
-            "app.api.dependencies.auth._verify_token", mock_verify_token
+            "app.api.dependencies.auth._is_user_authorized", mock_is_user_authorized
         )
 
         token = jwt.encode(
