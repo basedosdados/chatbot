@@ -326,7 +326,6 @@ class TestStreamResponse:
     def mock_config(self, mock_thread_id: str) -> ConfigDict:
         return {
             "run_id": uuid.uuid4(),
-            "recursion_limit": 10,
             "configurable": {"thread_id": mock_thread_id},
         }
 
