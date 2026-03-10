@@ -68,7 +68,8 @@ async def delete_thread_and_checkpoints(
             detail=f"Thread {thread_id} not found",
         )
 
-    await agent.aclear_thread(thread_id)
+    if agent.checkpointer is not None:
+        await agent.checkpointer.adelete_thread(thread_id)
 
 
 @router.get("/threads/{thread_id}/messages")

@@ -30,6 +30,9 @@ class MockLangSmithFeedbackSender:
 
 
 class MockReActAgent:
+    def __init__(self):
+        self.checkpointer = None
+
     def invoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
 
@@ -45,12 +48,6 @@ class MockReActAgent:
         chunk = {"agent": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
-
-    def clear_thread(self, thread_id):
-        return
-
-    async def aclear_thread(self, thread_id):
-        return
 
 
 @pytest.fixture(autouse=True)
