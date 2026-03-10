@@ -2,10 +2,7 @@ import json
 import uuid
 from typing import Any, AsyncIterator, Literal
 
-from google.api_core import exceptions as google_api_exceptions
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, ToolMessage
-from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 from pydantic import BaseModel, JsonValue
@@ -13,7 +10,6 @@ from pydantic import BaseModel, JsonValue
 from app.api.schemas import ConfigDict
 from app.db.database import AsyncDatabase
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
-from app.settings import settings
 
 
 class ToolCall(BaseModel):
@@ -62,15 +58,9 @@ class ErrorMessage:
         "Se o problema persistir, avise-nos. Obrigado pela paciência!"
     )
 
-    CONTEXT_OVERFLOW = (
-        "Sua última mensagem ultrapassou o limite de tamanho para esta conversa. "
-        "Por favor, tente dividir sua solicitação em partes menores "
-        "ou inicie uma nova conversa."
-    )
-
-    GRAPH_RECURSION_LIMIT_REACHED = (
-        "Desculpe, não consegui encontrar uma resposta para a sua pergunta. "
-        "Por favor, tente reformulá-la ou pergunte algo diferente."
+    MODEL_CALL_LIMIT_REACHED = (
+        "Ops, essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
+        "Por favor, tente ser mais específico ou divida sua pergunta em partes menores."
     )
 
 
@@ -146,8 +136,8 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             - "final_answer" for agent messages without tool calls
             - None for ignored chunks
     """
-    if "agent" in chunk:
-        ai_messages: list[AIMessage] = chunk["agent"]["messages"]
+    if "model" in chunk:
+        ai_messages: list[AIMessage] = chunk["model"]["messages"]
 
         # If no messages are returned, the model returned an empty response
         # with no tool calls. This also counts as a final (but empty) answer.
@@ -202,6 +192,11 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         return StreamEvent(
             type="tool_output", data=EventData(tool_outputs=tool_outputs)
         )
+    elif "ModelCallLimitMiddleware.before_model" in chunk:
+        event_data = EventData(
+            content=ErrorMessage.MODEL_CALL_LIMIT_REACHED, tool_calls=None
+        )
+        return StreamEvent(type="final_answer", data=event_data)
     return None
 
 
@@ -225,7 +220,6 @@ async def stream_response(
     """
     events = []
     artifacts = []
-    agent_state = None
     assistant_message = ""
     status = MessageStatus.SUCCESS
 
@@ -236,7 +230,6 @@ async def stream_response(
             stream_mode=["updates", "values"],
         ):
             if mode == "values":
-                agent_state = chunk
                 continue
 
             event = _process_chunk(chunk)
@@ -253,47 +246,10 @@ async def stream_response(
 
                 events.append(event.model_dump())
                 yield event.to_sse()
-
-    except GraphRecursionError:
-        logger.warning(f"Graph recursion limit reached for message {config['run_id']}")
-
-        assistant_message = ErrorMessage.GRAPH_RECURSION_LIMIT_REACHED
-
-        status = MessageStatus.SUCCESS
-
-        yield StreamEvent(
-            type="final_answer", data=EventData(content=assistant_message)
-        ).to_sse()
-
-    except google_api_exceptions.InvalidArgument:
-        logger.exception(
-            "Agent execution failed with Google API InvalidArgument error:"
-        )
-
-        assistant_message = ErrorMessage.UNEXPECTED
-
-        status = MessageStatus.ERROR
-
-        if agent_state is not None:
-            model = init_chat_model(settings.MODEL_URI)
-            total_tokens = model.get_num_tokens_from_messages(agent_state["messages"])
-
-            if total_tokens >= model.profile.get(
-                "max_input_tokens", settings.MAX_TOKENS
-            ):
-                assistant_message = ErrorMessage.CONTEXT_OVERFLOW
-
-        yield StreamEvent(
-            type="error", data=EventData(error_details={"message": assistant_message})
-        ).to_sse()
-
     except Exception:
         logger.exception(f"Unexpected error responding message {config['run_id']}:")
-
         assistant_message = ErrorMessage.UNEXPECTED
-
         status = MessageStatus.ERROR
-
         yield StreamEvent(
             type="error", data=EventData(error_details={"message": assistant_message})
         ).to_sse()

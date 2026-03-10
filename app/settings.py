@@ -111,13 +111,6 @@ class Settings(BaseSettings):
             "lower ones make them more deterministic."
         )
     )
-    MAX_TOKENS: int = Field(
-        description=(
-            "Maximum number of tokens for a single input. "
-            "Must be defined according to the provided model uri "
-            "and be less than the model's maximum input tokens."
-        ),
-    )
 
     # ============================================================
     # ==                   LangSmith settings                   ==
