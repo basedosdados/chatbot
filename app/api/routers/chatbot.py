@@ -107,7 +107,6 @@ async def send_message(
 
     config = ConfigDict(
         run_id=run_id,
-        recursion_limit=32,
         configurable={"thread_id": thread_id},
     )
 
