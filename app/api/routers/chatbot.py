@@ -108,7 +108,7 @@ async def send_message(
 
     config = ConfigDict(
         run_id=run_id,
-        configurable={"thread_id": thread_id},
+        configurable={"thread_id": thread_id, "user_id": user_id},
     )
 
     message_create = MessageCreate(
