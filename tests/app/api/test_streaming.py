@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from app.api.schemas import ConfigDict
 from app.api.streaming import (
     ErrorMessage,
+    _parse_thinking,
     _process_chunk,
     _truncate_json,
     stream_response,
@@ -109,6 +110,64 @@ class TestTruncateJSON:
     def test_truncate_json_invalid(self):
         invalid_json_string = '{"key": "value"'
         assert _truncate_json(invalid_json_string) == invalid_json_string
+
+
+class TestParseThinking:
+    """Tests for _parse_thinking function."""
+
+    def test_string_content_returns_none(self):
+        """Test that plain string content returns None."""
+        message = AIMessage(content="Hello, world!")
+        assert _parse_thinking(message) is None
+
+    def test_single_thinking_block(self):
+        """Test extraction of a single thinking block."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "Let me reason about this."},
+                {"type": "text", "text": "Here is my answer."},
+            ]
+        )
+        assert _parse_thinking(message) == "Let me reason about this."
+
+    def test_multiple_thinking_blocks_are_concatenated(self):
+        """Test that multiple thinking blocks are concatenated."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "First thought. "},
+                {"type": "text", "text": "Some text."},
+                {"type": "thinking", "thinking": "Second thought."},
+            ]
+        )
+        assert _parse_thinking(message) == "First thought. Second thought."
+
+    def test_no_thinking_blocks_returns_none(self):
+        """Test that content with no thinking blocks returns None."""
+        message = AIMessage(
+            content=[
+                {"type": "text", "text": "Just text."},
+            ]
+        )
+        assert _parse_thinking(message) is None
+
+    def test_empty_thinking_block_returns_none(self):
+        """Test that an empty thinking string returns None."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": ""},
+            ]
+        )
+        assert _parse_thinking(message) is None
+
+    def test_non_dict_blocks_are_skipped(self):
+        """Test that non-dict items in content are safely skipped."""
+        message = AIMessage(
+            content=[
+                "plain string block",
+                {"type": "thinking", "thinking": "Actual thinking."},
+            ]
+        )
+        assert _parse_thinking(message) == "Actual thinking."
 
 
 class TestProcessChunk:
