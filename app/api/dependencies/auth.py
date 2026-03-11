@@ -1,4 +1,3 @@
-import time
 from typing import Annotated
 
 import httpx
@@ -14,7 +13,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 _http_client = httpx.AsyncClient()
 
 
-async def _verify_token(token: str) -> bool:
+async def _is_user_authorized(token: str) -> bool:
     query = """
         mutation verifyToken($token: String!) {
             verifyToken(token: $token) {
@@ -22,7 +21,7 @@ async def _verify_token(token: str) -> bool:
             }
         }
     """
-    start = time.perf_counter()
+
     try:
         response = await _http_client.post(
             f"{settings.BASEDOSDADOS_BASE_URL}/graphql",
@@ -30,13 +29,11 @@ async def _verify_token(token: str) -> bool:
         )
         response.raise_for_status()
     except (httpx.HTTPStatusError, httpx.ConnectError):
+        logger.exception("Authorization service unreachable:")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to verify user access",
+            detail="Authorization service unavailable",
         )
-    finally:
-        elapsed = time.perf_counter() - start
-        logger.info(f"Token verification elapsed time: {elapsed:.4f}s")
 
     payload = response.json()["data"]["verifyToken"]["payload"]
     return payload["has_chatbot_access"]
@@ -80,10 +77,10 @@ async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> i
     except jwt.exceptions.InvalidTokenError:
         raise credentials_exception
 
-    if not await _verify_token(token):
+    if not await _is_user_authorized(token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User does not have chatbot access",
+            detail="User is not authorized to access this resource",
         )
 
     return user_id
