@@ -122,6 +122,24 @@ def _truncate_json(
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def _get_thinking(message: AIMessage) -> str | None:
+    """Extract thinking from an AI message.
+
+    Args:
+        message (AIMessage): The AI message from where to extract the thinking.
+
+    Returns:
+        str | None: The extracted thinking or None, if not available.
+    """
+    blocks = [
+        block
+        for block in message.content
+        if block.get("type") == "thinking" and isinstance(block.get("thinking"), str)
+    ]
+    thinking = "".join(block["thinking"] for block in blocks)
+    return thinking or None
+
+
 def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
     """Process a streaming chunk from a react agent workflow into a standardized StreamEvent.
 
@@ -154,11 +172,14 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 )
                 for tool_call in message.tool_calls
             ]
+            thinking = _get_thinking(message)
         else:
             event_type = "final_answer"
             tool_calls = None
+            thinking = None
 
-        event_data = EventData(content=message.text, tool_calls=tool_calls)
+        content = thinking or message.text
+        event_data = EventData(content=content, tool_calls=tool_calls)
 
         return StreamEvent(type=event_type, data=event_data)
     elif "tools" in chunk:
