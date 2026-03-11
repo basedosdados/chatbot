@@ -1,6 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import jwt
 import pytest
@@ -29,9 +30,9 @@ class MockLangSmithFeedbackSender:
         return FeedbackSyncStatus.SUCCESS, datetime.now(timezone.utc)
 
 
-class MockReActAgent:
-    def __init__(self):
-        self.checkpointer = None
+class MockAgent:
+    def __init__(self, checkpointer=None):
+        self.checkpointer = checkpointer
 
     def invoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
@@ -84,7 +85,7 @@ def access_token(user_id: str) -> str:
 def client(database: AsyncDatabase):
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
-        app.state.agent = MockReActAgent()
+        app.state.agent = MockAgent()
         yield
 
     def get_database_override():
@@ -234,6 +235,21 @@ class TestDeleteThreadEndpoint:
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
+
+    def test_delete_thread_with_checkpointer(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
+        """Test successful thread deletion also deletes checkpointer data."""
+        mock_checkpointer = AsyncMock()
+        app.state.agent.checkpointer = mock_checkpointer
+
+        response = client.delete(
+            url=f"/api/v1/chatbot/threads/{thread.id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_checkpointer.adelete_thread.assert_called_once_with(str(thread.id))
 
     def test_delete_thread_not_found(self, client: TestClient, access_token: str):
         """Test deleting non-existent thread returns 404."""
