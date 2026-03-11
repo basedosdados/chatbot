@@ -122,21 +122,32 @@ def _truncate_json(
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _get_thinking(message: AIMessage) -> str | None:
-    """Extract thinking from an AI message.
+def _parse_thinking(message: AIMessage) -> str | None:
+    """Parse thinking content from an AI message.
+
+    Some models (e.g., Gemini 3) return `message.content` as a list of typed blocks,
+    which may include `{"type": "thinking", "thinking": "..."}` entries. When
+    `content` is a plain string, no thinking is available.
 
     Args:
-        message (AIMessage): The AI message from where to extract the thinking.
+        message (AIMessage): The AI message from where to parse the thinking.
 
     Returns:
-        str | None: The extracted thinking or None, if not available.
+        str | None: The concatenated thinking text, or None if no thinking blocks exist.
     """
+    if isinstance(message.content, str):
+        return None
+
     blocks = [
         block
         for block in message.content
-        if block.get("type") == "thinking" and isinstance(block.get("thinking"), str)
+        if isinstance(block, dict)
+        and block.get("type") == "thinking"
+        and isinstance(block.get("thinking"), str)
     ]
+
     thinking = "".join(block["thinking"] for block in blocks)
+
     return thinking or None
 
 
@@ -172,7 +183,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 )
                 for tool_call in message.tool_calls
             ]
-            thinking = _get_thinking(message)
+            thinking = _parse_thinking(message)
         else:
             event_type = "final_answer"
             tool_calls = None
