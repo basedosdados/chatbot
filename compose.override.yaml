@@ -1,0 +1,14 @@
+# Connects the chatbot api to the website api network for user authorization
+# This file is automatically loaded by `docker compose up`
+# To run without it, use: `docker compose -f compose.yaml up`
+
+services:
+  chatbot-api:
+    networks:
+      - default
+      - api_network
+
+# Ref: https://github.com/basedosdados/backend/blob/main/compose.yaml#L84-L87
+networks:
+  api_network:
+    external: true
