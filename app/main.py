@@ -2,14 +2,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    SummarizationMiddleware,
+)
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from app.agent import ReActAgent
-from app.agent.hooks import trim_messages_before_agent
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.tools import BDToolkit
 from app.api.main import api_router
@@ -52,6 +55,17 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             credentials=settings.GOOGLE_CREDENTIALS,
         )
 
+        summ_middleware = SummarizationMiddleware(
+            model=model,
+            trigger=("fraction", 0.5),
+            keep=("fraction", 0.25),
+        )
+
+        limit_middleware = ModelCallLimitMiddleware(
+            run_limit=20,
+            exit_behavior="end",
+        )
+
         async with AsyncConnectionPool(
             conninfo=settings.DB_URL,
             kwargs=conn_kwargs,
@@ -62,11 +76,11 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         ) as pool:
             checkpointer = AsyncPostgresSaver(pool)
 
-            agent = ReActAgent(
+            agent = create_agent(
                 model=model,
                 tools=BDToolkit.get_tools(),
-                start_hook=trim_messages_before_agent,
                 system_prompt=SYSTEM_PROMPT,
+                middleware=[summ_middleware, limit_middleware],
                 checkpointer=checkpointer,
             )
 

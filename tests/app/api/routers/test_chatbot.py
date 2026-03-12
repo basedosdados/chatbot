@@ -30,6 +30,9 @@ class MockLangSmithFeedbackSender:
 
 
 class MockReActAgent:
+    def __init__(self):
+        self.checkpointer = None
+
     def invoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
 
@@ -46,12 +49,6 @@ class MockReActAgent:
         yield "updates", chunk
         yield "values", chunk
 
-    def clear_thread(self, thread_id):
-        return
-
-    async def aclear_thread(self, thread_id):
-        return
-
 
 @pytest.fixture(autouse=True)
 def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
@@ -63,13 +60,15 @@ def disable_auth_dev_mode(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_verify_token(monkeypatch: pytest.MonkeyPatch):
-    """Mock _verify_token to bypass the external API call."""
+def mock_is_user_authorized(monkeypatch: pytest.MonkeyPatch):
+    """Mock _is_user_authorized to bypass the external API call."""
 
-    async def _verify_token(token: str) -> bool:
+    async def _is_user_authorized(token: str) -> bool:
         return True
 
-    monkeypatch.setattr("app.api.dependencies.auth._verify_token", _verify_token)
+    monkeypatch.setattr(
+        "app.api.dependencies.auth._is_user_authorized", _is_user_authorized
+    )
 
 
 @pytest.fixture

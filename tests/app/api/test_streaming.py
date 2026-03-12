@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from google.api_core import exceptions as google_api_exceptions
 from langchain_core.messages import AIMessage, ToolMessage
-from langgraph.errors import GraphRecursionError
-from pytest_mock import MockerFixture
 
 from app.api.schemas import ConfigDict
 from app.api.streaming import (
@@ -119,7 +117,7 @@ class TestProcessChunk:
     def test_agent_chunk_with_tool_calls(self):
         """Test agent chunk with tool calls returns tool_call event."""
         chunk = {
-            "agent": {
+            "model": {
                 "messages": [
                     AIMessage(
                         content="Let me search for that.",
@@ -154,7 +152,7 @@ class TestProcessChunk:
     def test_agent_chunk_with_multiple_tool_calls(self):
         """Test agent chunk with multiple parallel tool calls."""
         chunk = {
-            "agent": {
+            "model": {
                 "messages": [
                     AIMessage(
                         content="I'll search both.",
@@ -181,7 +179,7 @@ class TestProcessChunk:
 
     def test_agent_chunk_final_answer(self):
         """Test agent chunk without tool calls returns final_answer event."""
-        chunk = {"agent": {"messages": [AIMessage(content="Here is your answer.")]}}
+        chunk = {"model": {"messages": [AIMessage(content="Here is your answer.")]}}
 
         event = _process_chunk(chunk)
 
@@ -195,7 +193,7 @@ class TestProcessChunk:
 
     def test_agent_chunk_empty_messages(self):
         """Test agent chunk with empty messages list returns empty final_answer."""
-        chunk = {"agent": {"messages": []}}
+        chunk = {"model": {"messages": []}}
 
         event = _process_chunk(chunk)
 
@@ -328,7 +326,6 @@ class TestStreamResponse:
     def mock_config(self, mock_thread_id: str) -> ConfigDict:
         return {
             "run_id": uuid.uuid4(),
-            "recursion_limit": 10,
             "configurable": {"thread_id": mock_thread_id},
         }
 
@@ -383,7 +380,7 @@ class TestStreamResponse:
             yield (
                 "updates",
                 {
-                    "agent": {
+                    "model": {
                         "messages": [
                             AIMessage(
                                 content="Let me search.",
@@ -433,7 +430,7 @@ class TestStreamResponse:
             yield "values", {"messages": ["msg1", "msg2"]}
             yield (
                 "updates",
-                {"agent": {"messages": [AIMessage(content="Here is your answer.")]}},
+                {"model": {"messages": [AIMessage(content="Here is your answer.")]}},
             )
             yield "values", {"messages": ["msg1", "msg2", "msg3"]}
 
@@ -499,7 +496,7 @@ class TestStreamResponse:
         assert call_args.status == MessageStatus.ERROR
         assert call_args.content == ErrorMessage.UNEXPECTED
 
-    async def test_stream_response_graph_recursion_error(
+    async def test_stream_response_model_call_limit_reached(
         self,
         mock_database,
         mock_user_message,
@@ -507,12 +504,14 @@ class TestStreamResponse:
         mock_thread_id,
         mock_model_uri,
     ):
-        """Test GraphRecursionError sets graceful message without error status."""
+        """Test ModelCallLimitMiddleware sets graceful message without error status."""
         mock_agent = MagicMock()
 
         async def mock_astream(*args, **kwargs):
-            raise GraphRecursionError("Recursion limit reached")
-            yield  # Makes this an async generator
+            yield (
+                "updates",
+                {"ModelCallLimitMiddleware.before_model": {"messages": []}},
+            )
 
         mock_agent.astream = mock_astream
 
@@ -529,12 +528,12 @@ class TestStreamResponse:
 
         assert len(events) == 2
         assert '"type":"final_answer"' in events[0]
-        assert ErrorMessage.GRAPH_RECURSION_LIMIT_REACHED in events[0]
+        assert ErrorMessage.MODEL_CALL_LIMIT_REACHED in events[0]
         assert '"type":"complete"' in events[1]
 
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.SUCCESS
-        assert call_args.content == ErrorMessage.GRAPH_RECURSION_LIMIT_REACHED
+        assert call_args.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
 
     async def test_stream_response_google_api_error(
         self,
@@ -571,91 +570,3 @@ class TestStreamResponse:
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.ERROR
         assert call_args.content == ErrorMessage.UNEXPECTED
-
-    async def test_stream_response_google_api_error_with_agent_state_below_limit(
-        self,
-        mocker: MockerFixture,
-        mock_database,
-        mock_user_message,
-        mock_config,
-        mock_thread_id,
-        mock_model_uri,
-    ):
-        """Test Google API error with agent_state set but tokens below limit."""
-        mock_agent = MagicMock()
-
-        async def mock_astream(*args, **kwargs):
-            yield "values", {"messages": ["msg1"]}  # Sets agent_state
-            raise google_api_exceptions.InvalidArgument("Some other error")
-
-        mock_agent.astream = mock_astream
-
-        mock_model = MagicMock()
-        mock_model.get_num_tokens_from_messages.return_value = 999  # Below limit
-        mock_model.profile.get.return_value = 1_048_576  # Gemini context window
-        mocker.patch("app.api.streaming.init_chat_model", return_value=mock_model)
-
-        events = await self._collect_events(
-            stream_response(
-                database=mock_database,
-                agent=mock_agent,
-                user_message=mock_user_message,
-                config=mock_config,
-                thread_id=mock_thread_id,
-                model_uri=mock_model_uri,
-            )
-        )
-
-        assert len(events) == 2
-        assert '"type":"error"' in events[0]
-        assert ErrorMessage.UNEXPECTED in events[0]  # Not CONTEXT_OVERFLOW
-        assert '"type":"complete"' in events[1]
-
-        call_args = mock_database.create_message.call_args[0][0]
-        assert call_args.status == MessageStatus.ERROR
-        assert call_args.content == ErrorMessage.UNEXPECTED
-
-    async def test_stream_response_google_api_error_with_agent_state_context_overflow(
-        self,
-        mocker: MockerFixture,
-        mock_database,
-        mock_user_message,
-        mock_config,
-        mock_thread_id,
-        mock_model_uri,
-    ):
-        """Test Google API error with context window exceeded."""
-        mock_agent = MagicMock()
-
-        async def mock_astream(*args, **kwargs):
-            yield "values", {"messages": ["msg1"]}  # Sets agent_state
-            raise google_api_exceptions.InvalidArgument("Token limit exceeded")
-
-        mock_agent.astream = mock_astream
-
-        mock_model = MagicMock()
-        mock_model.get_num_tokens_from_messages.return_value = (
-            9_999_999  # Exceeds limit
-        )
-        mock_model.profile.get.return_value = 1_048_576  # Gemini context window
-        mocker.patch("app.api.streaming.init_chat_model", return_value=mock_model)
-
-        events = await self._collect_events(
-            stream_response(
-                database=mock_database,
-                agent=mock_agent,
-                user_message=mock_user_message,
-                config=mock_config,
-                thread_id=mock_thread_id,
-                model_uri=mock_model_uri,
-            )
-        )
-
-        assert len(events) == 2
-        assert '"type":"error"' in events[0]
-        assert ErrorMessage.CONTEXT_OVERFLOW in events[0]
-        assert '"type":"complete"' in events[1]
-
-        call_args = mock_database.create_message.call_args[0][0]
-        assert call_args.status == MessageStatus.ERROR
-        assert call_args.content == ErrorMessage.CONTEXT_OVERFLOW
