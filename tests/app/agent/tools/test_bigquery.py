@@ -34,7 +34,9 @@ class TestExecuteBigQuerySQL:
             mock_query_job,
         ]
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "SELECT * FROM project.dataset.table", "config": mock_config}
@@ -52,7 +54,9 @@ class TestExecuteBigQuerySQL:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_dry_run_query_job
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "DELETE FROM project.dataset.table", "config": mock_config}
@@ -80,7 +84,9 @@ class TestExecuteBigQuerySQL:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = [mock_dry_run_query_job, error]
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "SELECT * FROM project.dataset.table", "config": mock_config}
@@ -107,7 +113,9 @@ class TestExecuteBigQuerySQL:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = [mock_dry_run_query_job, error]
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = execute_bigquery_sql.invoke(
             {"sql_query": "SELECT * FROM project.dataset.table", "config": mock_config}
@@ -137,7 +145,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_query_job
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {"table_gcp_id": "project.dataset.table", "config": mock_config}
@@ -158,7 +168,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_query_job
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {
@@ -185,7 +197,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = error
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {"table_gcp_id": "project.dataset.table", "config": mock_config}
@@ -220,7 +234,9 @@ class TestDecodeTableValues:
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = error
 
-        mocker.patch("app.agent.tools.bigquery._client", mock_bigquery_client)
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
 
         result = decode_table_values.invoke(
             {"table_gcp_id": "project.dataset.table", "config": mock_config}
