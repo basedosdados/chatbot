@@ -1,5 +1,6 @@
 import inspect
 import json
+from functools import cache
 
 from google.api_core.exceptions import GoogleAPICallError
 from google.cloud import bigquery as bq
@@ -11,9 +12,13 @@ from app.settings import settings
 
 MAX_BYTES_BILLED = 10 * 10**9
 
-_client = bq.Client(
-    project=settings.GOOGLE_BIGQUERY_PROJECT, credentials=settings.GOOGLE_CREDENTIALS
-)
+
+@cache
+def _get_client() -> bq.Client:  # pragma: no cover
+    return bq.Client(
+        project=settings.GOOGLE_BIGQUERY_PROJECT,
+        credentials=settings.GOOGLE_CREDENTIALS,
+    )
 
 
 @tool
@@ -40,7 +45,9 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
     Returns:
         str: Query results as JSON array. Empty results return "[]".
     """  # noqa: E501
-    dry_run = _client.query(
+    client = _get_client()
+
+    dry_run = client.query(
         sql_query, job_config=bq.QueryJobConfig(dry_run=True, use_query_cache=False)
     )
 
@@ -56,7 +63,7 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
     }
 
     try:
-        job = _client.query(
+        job = client.query(
             sql_query,
             job_config=bq.QueryJobConfig(
                 maximum_bytes_billed=MAX_BYTES_BILLED, labels=labels
@@ -119,7 +126,8 @@ def decode_table_values(
     }
 
     try:
-        job = _client.query(search_query, job_config=bq.QueryJobConfig(labels=labels))
+        client = _get_client()
+        job = client.query(search_query, job_config=bq.QueryJobConfig(labels=labels))
         results = [dict(row) for row in job.result()]
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
