@@ -127,4 +127,4 @@ cd chatbot-frontend
 Configure e execute de acordo com as [instruções do repositório](https://github.com/basedosdados/chatbot-frontend?tab=readme-ov-file#interface-do-chatbot-da-bd-feita-com-streamlit).
 
 > [!TIP]
-> Você também pode executar a aplicação full stack com o modo de autenticação de desenvolvedor ativo. Isso pode ser útil caso você deseje apontar a variável `BASEDOSDADOS_BASE_URL` para a api do website de produção (https://backend.basedosdados.org). Porém, a autenticação e autorização de requisições à API do chatbot serão ignoradas nesse caso.
+> Você também pode executar a aplicação full stack com o modo de autenticação de desenvolvedor ativo. Isso pode ser útil caso você deseje apontar a variável `BASEDOSDADOS_BASE_URL` para a api do website de produção. Porém, a autenticação e autorização de requisições à API do chatbot serão ignoradas nesse caso.
