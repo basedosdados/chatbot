@@ -4,7 +4,6 @@ from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from google.api_core import exceptions as google_api_exceptions
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.api.schemas import ConfigDict
@@ -530,7 +529,7 @@ class TestStreamResponse:
         mock_agent = MagicMock()
 
         async def mock_astream(*args, **kwargs):
-            raise RuntimeError("Something went wrong")
+            raise Exception("Something went wrong")
             yield  # Makes this an async generator
 
         mock_agent.astream = mock_astream
@@ -593,39 +592,3 @@ class TestStreamResponse:
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.SUCCESS
         assert call_args.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
-
-    async def test_stream_response_google_api_error(
-        self,
-        mock_database,
-        mock_user_message,
-        mock_config,
-        mock_thread_id,
-        mock_model_uri,
-    ):
-        """Test Google API InvalidArgument yields error event."""
-        mock_agent = MagicMock()
-
-        async def mock_astream(*args, **kwargs):
-            raise google_api_exceptions.InvalidArgument("Invalid request")
-            yield  # Makes this an async generator
-
-        mock_agent.astream = mock_astream
-
-        events = await self._collect_events(
-            stream_response(
-                database=mock_database,
-                agent=mock_agent,
-                user_message=mock_user_message,
-                config=mock_config,
-                thread_id=mock_thread_id,
-                model_uri=mock_model_uri,
-            )
-        )
-
-        assert len(events) == 2
-        assert ErrorMessage.UNEXPECTED in events[0]
-        assert '"type":"complete"' in events[1]
-
-        call_args = mock_database.create_message.call_args[0][0]
-        assert call_args.status == MessageStatus.ERROR
-        assert call_args.content == ErrorMessage.UNEXPECTED

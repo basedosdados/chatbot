@@ -41,12 +41,12 @@ class MockAgent:
         return {"messages": [AIMessage("Mock response")]}
 
     def stream(self, input, config, stream_mode):
-        chunk = {"agent": {"messages": [AIMessage("Mock response")]}}
+        chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
 
     async def astream(self, input, config, stream_mode):
-        chunk = {"agent": {"messages": [AIMessage("Mock response")]}}
+        chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
 
@@ -239,7 +239,7 @@ class TestDeleteThreadEndpoint:
     def test_delete_thread_with_checkpointer(
         self, client: TestClient, access_token: str, thread: Thread
     ):
-        """Test successful thread deletion also deletes checkpointer data."""
+        """Test successful thread deletion also deletes checkpoints."""
         mock_checkpointer = AsyncMock()
         app.state.agent.checkpointer = mock_checkpointer
 
@@ -384,7 +384,8 @@ class TestSendMessageEndpoint:
                 event = StreamEvent.model_validate_json(line)
                 events.append(event)
 
-        assert len(events) >= 1
+        assert len(events) >= 2
+        assert any(event.type == "final_answer" for event in events)
         assert events[-1].type == "complete"
         assert events[-1].data.run_id is not None
 
