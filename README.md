@@ -62,7 +62,7 @@ AUTH_DEV_USER_ID=uuid
 > O modo de autenticação de desenvolvedor ignora a validação do token JWT e retorna o ID definido por `AUTH_DEV_USER_ID` para todas as requisições. **Nunca habilite em produção.**
 
 ### 3. Executando a API
-Os comando abaixo executam a API do chatbot localmente sem dependências externas. O modo de autenticação de desenvolvedor deve estar ativado para ignorar a autenticação e autorização de usuários.
+Os comandos abaixo executam a API do chatbot localmente sem dependências externas. O modo de autenticação de desenvolvedor deve estar ativado para ignorar a autenticação e autorização de usuários.
 
 **Com o [Make](https://www.gnu.org/software/make/):**
 ```bash
