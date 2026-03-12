@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -53,6 +54,8 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             model=settings.MODEL_URI,
             temperature=settings.MODEL_TEMPERATURE,
             credentials=settings.GOOGLE_CREDENTIALS,
+            thinking_level=settings.THINKING_LEVEL,
+            include_thoughts=True,
         )
 
         summ_middleware = SummarizationMiddleware(
@@ -79,7 +82,9 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             agent = create_agent(
                 model=model,
                 tools=BDToolkit.get_tools(),
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=SYSTEM_PROMPT.format(
+                    current_date=date.today().isoformat()
+                ),
                 middleware=[summ_middleware, limit_middleware],
                 checkpointer=checkpointer,
             )

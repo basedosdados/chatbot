@@ -48,7 +48,7 @@ jobs:
           # Mock LLM configuration
           MODEL_URI: mock-model-uri
           MODEL_TEMPERATURE: 0.0
-          MAX_TOKENS: 4096
+          THINKING_LEVEL: low
 
           # Mock LangSmith configuration
           LANGSMITH_TRACING: false

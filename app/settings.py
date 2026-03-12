@@ -111,6 +111,9 @@ class Settings(BaseSettings):
             "lower ones make them more deterministic."
         )
     )
+    THINKING_LEVEL: Literal["minimum", "low", "medium", "high"] = Field(
+        description="Controls the amount of thinking Gemini models performs before returning a response."
+    )
 
     # ============================================================
     # ==                   LangSmith settings                   ==
