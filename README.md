@@ -62,7 +62,7 @@ AUTH_DEV_USER_ID=uuid
 > O modo de autenticação de desenvolvedor ignora a validação do token JWT e retorna o ID definido por `AUTH_DEV_USER_ID` para todas as requisições. **Nunca habilite em produção.**
 
 ### 3. Executando a API
-Os comandos abaixo executam a API do chatbot localmente sem dependências externas. O modo de autenticação de desenvolvedor deve estar ativado para ignorar a autenticação e autorização de usuários.
+Os comandos abaixo executam a API do chatbot sem dependências externas. O modo de autenticação de desenvolvedor deve estar ativado para ignorar a autenticação e autorização de usuários.
 
 **Com o [Make](https://www.gnu.org/software/make/):**
 ```bash
@@ -127,4 +127,4 @@ cd chatbot-frontend
 Configure e execute de acordo com as [instruções do repositório](https://github.com/basedosdados/chatbot-frontend?tab=readme-ov-file#interface-do-chatbot-da-bd-feita-com-streamlit).
 
 > [!TIP]
-> Você também pode executar a aplicação full stack com o modo de autenticação de desenvolvedor ativo e iniciando a API do chatbot sem dependências externas. Porém, a autenticação e autorização de requisições à API do chatbot serão ignoradas nesse caso.
+> Você também pode executar a aplicação full stack com o modo de autenticação de desenvolvedor ativo. Isso pode ser útil caso você deseje apontar a variável `BASEDOSDADOS_BASE_URL` para a api do website de produção (https://backend.basedosdados.org). Porém, a autenticação e autorização de requisições à API do chatbot serão ignoradas nesse caso.
