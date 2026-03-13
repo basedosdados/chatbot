@@ -157,14 +157,14 @@ class TestDecodeTableValues:
 
         assert len(output) == 2
 
-        # Verify parameterized table filter was added to query
         call_args = mock_bigquery_client.query.call_args[0][0]
         assert "id_tabela = @table_name" in call_args
+        assert "nome_coluna = @column_name" not in call_args
 
-        # Verify query parameters include table_name
         job_config = mock_bigquery_client.query.call_args[1]["job_config"]
         param_names = {p.name for p in job_config.query_parameters}
         assert "table_name" in param_names
+        assert "nome_coluna = " not in param_names
 
     def test_decode_specific_column(self, mocker: MockerFixture, mock_config: dict):
         """Test decoding a specific column."""
@@ -193,13 +193,13 @@ class TestDecodeTableValues:
 
         assert len(output) == 2
 
-        # Verify parameterized column filter was added to query
         call_args = mock_bigquery_client.query.call_args[0][0]
+        assert "id_tabela = @table_name" in call_args
         assert "nome_coluna = @column_name" in call_args
 
-        # Verify query parameters include column_name
         job_config = mock_bigquery_client.query.call_args[1]["job_config"]
         param_names = {p.name for p in job_config.query_parameters}
+        assert "table_name" in param_names
         assert "column_name" in param_names
 
     def test_dictionary_not_found(self, mocker: MockerFixture, mock_config: dict):
