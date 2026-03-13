@@ -44,7 +44,7 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
 
     Returns:
         str: Query results as JSON array. Empty results return "[]".
-    """  # noqa: E501
+    """
     client = _get_client()
 
     dry_run = client.query(
@@ -89,7 +89,7 @@ def decode_table_values(
     """Decode coded values from a table using its dataset's `dicionario` table.
 
     Use when column values appear to be codes (e.g., 1,2,3 or A,B,C) and the
-    column does NOT have a `lookup_table_id` in `get_table_details()` metadata.
+    column does NOT have a `reference_table_id` in `get_table_details()` metadata.
 
     Args:
         table_gcp_id (str): Full BigQuery table reference.
@@ -99,6 +99,9 @@ def decode_table_values(
     Returns:
         str: JSON array with chave (code) and valor (meaning) mappings.
     """
+    if "`" in table_gcp_id:
+        table_gcp_id = table_gcp_id.replace("`", "")
+
     try:
         project_name, dataset_name, table_name = table_gcp_id.split(".")
     except ValueError:
