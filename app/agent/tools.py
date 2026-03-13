@@ -280,7 +280,7 @@ def search_datasets(query: str) -> str:
 
     Strategy: Start with broad terms like "censo", "ibge", "inep", "rais", then get specific if needed.
     Next step: Use `get_dataset_details()` with returned dataset IDs.
-    """  # noqa: E501
+    """
     response = _http_client.get(
         url=SEARCH_URL,
         params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
@@ -333,7 +333,7 @@ def get_dataset_details(dataset_id: str) -> str:
             - usage_guide: Provide key information and best practices for using the dataset.
 
     Next step: Use `execute_bigquery_sql()` to execute queries.
-    """  # noqa: E501
+    """
     response = _http_client.post(
         url=GRAPHQL_URL,
         json={
@@ -485,7 +485,7 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
 
     Returns:
         str: Query results as JSON array. Empty results return "[]".
-    """  # noqa: E501
+    """
     client = get_bigquery_client()
 
     job_config = bq.QueryJobConfig(dry_run=True, use_query_cache=False)
@@ -544,14 +544,16 @@ def decode_table_values(
     Returns:
         str: JSON array with chave (code) and valor (meaning) mappings.
     """
-    # noqa: E501
+    if "`" in table_gcp_id:
+        table_gcp_id = table_gcp_id.replace("`", "")
+
     try:
         project_name, dataset_name, table_name = table_gcp_id.split(".")
     except ValueError:
         raise ToolError(
             message=f"Invalid table reference: '{table_gcp_id}'",
             error_type="INVALID_TABLE_REFERENCE",
-            instructions="Provide a valid table reference in the format `project.dataset.table`",
+            instructions="Provide a valid table reference in the format project.dataset.table",
         )
 
     client = get_bigquery_client()
