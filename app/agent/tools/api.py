@@ -52,7 +52,7 @@ def search_datasets(query: str) -> str:
 
     Strategy: Start with broad terms like "censo", "ibge", "inep", "rais", then get specific if needed.
     Next step: Use `get_dataset_details()` with returned dataset IDs.
-    """  # noqa: E501
+    """
     response = _client.get(
         url=SEARCH_URL,
         params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
@@ -101,7 +101,7 @@ def get_dataset_details(dataset_id: str) -> str:
             - usage_guide: Provide key information and best practices for using the dataset.
 
     Next step: Use `get_table_details()` with returned table IDs.
-    """  # noqa: E501
+    """
     response = _client.post(
         url=GRAPHQL_URL,
         json={
