@@ -634,6 +634,15 @@ class TestDecodeTableValues:
         assert len(output.results) == 2
         assert output.error_details is None
 
+        # Verify parameterized table filter was added to query
+        call_args = mock_bigquery_client.query.call_args[0][0]
+        assert "id_tabela = @table_name" in call_args
+
+        # Verify query parameters include table_name
+        job_config = mock_bigquery_client.query.call_args[1]["job_config"]
+        param_names = {p.name for p in job_config.query_parameters}
+        assert "table_name" in param_names
+
     def test_decode_specific_column(self, mocker: MockerFixture, mock_config: dict):
         """Test decoding a specific column."""
         mock_query_job = MagicMock()
@@ -660,9 +669,15 @@ class TestDecodeTableValues:
         output = ToolOutput.model_validate(json.loads(result))
 
         assert output.status == "success"
-        # Verify column filter was added to query
+
+        # Verify parameterized column filter was added to query
         call_args = mock_bigquery_client.query.call_args[0][0]
-        assert "nome_coluna = 'col1'" in call_args
+        assert "nome_coluna = @column_name" in call_args
+
+        # Verify query parameters include column_name
+        job_config = mock_bigquery_client.query.call_args[1]["job_config"]
+        param_names = {p.name for p in job_config.query_parameters}
+        assert "column_name" in param_names
 
     def test_dictionary_not_found(self, mocker: MockerFixture, mock_config: dict):
         """Test error when dictionary table doesn't exist."""

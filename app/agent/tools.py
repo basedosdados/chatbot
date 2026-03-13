@@ -556,17 +556,23 @@ def decode_table_values(
 
     client = get_bigquery_client()
 
-    dataset_id = f"{project_name}.{dataset_name}"
-    dict_table_id = f"{dataset_id}.dicionario"
+    dict_table_id = f"`{project_name}.{dataset_name}.dicionario`"
 
     search_query = f"""
         SELECT nome_coluna, chave, valor
         FROM {dict_table_id}
-        WHERE id_tabela = '{table_name}'
+        WHERE id_tabela = @table_name
     """
 
+    query_params = [
+        bq.ScalarQueryParameter("table_name", "STRING", table_name),
+    ]
+
     if column_name is not None:
-        search_query += f"AND nome_coluna = '{column_name}'"
+        search_query += "AND nome_coluna = @column_name\n"
+        query_params.append(
+            bq.ScalarQueryParameter("column_name", "STRING", column_name),
+        )
 
     search_query += "ORDER BY nome_coluna, chave"
 
@@ -576,7 +582,7 @@ def decode_table_values(
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 
-    job_config = bq.QueryJobConfig(labels=labels)
+    job_config = bq.QueryJobConfig(query_parameters=query_params, labels=labels)
     query_job = client.query(search_query, job_config=job_config)
 
     rows = query_job.result()
