@@ -109,7 +109,7 @@ def decode_table_values(
             f"Invalid table reference: '{table_gcp_id}'. Expected format: project.dataset.table"
         )
 
-    dict_table_id = f"{project_name}.{dataset_name}.dicionario"
+    dict_table_id = f"`{project_name}.{dataset_name}.dicionario`"
 
     search_query = f"""
         SELECT nome_coluna, chave, valor
