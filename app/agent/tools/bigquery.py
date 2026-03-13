@@ -111,11 +111,18 @@ def decode_table_values(
     search_query = f"""
         SELECT nome_coluna, chave, valor
         FROM {dict_table_id}
-        WHERE id_tabela = '{table_name}'
+        WHERE id_tabela = @table_name
     """
 
+    query_params = [
+        bq.ScalarQueryParameter("table_name", "STRING", table_name),
+    ]
+
     if column_name is not None:
-        search_query += f"AND nome_coluna = '{column_name}'"
+        search_query += "AND nome_coluna = @column_name\n"
+        query_params.append(
+            bq.ScalarQueryParameter("column_name", "STRING", column_name),
+        )
 
     search_query += "ORDER BY nome_coluna, chave"
 
@@ -127,7 +134,10 @@ def decode_table_values(
 
     try:
         client = _get_client()
-        job = client.query(search_query, job_config=bq.QueryJobConfig(labels=labels))
+        job = client.query(
+            search_query,
+            job_config=bq.QueryJobConfig(query_parameters=query_params, labels=labels),
+        )
         results = [dict(row) for row in job.result()]
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
