@@ -722,7 +722,7 @@ class TestDecodeTableValues:
         assert output.error_details.message == "Invalid table reference: 'table'"
         assert (
             output.error_details.instructions
-            == "Provide a valid table reference in the format `project.dataset.table`"
+            == "Provide a valid table reference in the format project.dataset.table"
         )
 
 
