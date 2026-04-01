@@ -166,6 +166,40 @@ class TestDecodeTableValues:
         assert "table_name" in param_names
         assert "nome_coluna = " not in param_names
 
+    def test_decode_all_columns_with_backticks(
+        self, mocker: MockerFixture, mock_config: dict
+    ):
+        """Test decoding all columns from a table with backticks in its name."""
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = [
+            {"nome_coluna": "col1", "chave": "1", "valor": "Value 1"},
+            {"nome_coluna": "col2", "chave": "2", "valor": "Value 2"},
+        ]
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.return_value = mock_query_job
+
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
+
+        result = decode_table_values.invoke(
+            {"table_gcp_id": "`project.dataset.table`", "config": mock_config}
+        )
+
+        output = json.loads(result)
+
+        assert len(output) == 2
+
+        call_args = mock_bigquery_client.query.call_args[0][0]
+        assert "id_tabela = @table_name" in call_args
+        assert "nome_coluna = @column_name" not in call_args
+
+        job_config = mock_bigquery_client.query.call_args[1]["job_config"]
+        param_names = {p.name for p in job_config.query_parameters}
+        assert "table_name" in param_names
+        assert "nome_coluna = " not in param_names
+
     def test_decode_specific_column(self, mocker: MockerFixture, mock_config: dict):
         """Test decoding a specific column."""
         mock_query_job = MagicMock()
