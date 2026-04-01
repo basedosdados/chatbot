@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.api.schemas import ConfigDict
-from app.api.streaming import (
+from app.api.streaming.stream import (
     ErrorMessage,
     _parse_thinking,
     _process_chunk,

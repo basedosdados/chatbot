@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from app.api.dependencies import get_database, get_feedback_sender
-from app.api.streaming import StreamEvent
+from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
     Feedback,
