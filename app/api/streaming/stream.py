@@ -1,55 +1,15 @@
 import json
-import uuid
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
-from pydantic import BaseModel, JsonValue
 
 from app.api.schemas import ConfigDict
+from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
+from app.api.streaming.security import sanitize_markdown_links
 from app.db.database import AsyncDatabase
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
-
-
-class ToolCall(BaseModel):
-    id: str
-    name: str
-    args: dict[str, Any]
-
-
-class ToolOutput(BaseModel):
-    status: Literal["error", "success"]
-    tool_call_id: str
-    tool_name: str
-    content: str
-    artifact: JsonValue | None = None
-    metadata: JsonValue | None = None
-
-
-EventType = Literal[
-    "tool_call",
-    "tool_output",
-    "final_answer",
-    "error",
-    "complete",
-]
-
-
-class EventData(BaseModel):
-    run_id: uuid.UUID | None = None
-    content: str | None = None
-    tool_calls: list[ToolCall] | None = None
-    tool_outputs: list[ToolOutput] | None = None
-    error_details: dict[str, Any] | None = None
-
-
-class StreamEvent(BaseModel):
-    type: EventType
-    data: EventData
-
-    def to_sse(self) -> str:
-        return self.model_dump_json() + "\n\n"
 
 
 class ErrorMessage:
@@ -183,13 +143,12 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 )
                 for tool_call in message.tool_calls
             ]
-            thinking = _parse_thinking(message)
+            content = _parse_thinking(message) or message.text
         else:
             event_type = "final_answer"
             tool_calls = None
-            thinking = None
+            content = sanitize_markdown_links(message.text)
 
-        content = thinking or message.text
         event_data = EventData(content=content, tool_calls=tool_calls)
 
         return StreamEvent(type=event_type, data=event_data)
