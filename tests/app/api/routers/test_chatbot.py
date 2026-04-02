@@ -83,6 +83,8 @@ def access_token(user_id: str) -> str:
 
 @pytest.fixture
 def client(database: AsyncDatabase):
+    """Test client with mocked agent, database, and feedback sender."""
+
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
         app.state.agent = MockAgent()

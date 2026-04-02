@@ -7,6 +7,7 @@ client = TestClient(app)
 
 
 def test_redirect_root_to_docs():
+    """Test that root path redirects to /docs."""
     response = client.get("/", follow_redirects=False)
 
     assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
@@ -14,6 +15,7 @@ def test_redirect_root_to_docs():
 
 
 def test_health_check():
+    """Test that health endpoint returns healthy status."""
     response = client.get("/health")
 
     assert response.status_code == status.HTTP_200_OK
