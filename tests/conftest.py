@@ -182,6 +182,7 @@ async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesF
 # =============================================================
 @pytest.fixture
 def feedback_create(assistant_message: Message) -> FeedbackCreate:
+    """Mock FeedbackCreate instance for testing."""
     return FeedbackCreate(
         message_id=assistant_message.id,
         rating=FeedbackRating.POSITIVE,
@@ -193,5 +194,6 @@ def feedback_create(assistant_message: Message) -> FeedbackCreate:
 async def feedback(
     database: AsyncDatabase, feedback_create: FeedbackCreate
 ) -> Feedback:
+    """Mock Feedback instance for testing."""
     feedback, _ = await database.upsert_feedback(feedback_create)
     return feedback

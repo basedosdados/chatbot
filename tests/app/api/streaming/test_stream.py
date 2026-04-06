@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.api.schemas import ConfigDict
-from app.api.streaming import (
+from app.api.streaming.stream import (
     ErrorMessage,
     _parse_thinking,
     _process_chunk,
@@ -33,6 +33,7 @@ class TestTruncateJSON:
         return json.dumps(data, ensure_ascii=False, indent=2)
 
     def test_truncate_json_long_string(self):
+        """Test that long strings are truncated with a remaining count."""
         data = {"long_string": "a" * self.STR_LONG_LEN}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_str_len=self.STR_MAX_LEN)
@@ -43,6 +44,7 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_long_list(self):
+        """Test that long lists are truncated with a remaining count."""
         data = {"long_list": list(range(self.LIST_LONG_LEN))}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_list_len=self.LIST_MAX_LEN)
@@ -53,6 +55,7 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_nested(self):
+        """Test that nested structures have both strings and lists truncated."""
         data = {
             "short_string": "a" * 100,
             "nested_list": [
@@ -92,12 +95,14 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_not_dict(self):
+        """Test that non-dict JSON is returned as-is."""
         data = list(range(self.LIST_LONG_LEN))
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string)
         assert truncated == json_string
 
     def test_truncate_json_not_needed(self):
+        """Test that short strings and lists are not truncated."""
         data = {
             "short_string": "hello",
             "short_list": [1, 2, 3],
@@ -107,6 +112,7 @@ class TestTruncateJSON:
         assert _truncate_json(json_string) == expected_json
 
     def test_truncate_json_invalid(self):
+        """Test that invalid JSON is returned as-is."""
         invalid_json_string = '{"key": "value"'
         assert _truncate_json(invalid_json_string) == invalid_json_string
 
@@ -374,14 +380,17 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_thread_id(self) -> str:
+        """Generate a random thread ID."""
         return str(uuid.uuid4())
 
     @pytest.fixture
     def mock_model_uri(self) -> str:
+        """Return a mock model URI."""
         return "mock-model"
 
     @pytest.fixture
     def mock_config(self, mock_thread_id: str) -> ConfigDict:
+        """Create a mock config dict."""
         return {
             "run_id": uuid.uuid4(),
             "configurable": {"thread_id": mock_thread_id},
@@ -389,6 +398,7 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_user_message(self, mock_thread_id: str, mock_model_uri: str) -> Message:
+        """Create a mock user message."""
         return Message(
             thread_id=mock_thread_id,
             model_uri=mock_model_uri,
@@ -399,6 +409,7 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_database(self, mock_config: ConfigDict, mock_user_message: Message):
+        """Create a mock database with stubbed create_message."""
         db = MagicMock()
 
         created_message = Message(
