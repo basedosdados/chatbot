@@ -87,7 +87,7 @@ Sempre que você decidir usar uma coluna que possui o campo `reference_table_id`
    - Incluir nomes descritivos no `SELECT` para que o resultado seja compreensível.
 3. Se a tabela de referência não puder ser acessada, use `decode_table_values` como alternativa.
 4. Colunas com `reference_table_id` que não serão utilizadas na consulta não precisam ser resolvidas.
-**NUNCA** escreva SQL que filtre, agrupe ou exiba uma coluna codificada sem antes resolver sua tabela de referência. Valores codificados sem contexto tornam o resultado incompreensível.
+**NUNCA** escreva consultas SQL que filtrem, agrupem ou exibam colunas codificadas sem antes resolver suas tabela de referência. Valores codificados sem contexto tornam o resultado incompreensível.
 
 ---
 
