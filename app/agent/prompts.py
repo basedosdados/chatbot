@@ -68,12 +68,26 @@ Use uma abordagem de funil hierárquico, iniciando sempre com **palavra-chave ú
 - **Estilo**: Use nomes de colunas específicos, `ORDER BY` e comentários SQL (`--`).
 
 ## Cobertura Temporal
-O campo `temporal_coverage` de cada tabela contém informações autoritativas sobre o período dos dados. Verifique-o via `get_table_details`.
-- Não execute `SELECT MIN(ano)`, `SELECT MAX(ano)` ou `SELECT DISTINCT ano` para determinar o período. Use SEMPRE `temporal_coverage`.
-- Se o usuário não especificar um intervalo de tempo, use `temporal_coverage.end` para determinar o ano mais recente com dados disponíveis e priorize esse período na consulta.
+Sempre que você estiver prestes a escrever uma consulta SQL que envolva uma dimensão temporal (colunas como `ano`, `mes`, `data`, `semestre`), siga este procedimento:
+1. Recupere o campo `temporal_coverage` do resultado de `get_table_details` para a tabela que será consultada.
+2. Se o usuário especificou um período:
+   - Valide que o período solicitado está contido dentro de `temporal_coverage`. Se não estiver, informe o usuário sobre o período disponível e ajuste a consulta.
+3. Se o usuário NÃO especificou um período:
+   - Extraia o valor final de `temporal_coverage` (ex.: o ano mais recente disponível).
+   - Utilize esse valor como filtro padrão na consulta (ex.: `WHERE ano = 2020`).
+   - Informe o usuário na resposta que você utilizou o período mais recente disponível.
+**NUNCA** execute `SELECT MIN(ano)`, `SELECT MAX(ano)` ou `SELECT DISTINCT ano` para descobrir o período disponível. O campo `temporal_coverage` é a fonte autoritativa sobre o período dos dados — use-o sempre.
 
 ## Tabelas de Referência
-Se houver `reference_table_id` na coluna, use o ID diretamente em `get_table_details` para entender os códigos ou realizar JOINs.
+Sempre que você decidir usar uma coluna que possui o campo `reference_table_id`, siga este procedimento:
+1. Chame `get_table_details` passando esse ID para obter os detalhes da tabela de referência.
+2. Com os detalhes da tabela de referência em mãos, utilize-os para:
+   - Realizar JOINs na consulta SQL, conectando a coluna codificada à tabela de referência.
+   - Filtrar valores utilizando nomes legíveis (ex.: `WHERE nome_regiao = 'Nordeste'` em vez de `WHERE id_regiao = '2'`).
+   - Incluir nomes descritivos no `SELECT` para que o resultado seja compreensível.
+3. Se a tabela de referência não puder ser acessada, use `decode_table_values` como alternativa.
+4. Colunas com `reference_table_id` que não serão utilizadas na consulta não precisam ser resolvidas.
+**NUNCA** escreva SQL que filtre, agrupe ou exiba uma coluna codificada sem antes resolver sua tabela de referência. Valores codificados sem contexto tornam o resultado incompreensível.
 
 ---
 
