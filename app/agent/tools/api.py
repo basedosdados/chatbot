@@ -32,12 +32,12 @@ GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 # URL for fetching usage guides
 BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/refs/heads/main/next/content/userGuide/pt"
 
-_client = httpx.Client(timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT))
+_client = httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT))
 
 
 @tool
 @handle_tool_errors
-def search_datasets(query: str) -> str:
+async def search_datasets(query: str) -> str:
     """Search for datasets in Base dos Dados using keywords.
 
     CRITICAL: Use individual KEYWORDS only, not full sentences. The search engine uses Elasticsearch.
@@ -53,7 +53,7 @@ def search_datasets(query: str) -> str:
     Strategy: Start with broad terms like "censo", "ibge", "inep", "rais", then get specific if needed.
     Next step: Use `get_dataset_details()` with returned dataset IDs.
     """
-    response = _client.get(
+    response = await _client.get(
         url=SEARCH_URL,
         params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
     )
@@ -82,7 +82,7 @@ def search_datasets(query: str) -> str:
 
 @tool
 @handle_tool_errors
-def get_dataset_details(dataset_id: str) -> str:
+async def get_dataset_details(dataset_id: str) -> str:
     """Get comprehensive details about a specific dataset including all its tables.
 
     Use AFTER `search_datasets()` to understand data structure before writing queries.
@@ -102,7 +102,7 @@ def get_dataset_details(dataset_id: str) -> str:
 
     Next step: Use `get_table_details()` with returned table IDs.
     """
-    response = _client.post(
+    response = await _client.post(
         url=GRAPHQL_URL,
         json={
             "query": DATASET_DETAILS_QUERY,
@@ -189,7 +189,7 @@ def get_dataset_details(dataset_id: str) -> str:
     if gcp_dataset_id is not None:
         filename = gcp_dataset_id.replace("_", "-")
 
-        response = _client.get(f"{BASE_USAGE_GUIDE_URL}/{filename}.md")
+        response = await _client.get(f"{BASE_USAGE_GUIDE_URL}/{filename}.md")
 
         if response.status_code == httpx.codes.OK:
             usage_guide = response.text.strip()
@@ -211,7 +211,7 @@ def get_dataset_details(dataset_id: str) -> str:
 
 @tool
 @handle_tool_errors
-def get_table_details(table_id: str) -> str:
+async def get_table_details(table_id: str) -> str:
     """Get comprehensive details about a specific table including all its columns.
 
     Use AFTER `get_dataset_details()` to understand table structure before writing queries.
@@ -229,7 +229,7 @@ def get_table_details(table_id: str) -> str:
 
     Next step: Use `execute_bigquery_sql()` to execute queries.
     """
-    response = _client.post(
+    response = await _client.post(
         url=GRAPHQL_URL,
         json={
             "query": TABLE_DETAILS_QUERY,
