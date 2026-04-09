@@ -14,7 +14,7 @@ class TestSearchDatasets:
     SEARCH_ENDPOINT = f"{settings.BASEDOSDADOS_BASE_URL}/search/"
 
     @respx.mock
-    def test_search_datasets_returns_overviews(self):
+    async def test_search_datasets_returns_overviews(self):
         """Test successful dataset search."""
         mock_response = {
             "results": [
@@ -34,7 +34,7 @@ class TestSearchDatasets:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = search_datasets.invoke({"query": "test"})
+        result = await search_datasets.ainvoke({"query": "test"})
         output = json.loads(result)
 
         assert len(output) == 1
@@ -50,13 +50,13 @@ class TestSearchDatasets:
         assert dataset["organizations"] == ["org1"]
 
     @respx.mock
-    def test_search_datasets_returns_empty_results(self):
+    async def test_search_datasets_returns_empty_results(self):
         """Test successful dataset search with no results."""
         respx.get(self.SEARCH_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"results": []})
         )
 
-        result = search_datasets.invoke({"query": "nonexistent"})
+        result = await search_datasets.ainvoke({"query": "nonexistent"})
         output = json.loads(result)
 
         assert output == []
@@ -121,7 +121,7 @@ class TestGetDatasetDetails:
         }
 
     @respx.mock
-    def test_get_dataset_details_success(self, mock_response):
+    async def test_get_dataset_details_success(self, mock_response):
         """Test successful dataset details retrieval."""
         # Mock graphql endpoint
         respx.post(self.GRAPHQL_URL).mock(
@@ -133,7 +133,7 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(404)
         )
 
-        result = get_dataset_details.invoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
         dataset = json.loads(result)
 
         assert dataset["id"] == "dataset-1"
@@ -157,7 +157,7 @@ class TestGetDatasetDetails:
         assert table["temporal_coverage"] == {"start": "2020", "end": "2023"}
 
     @respx.mock
-    def test_get_dataset_details_success_with_usage_guide(self, mock_response):
+    async def test_get_dataset_details_success_with_usage_guide(self, mock_response):
         """Test dataset details with usage guide available."""
         respx.post(self.GRAPHQL_URL).mock(
             return_value=httpx.Response(200, json=mock_response)
@@ -167,13 +167,13 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200, text="# This is a usage guide.")
         )
 
-        result = get_dataset_details.invoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
         dataset = json.loads(result)
 
         assert dataset["usage_guide"] == "# This is a usage guide."
 
     @respx.mock
-    def test_table_without_tags_themes_orgs(self):
+    async def test_table_without_tags_themes_orgs(self):
         """Test dataset with table that has no tags, themes and orgs."""
         mock_response = {
             "data": {
@@ -230,7 +230,7 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200)
         )
 
-        result = get_dataset_details.invoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
         dataset = json.loads(result)
 
         assert dataset["tags"] == []
@@ -238,7 +238,7 @@ class TestGetDatasetDetails:
         assert dataset["organizations"] == []
 
     @respx.mock
-    def test_table_without_cloud_tables(self):
+    async def test_table_without_cloud_tables(self):
         """Test dataset with table that has no cloud tables."""
         mock_response = {
             "data": {
@@ -285,14 +285,14 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = get_dataset_details.invoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
         dataset = json.loads(result)
 
         assert dataset["tables"][0]["gcp_id"] is None
         assert dataset["usage_guide"] is None
 
     @respx.mock
-    def test_get_dataset_details_dataset_not_found(self):
+    async def test_get_dataset_details_dataset_not_found(self):
         """Test error when dataset is not found."""
         respx.post(self.GRAPHQL_URL).mock(
             return_value=httpx.Response(
@@ -300,7 +300,7 @@ class TestGetDatasetDetails:
             )
         )
 
-        result = get_dataset_details.invoke({"dataset_id": "nonexistent"})
+        result = await get_dataset_details.ainvoke({"dataset_id": "nonexistent"})
         output = json.loads(result)
 
         assert output["status"] == "error"
@@ -376,13 +376,13 @@ class TestGetTableDetails:
         }
 
     @respx.mock
-    def test_get_table_details_success(self, mock_response):
+    async def test_get_table_details_success(self, mock_response):
         """Test successful table details retrieval."""
         respx.post(self.GRAPHQL_URL).mock(
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = get_table_details.invoke({"table_id": "table-1"})
+        result = await get_table_details.ainvoke({"table_id": "table-1"})
         table = json.loads(result)
 
         assert table["id"] == "table-1"
@@ -405,7 +405,7 @@ class TestGetTableDetails:
         assert table["columns"][1]["reference_table_id"] == "dir-table-1"
 
     @respx.mock
-    def test_get_table_details_without_cloud_tables(self, mock_response):
+    async def test_get_table_details_without_cloud_tables(self, mock_response):
         """Test table details when no cloud tables exist."""
         mock_response["data"]["allTable"]["edges"][0]["node"]["cloudTables"] = {
             "edges": []
@@ -415,19 +415,19 @@ class TestGetTableDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = get_table_details.invoke({"table_id": "table-1"})
+        result = await get_table_details.ainvoke({"table_id": "table-1"})
         table = json.loads(result)
 
         assert table["gcp_id"] is None
 
     @respx.mock
-    def test_get_table_details_not_found(self):
+    async def test_get_table_details_not_found(self):
         """Test error when table is not found."""
         respx.post(self.GRAPHQL_URL).mock(
             return_value=httpx.Response(200, json={"data": {"allTable": {"edges": []}}})
         )
 
-        result = get_table_details.invoke({"table_id": "nonexistent"})
+        result = await get_table_details.ainvoke({"table_id": "nonexistent"})
         output = json.loads(result)
 
         assert output["status"] == "error"
