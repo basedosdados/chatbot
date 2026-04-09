@@ -4,12 +4,12 @@ from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from google.api_core import exceptions as google_api_exceptions
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.api.schemas import ConfigDict
-from app.api.streaming import (
+from app.api.streaming.stream import (
     ErrorMessage,
+    _parse_thinking,
     _process_chunk,
     _truncate_json,
     stream_response,
@@ -33,6 +33,7 @@ class TestTruncateJSON:
         return json.dumps(data, ensure_ascii=False, indent=2)
 
     def test_truncate_json_long_string(self):
+        """Test that long strings are truncated with a remaining count."""
         data = {"long_string": "a" * self.STR_LONG_LEN}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_str_len=self.STR_MAX_LEN)
@@ -43,6 +44,7 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_long_list(self):
+        """Test that long lists are truncated with a remaining count."""
         data = {"long_list": list(range(self.LIST_LONG_LEN))}
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string, max_list_len=self.LIST_MAX_LEN)
@@ -53,6 +55,7 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_nested(self):
+        """Test that nested structures have both strings and lists truncated."""
         data = {
             "short_string": "a" * 100,
             "nested_list": [
@@ -92,12 +95,14 @@ class TestTruncateJSON:
         assert truncated == expected_json
 
     def test_truncate_json_not_dict(self):
+        """Test that non-dict JSON is returned as-is."""
         data = list(range(self.LIST_LONG_LEN))
         json_string = json.dumps(data)
         truncated = _truncate_json(json_string)
         assert truncated == json_string
 
     def test_truncate_json_not_needed(self):
+        """Test that short strings and lists are not truncated."""
         data = {
             "short_string": "hello",
             "short_list": [1, 2, 3],
@@ -107,8 +112,67 @@ class TestTruncateJSON:
         assert _truncate_json(json_string) == expected_json
 
     def test_truncate_json_invalid(self):
+        """Test that invalid JSON is returned as-is."""
         invalid_json_string = '{"key": "value"'
         assert _truncate_json(invalid_json_string) == invalid_json_string
+
+
+class TestParseThinking:
+    """Tests for _parse_thinking function."""
+
+    def test_string_content_returns_none(self):
+        """Test that plain string content returns None."""
+        message = AIMessage(content="Hello, world!")
+        assert _parse_thinking(message) is None
+
+    def test_single_thinking_block(self):
+        """Test extraction of a single thinking block."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "Let me reason about this."},
+                {"type": "text", "text": "Here is my answer."},
+            ]
+        )
+        assert _parse_thinking(message) == "Let me reason about this."
+
+    def test_multiple_thinking_blocks_are_concatenated(self):
+        """Test that multiple thinking blocks are concatenated."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "First thought. "},
+                {"type": "text", "text": "Some text."},
+                {"type": "thinking", "thinking": "Second thought."},
+            ]
+        )
+        assert _parse_thinking(message) == "First thought. Second thought."
+
+    def test_no_thinking_blocks_returns_none(self):
+        """Test that content with no thinking blocks returns None."""
+        message = AIMessage(
+            content=[
+                {"type": "text", "text": "Just text."},
+            ]
+        )
+        assert _parse_thinking(message) is None
+
+    def test_empty_thinking_block_returns_none(self):
+        """Test that an empty thinking string returns None."""
+        message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": ""},
+            ]
+        )
+        assert _parse_thinking(message) is None
+
+    def test_non_dict_blocks_are_skipped(self):
+        """Test that non-dict items in content are safely skipped."""
+        message = AIMessage(
+            content=[
+                "plain string block",
+                {"type": "thinking", "thinking": "Actual thinking."},
+            ]
+        )
+        assert _parse_thinking(message) == "Actual thinking."
 
 
 class TestProcessChunk:
@@ -316,14 +380,17 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_thread_id(self) -> str:
+        """Generate a random thread ID."""
         return str(uuid.uuid4())
 
     @pytest.fixture
     def mock_model_uri(self) -> str:
+        """Return a mock model URI."""
         return "mock-model"
 
     @pytest.fixture
     def mock_config(self, mock_thread_id: str) -> ConfigDict:
+        """Create a mock config dict."""
         return {
             "run_id": uuid.uuid4(),
             "configurable": {"thread_id": mock_thread_id},
@@ -331,6 +398,7 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_user_message(self, mock_thread_id: str, mock_model_uri: str) -> Message:
+        """Create a mock user message."""
         return Message(
             thread_id=mock_thread_id,
             model_uri=mock_model_uri,
@@ -341,6 +409,7 @@ class TestStreamResponse:
 
     @pytest.fixture
     def mock_database(self, mock_config: ConfigDict, mock_user_message: Message):
+        """Create a mock database with stubbed create_message."""
         db = MagicMock()
 
         created_message = Message(
@@ -471,7 +540,7 @@ class TestStreamResponse:
         mock_agent = MagicMock()
 
         async def mock_astream(*args, **kwargs):
-            raise RuntimeError("Something went wrong")
+            raise Exception("Something went wrong")
             yield  # Makes this an async generator
 
         mock_agent.astream = mock_astream
@@ -534,39 +603,3 @@ class TestStreamResponse:
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.SUCCESS
         assert call_args.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
-
-    async def test_stream_response_google_api_error(
-        self,
-        mock_database,
-        mock_user_message,
-        mock_config,
-        mock_thread_id,
-        mock_model_uri,
-    ):
-        """Test Google API InvalidArgument yields error event."""
-        mock_agent = MagicMock()
-
-        async def mock_astream(*args, **kwargs):
-            raise google_api_exceptions.InvalidArgument("Invalid request")
-            yield  # Makes this an async generator
-
-        mock_agent.astream = mock_astream
-
-        events = await self._collect_events(
-            stream_response(
-                database=mock_database,
-                agent=mock_agent,
-                user_message=mock_user_message,
-                config=mock_config,
-                thread_id=mock_thread_id,
-                model_uri=mock_model_uri,
-            )
-        )
-
-        assert len(events) == 2
-        assert ErrorMessage.UNEXPECTED in events[0]
-        assert '"type":"complete"' in events[1]
-
-        call_args = mock_database.create_message.call_args[0][0]
-        assert call_args.status == MessageStatus.ERROR
-        assert call_args.content == ErrorMessage.UNEXPECTED

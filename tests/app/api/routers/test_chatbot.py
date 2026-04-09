@@ -1,6 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import jwt
 import pytest
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from app.api.dependencies import get_database, get_feedback_sender
-from app.api.streaming import StreamEvent
+from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
     Feedback,
@@ -29,9 +30,9 @@ class MockLangSmithFeedbackSender:
         return FeedbackSyncStatus.SUCCESS, datetime.now(timezone.utc)
 
 
-class MockReActAgent:
-    def __init__(self):
-        self.checkpointer = None
+class MockAgent:
+    def __init__(self, checkpointer=None):
+        self.checkpointer = checkpointer
 
     def invoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
@@ -40,12 +41,12 @@ class MockReActAgent:
         return {"messages": [AIMessage("Mock response")]}
 
     def stream(self, input, config, stream_mode):
-        chunk = {"agent": {"messages": [AIMessage("Mock response")]}}
+        chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
 
     async def astream(self, input, config, stream_mode):
-        chunk = {"agent": {"messages": [AIMessage("Mock response")]}}
+        chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
 
@@ -82,9 +83,11 @@ def access_token(user_id: str) -> str:
 
 @pytest.fixture
 def client(database: AsyncDatabase):
+    """Test client with mocked agent, database, and feedback sender."""
+
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
-        app.state.agent = MockReActAgent()
+        app.state.agent = MockAgent()
         yield
 
     def get_database_override():
@@ -235,6 +238,21 @@ class TestDeleteThreadEndpoint:
         )
         assert response.status_code == status.HTTP_200_OK
 
+    def test_delete_thread_with_checkpointer(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
+        """Test successful thread deletion also deletes checkpoints."""
+        mock_checkpointer = AsyncMock()
+        app.state.agent.checkpointer = mock_checkpointer
+
+        response = client.delete(
+            url=f"/api/v1/chatbot/threads/{thread.id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_checkpointer.adelete_thread.assert_called_once_with(str(thread.id))
+
     def test_delete_thread_not_found(self, client: TestClient, access_token: str):
         """Test deleting non-existent thread returns 404."""
         response = client.delete(
@@ -368,7 +386,8 @@ class TestSendMessageEndpoint:
                 event = StreamEvent.model_validate_json(line)
                 events.append(event)
 
-        assert len(events) >= 1
+        assert len(events) >= 2
+        assert any(event.type == "final_answer" for event in events)
         assert events[-1].type == "complete"
         assert events[-1].data.run_id is not None
 
