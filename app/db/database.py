@@ -176,7 +176,7 @@ class AsyncDatabase:
     async def get_messages(
         self, thread_id: str | UUID, order_by: str | None = None
     ) -> list[Message]:
-        """Get all messages that belongs to a thread.
+        """Get all messages that belong to a thread.
 
         Args:
             thread_id (str | UUID): The thread unique identifier.
