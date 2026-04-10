@@ -257,6 +257,6 @@ async def stream_response(
         status=status,
     )
 
-    message_pair = await database.create_message(message_create)
+    message = await database.create_message(message_create)
 
-    yield StreamEvent(type="complete", data=EventData(run_id=message_pair.id)).to_sse()
+    yield StreamEvent(type="complete", data=EventData(run_id=message.id)).to_sse()
