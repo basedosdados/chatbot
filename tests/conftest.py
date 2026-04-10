@@ -146,7 +146,7 @@ async def assistant_message(
 
 @pytest_asyncio.fixture
 async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesFactory:
-    """Factory to create a user/assistant message pair in a single test."""
+    """Factory to create a (user message, assistant message) tuple in a single test."""
 
     async def factory() -> tuple[Message, Message]:
         user_message_create = MessageCreate(
