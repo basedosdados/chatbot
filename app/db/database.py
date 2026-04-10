@@ -57,7 +57,7 @@ class AsyncDatabase:
 
     @staticmethod
     def _apply_order_by(query, model: type[T], order_by: str | None):
-        """Apply ordering to a query based on an order_by string.
+        """Apply ordering to a query based on an `order_by` string.
 
         Args:
             query: The SQLAlchemy query to apply ordering to.
@@ -155,7 +155,7 @@ class AsyncDatabase:
 
         return thread
 
-    # ================================== Message Pair ==================================
+    # ===================================== Message ====================================
     async def create_message(self, message_create: MessageCreate) -> Message:
         """Create a message in the messages table.
 
@@ -165,25 +165,25 @@ class AsyncDatabase:
         Returns:
             Message: The created Message object.
         """
-        message_pair = Message.model_validate(message_create)
+        message = Message.model_validate(message_create)
 
-        self.session.add(message_pair)
+        self.session.add(message)
         await self.session.commit()
-        await self.session.refresh(message_pair)
+        await self.session.refresh(message)
 
-        return message_pair
+        return message
 
     async def get_messages(
         self, thread_id: str | UUID, order_by: str | None = None
     ) -> list[Message]:
-        """Get all message pairs that belongs to a thread.
+        """Get all messages that belongs to a thread.
 
         Args:
             thread_id (str | UUID): The thread unique identifier.
             order_by (str | None, optional): A field by which results should be ordered. Defaults to None.
 
         Returns:
-            list[MessagePair]: A list of MessagePair objects.
+            list[Message]: A list of Message objects.
         """
         query = select(Message).where(Message.thread_id == thread_id)
         query = self._apply_order_by(query, Message, order_by)
@@ -196,8 +196,7 @@ class AsyncDatabase:
     async def upsert_feedback(
         self, feedback_create: FeedbackCreate
     ) -> tuple[Feedback, bool]:
-        """Upsert a feedback into the feedback table, i.e., if there is already a feedback associated
-        with the message pair ID, it is updated. Otherwise, it is created.
+        """Upsert a feedback into the feedbacks table.
 
         Args:
             feedback_create (FeedbackCreate): A FeedbackCreate object
@@ -240,7 +239,7 @@ class AsyncDatabase:
         sync_status: FeedbackSyncStatus,
         synced_at: datetime,
     ) -> Feedback | None:
-        """Update the sync_status and synced_at attributes of an existing feedback.
+        """Update the `sync_status` and `synced_at` attributes of an existing feedback.
 
         Args:
             feedback_id (str | UUID): The feedback ID.
