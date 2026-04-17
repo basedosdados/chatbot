@@ -1,6 +1,10 @@
 import inspect
 import json
+import re
+import uuid
+from dataclasses import dataclass
 from functools import cache
+from typing import Any, Literal
 
 from google.api_core.exceptions import GoogleAPICallError
 from google.cloud import bigquery as bq
@@ -8,13 +12,54 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from app.agent.tools.exceptions import handle_tool_errors
+from app.artifacts import Artifact, ArtifactMetadata, RemoteObjectSource
 from app.settings import settings
+from app.storage import get_object_size
+
+type ExportFormat = Literal["AVRO", "CSV", "JSON", "PARQUET"]
+
+
+@dataclass(frozen=True, slots=True)
+class ExportSpec:
+    extension: str
+    mime_type: str
+    dest: str
+
+
+EXPORT_FORMATS = {
+    "AVRO": ExportSpec(
+        extension="avro",
+        mime_type="application/avro",
+        dest=bq.DestinationFormat.AVRO,
+    ),
+    "CSV": ExportSpec(
+        extension="csv",
+        mime_type="text/csv",
+        dest=bq.DestinationFormat.CSV,
+    ),
+    "JSON": ExportSpec(
+        extension="jsonl",
+        mime_type="application/jsonl",
+        dest=bq.DestinationFormat.NEWLINE_DELIMITED_JSON,
+    ),
+    "PARQUET": ExportSpec(
+        extension="parquet",
+        mime_type="application/vnd.apache.parquet",
+        dest=bq.DestinationFormat.PARQUET,
+    ),
+}
+
+EXPORT_FILENAME_MAX_LEN = 64
+
+EXPORT_FILENAME_PATTERN = re.compile(r"^[\w\-. ]+$")
+
+EXPORT_MAX_SIZE_BYTES = 1 * 10**9
 
 MAX_BYTES_BILLED = 10 * 10**9
 
 
 @cache
-def _get_client() -> bq.Client:  # pragma: no cover
+def _bq_client() -> bq.Client:  # pragma: no cover
     return bq.Client(
         project=settings.GOOGLE_BIGQUERY_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,
@@ -45,7 +90,7 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
     Returns:
         str: Query results as JSON array. Empty results return "[]".
     """
-    client = _get_client()
+    client = _bq_client()
 
     dry_run = client.query(
         sql_query, job_config=bq.QueryJobConfig(dry_run=True, use_query_cache=False)
@@ -66,7 +111,8 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
         job = client.query(
             sql_query,
             job_config=bq.QueryJobConfig(
-                maximum_bytes_billed=MAX_BYTES_BILLED, labels=labels
+                maximum_bytes_billed=MAX_BYTES_BILLED,
+                labels=labels,
             ),
         )
         results = [dict(row) for row in job.result()]
@@ -74,7 +120,8 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
         if reason == "bytesBilledLimitExceeded":
             raise ValueError(
-                f"Query exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. Add WHERE filters or select fewer columns."
+                f"Query exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. "
+                "Add WHERE filters or select fewer columns."
             ) from e
         raise
 
@@ -136,7 +183,7 @@ def decode_table_values(
     }
 
     try:
-        client = _get_client()
+        client = _bq_client()
         job = client.query(
             search_query,
             job_config=bq.QueryJobConfig(query_parameters=query_params, labels=labels),
@@ -149,3 +196,136 @@ def decode_table_values(
         raise
 
     return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+
+
+@tool(response_format="content_and_artifact")
+@handle_tool_errors(response_format="content_and_artifact")
+def export_query_results(
+    sql_query: str,
+    filename: str,
+    config: RunnableConfig,
+    file_format: ExportFormat = "CSV",
+) -> tuple[str, dict[str, Any]]:
+    """Export the results of a SELECT query to a single downloadable file in Google Cloud Storage.
+
+    Call this with the SAME SQL you previously ran via `execute_bigquery_sql`
+    when the user asks to download, export, or save the data. Exports are
+    capped at ~1GB — if the results exceeds that, the export will fail
+    and you should ask the user to narrow the query (add filters, select fewer columns, limit rows).
+
+    A download link is surfaced to the user by the application. You will not see the URL yourself.
+
+    Args:
+        sql_query (str): Standard GoogleSQL SELECT query.
+        filename (str): Short, human-readable base name for the file (no extension, no path separators).
+        file_format (str): Output format. One of "AVRO", "CSV", "JSON", "PARQUET". Defaults to "CSV".
+
+    Returns:
+        str: Confirmation that the export suceeded and the object was created.
+    """
+    fmt = file_format.upper()
+
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError(
+            f"Unsupported format '{file_format}'. Use one of {list(EXPORT_FORMATS)}."
+        )
+
+    if len(filename) > EXPORT_FILENAME_MAX_LEN:
+        raise ValueError(
+            f"`filename` must be at most {EXPORT_FILENAME_MAX_LEN} characters."
+        )
+
+    if not EXPORT_FILENAME_PATTERN.match(filename):
+        raise ValueError(
+            "`filename` must contain only letters, digits, hyphens, underscores, "
+            "dots, and spaces (no path separators)."
+        )
+
+    client = _bq_client()
+
+    dry_run = client.query(
+        sql_query, job_config=bq.QueryJobConfig(dry_run=True, use_query_cache=False)
+    )
+
+    if dry_run.statement_type != "SELECT":
+        raise ValueError(
+            f"Only SELECT statements are allowed, got {dry_run.statement_type}."
+        )
+
+    thread_id = config.get("configurable", {}).get("thread_id", "unknown")
+    object_id = uuid.uuid4().hex
+
+    extension = EXPORT_FORMATS[fmt].extension
+    object_key = f"exports/{thread_id}/{object_id}.{extension}"
+    gcs_uri = f"gs://{settings.GOOGLE_GCS_BUCKET}/{object_key}"
+
+    labels = {
+        "thread_id": thread_id,
+        "user_id": config.get("configurable", {}).get("user_id", "unknown"),
+        "tool_name": inspect.currentframe().f_code.co_name,
+    }
+
+    # Query results land in an anonymous temp table (~24h TTL, no cleanup needed).
+    try:
+        query_job = client.query(
+            sql_query,
+            job_config=bq.QueryJobConfig(
+                maximum_bytes_billed=MAX_BYTES_BILLED,
+                labels=labels,
+            ),
+        )
+        query_job.result()
+    except GoogleAPICallError as e:
+        reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
+        if reason == "bytesBilledLimitExceeded":
+            raise ValueError(
+                f"Export exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. "
+                "Add WHERE filters or select fewer columns."
+            ) from e
+        raise
+
+    # Single-URI extract requires the source table to be <= 1GB logical size.
+    # Check up front so the client gets a clean error instead of an opaque
+    # BigQuery failure on the extract job.
+    results_table = client.get_table(query_job.destination)
+
+    if results_table.num_bytes > EXPORT_MAX_SIZE_BYTES:
+        raise ValueError(
+            f"The result set size exceeds the {EXPORT_MAX_SIZE_BYTES // 10**9}GB export limit. "
+            "Add WHERE filters, select fewer columns, or limit the number of rows."
+        )
+
+    client.extract_table(
+        query_job.destination,
+        destination_uris=[gcs_uri],
+        job_config=bq.ExtractJobConfig(
+            destination_format=EXPORT_FORMATS[fmt].dest,
+            labels=labels,
+        ),
+    ).result()
+
+    size_bytes = get_object_size(settings.GOOGLE_GCS_BUCKET, object_key)
+
+    if size_bytes is None:
+        raise RuntimeError("Export completed but no file was written to GCS.")
+
+    content = json.dumps(
+        {
+            "status": "success",
+            "filename": f"{filename}.{extension}",
+        }
+    )
+
+    artifact = Artifact(
+        source=RemoteObjectSource(
+            bucket=settings.GOOGLE_GCS_BUCKET,
+            object_key=object_key,
+        ),
+        metadata=ArtifactMetadata(
+            filename=f"{filename}.{extension}",
+            mime_type=EXPORT_FORMATS[fmt].mime_type,
+            size_bytes=size_bytes,
+        ),
+    ).model_dump(mode="json")
+
+    return content, artifact

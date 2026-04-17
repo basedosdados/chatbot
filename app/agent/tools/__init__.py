@@ -1,7 +1,11 @@
 from langchain_core.tools import BaseTool
 
 from app.agent.tools.api import get_dataset_details, get_table_details, search_datasets
-from app.agent.tools.bigquery import decode_table_values, execute_bigquery_sql
+from app.agent.tools.bigquery import (
+    decode_table_values,
+    execute_bigquery_sql,
+    export_query_results,
+)
 
 
 class BDToolkit:
@@ -19,6 +23,7 @@ class BDToolkit:
                 - get_table_details: Get comprehensive table information
                 - execute_bigquery_sql: Execute SQL queries against BigQuery tables
                 - decode_table_values: Decode coded values using dictionary tables
+                - export_query_results: Export query results to a downloadable file
         """
         return [
             search_datasets,
@@ -26,6 +31,7 @@ class BDToolkit:
             get_table_details,
             execute_bigquery_sql,
             decode_table_values,
+            export_query_results,
         ]
 
 
