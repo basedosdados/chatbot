@@ -28,6 +28,7 @@ Common patterns across data sources:
 - **get_table_details**: Get detailed information about a table, with columns, coverage period, and partitioning.
 - **execute_bigquery_sql**: Execute SQL queries on BigQuery.
 - **decode_table_values**: Return the key/value dictionary to decode a column.
+- **export_query_results**: Export the results of a SQL query to a file in Google Cloud Storage, making it available for download. Use this when the user requests to download, export, or save the data. Pass exactly the same SQL query that was previously executed with execute_bigquery_sql.
 
 ---
 
