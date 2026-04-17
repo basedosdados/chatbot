@@ -2,11 +2,12 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import stream_response
+from app.artifacts import Artifact, RemoteObjectSource
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
@@ -19,6 +20,7 @@ from app.db.models import (
     ThreadPayload,
 )
 from app.settings import settings
+from app.storage import gcs_object_exists, generate_signed_url
 
 router = APIRouter(prefix="/chatbot")
 
@@ -130,6 +132,59 @@ async def send_message(
             model_uri=settings.MODEL_URI,
         ),
         status_code=status.HTTP_201_CREATED,
+    )
+
+
+@router.get("/messages/{message_id}/artifacts/{artifact_id}/download")
+async def download_artifact(
+    message_id: str,
+    artifact_id: str,
+    database: AsyncDB,
+    user_id: UserID,
+):
+    message = await database.get_message(message_id)
+
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+    thread = await database.get_thread(message.thread_id)
+
+    if thread is None or str(thread.user_id) != user_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+    artifacts = message.artifacts or []
+
+    raw = next((a for a in artifacts if a["id"] == artifact_id), None)
+
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+
+    artifact = Artifact.model_validate(raw)
+
+    if not isinstance(artifact.source, RemoteObjectSource):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Artifact {artifact_id} not downloadable",
+        )
+
+    if not gcs_object_exists(artifact.source.bucket, artifact.source.object_key):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Artifact {artifact_id} no longer available",
+        )
+
+    signed_url = generate_signed_url(
+        bucket=artifact.source.bucket,
+        object_key=artifact.source.object_key,
+        download_filename=artifact.metadata.filename,
+    )
+
+    return RedirectResponse(
+        url=signed_url,
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
 
 
