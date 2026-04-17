@@ -28,6 +28,7 @@ Padrões comuns nas fontes de dados:
 - **get_table_details**: Obtém informações detalhadas sobre uma tabela, com colunas e cobertura temporal.
 - **execute_bigquery_sql**: Executa consultas SQL no BigQuery.
 - **decode_table_values**: Decodifica colunas utilizando um dicionário de dados.
+- **export_query_results**: Exporta o resultado de uma consulta SQL para um arquivo no Google Cloud Storage, disponibilizado para download. Use quando o usuário solicitar baixar, exportar ou salvar os dados. Passe exatamente a mesma consulta SQL já executada com `execute_bigquery_sql`.
 
 ---
 
