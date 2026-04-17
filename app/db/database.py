@@ -100,7 +100,7 @@ class AsyncDatabase:
             thread_id (str | UUID): The thread unique identifier.
 
         Returns:
-            Thread | None: A Thread object if the thread was found. None otherwise.
+            Thread | None: A Thread object if found. None otherwise.
         """
         query = select(Thread).where(Thread.id == thread_id, Thread.deleted.is_(False))
         results = await self.session.execute(query)
@@ -170,6 +170,22 @@ class AsyncDatabase:
         self.session.add(message)
         await self.session.commit()
         await self.session.refresh(message)
+
+        return message
+
+    async def get_message(self, message_id: str | UUID) -> Message | None:
+        """Get a message from the messages table.
+
+        Args:
+            message_id (str | UUID): The message unique identifier.
+
+        Returns:
+            Message | None: A Message object if found, None otherwise.
+        """
+        message = await self.session.get(Message, message_id)
+
+        if message is None:
+            self.logger.warning(f"Message {message_id} not found")
 
         return message
 
