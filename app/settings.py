@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     GOOGLE_SERVICE_ACCOUNT: NonEmptyStr = Field(
         description="Path to a google service account with required permissions."
     )
+    GOOGLE_GCS_BUCKET: NonEmptyStr = Field(
+        description="GCS bucket where exported query results are stored."
+    )
+    SIGNED_URL_TTL_SECONDS: int = Field(
+        default=15 * 60,
+        description="Lifetime of signed URLs generated for downloading exported query results.",
+    )
 
     @computed_field
     @cached_property
