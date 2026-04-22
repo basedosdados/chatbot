@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlmodel import SQLModel
 from testcontainers.postgres import PostgresContainer
 
+from app.artifacts import Artifact, ArtifactMetadata, RemoteObjectSource
 from app.db.database import AsyncDatabase
 from app.db.models import (
     Feedback,
@@ -102,6 +103,21 @@ async def thread_factory(database: AsyncDatabase, user_id: int) -> ThreadFactory
 # Message Fixtures
 # =============================================================
 @pytest.fixture
+def artifact() -> Artifact:
+    return Artifact(
+        source=RemoteObjectSource(
+            bucket="test-bucket",
+            object_key="exports/test-thread/abc123.csv",
+        ),
+        metadata=ArtifactMetadata(
+            filename="test-file.csv",
+            mime_type="text/csv",
+            size_bytes=1024,
+        ),
+    )
+
+
+@pytest.fixture
 def user_message_create(thread: Thread) -> MessageCreate:
     """Mock MessageCreate instance for testing (user)."""
     return MessageCreate(
@@ -122,16 +138,19 @@ async def user_message(
 
 
 @pytest.fixture
-def assistant_message_create(user_message: Message) -> MessageCreate:
+def assistant_message_create(
+    user_message: Message, artifact: Artifact
+) -> MessageCreate:
     """Mock MessageCreate instance for testing (assistant)."""
+
     return MessageCreate(
         thread_id=user_message.thread_id,
         user_message_id=user_message.id,
-        model_uri="mock_model",
+        model_uri="mock-model",
         role=MessageRole.ASSISTANT,
         content="Mock assistant message",
-        artifacts=[{"mock_artifact": "artifact"}],
-        events=[{"mock_event": "event"}],
+        artifacts=[artifact.model_dump(mode="json")],
+        events=[{"mock-event": "event"}],
         status=MessageStatus.SUCCESS,
     )
 
@@ -145,7 +164,9 @@ async def assistant_message(
 
 
 @pytest_asyncio.fixture
-async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesFactory:
+async def messages_factory(
+    database: AsyncDatabase, thread: Thread, artifact: Artifact
+) -> MessagesFactory:
     """Factory to create a (user message, assistant message) tuple in a single test."""
 
     async def factory() -> tuple[Message, Message]:
@@ -162,11 +183,11 @@ async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesF
         assistant_message_create = MessageCreate(
             thread_id=user_message.thread_id,
             user_message_id=user_message.id,
-            model_uri="mock_model",
+            model_uri="mock-model",
             role=MessageRole.ASSISTANT,
             content="Mock assistant message",
-            artifacts=[{"mock_artifact": "artifact"}],
-            events=[{"mock_event": "event"}],
+            artifacts=[artifact.model_dump(mode="json")],
+            events=[{"mock-event": "event"}],
             status=MessageStatus.SUCCESS,
         )
 
