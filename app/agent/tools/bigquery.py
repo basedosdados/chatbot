@@ -53,8 +53,6 @@ EXPORT_FILENAME_MAX_LEN = 64
 
 EXPORT_FILENAME_PATTERN = re.compile(r"^[\w\-. ]+$")
 
-EXPORT_MAX_SIZE_BYTES = 1 * 10**9
-
 MAX_BYTES_BILLED = 10 * 10**9
 
 
@@ -223,13 +221,6 @@ def export_query_results(
     Returns:
         str: Confirmation that the export suceeded and the object was created.
     """
-    fmt = file_format.upper()
-
-    if fmt not in EXPORT_FORMATS:
-        raise ValueError(
-            f"Unsupported format '{file_format}'. Use one of {list(EXPORT_FORMATS)}."
-        )
-
     if len(filename) > EXPORT_FILENAME_MAX_LEN:
         raise ValueError(
             f"`filename` must be at most {EXPORT_FILENAME_MAX_LEN} characters."
@@ -255,7 +246,7 @@ def export_query_results(
     thread_id = config.get("configurable", {}).get("thread_id", "unknown")
     object_id = uuid.uuid4().hex
 
-    extension = EXPORT_FORMATS[fmt].extension
+    extension = EXPORT_FORMATS[file_format].extension
     object_key = f"exports/{thread_id}/{object_id}.{extension}"
     gcs_uri = f"gs://{settings.GOOGLE_GCS_BUCKET}/{object_key}"
 
@@ -265,7 +256,7 @@ def export_query_results(
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 
-    # Query results land in an anonymous temp table (~24h TTL, no cleanup needed).
+    # Query results land in an anonymous temp table with ~24h TTL and no cleanup needed.
     try:
         query_job = client.query(
             sql_query,
@@ -284,25 +275,24 @@ def export_query_results(
             ) from e
         raise
 
-    # Single-URI extract requires the source table to be <= 1GB logical size.
-    # Check up front so the client gets a clean error instead of an opaque
-    # BigQuery failure on the extract job.
-    results_table = client.get_table(query_job.destination)
-
-    if results_table.num_bytes > EXPORT_MAX_SIZE_BYTES:
-        raise ValueError(
-            f"The result set size exceeds the {EXPORT_MAX_SIZE_BYTES // 10**9}GB export limit. "
-            "Add WHERE filters, select fewer columns, or limit the number of rows."
-        )
-
-    client.extract_table(
-        query_job.destination,
-        destination_uris=[gcs_uri],
-        job_config=bq.ExtractJobConfig(
-            destination_format=EXPORT_FORMATS[fmt].dest,
-            labels=labels,
-        ),
-    ).result()
+    # The temp table is then extracted to Google Cloud Storage.
+    try:
+        client.extract_table(
+            query_job.destination,
+            destination_uris=[gcs_uri],
+            job_config=bq.ExtractJobConfig(
+                destination_format=EXPORT_FORMATS[file_format].dest,
+                labels=labels,
+            ),
+        ).result()
+    except GoogleAPICallError as e:
+        msg = e.errors[0].get("message", "") if getattr(e, "errors", None) else ""
+        if "too large to be exported to a single file" in msg:
+            raise ValueError(
+                "Result set is too large to export as a single file. "
+                "Add WHERE filters, select fewer columns, or limit the number of rows."
+            ) from e
+        raise
 
     size_bytes = get_object_size(settings.GOOGLE_GCS_BUCKET, object_key)
 
@@ -323,7 +313,7 @@ def export_query_results(
         ),
         metadata=ArtifactMetadata(
             filename=f"{filename}.{extension}",
-            mime_type=EXPORT_FORMATS[fmt].mime_type,
+            mime_type=EXPORT_FORMATS[file_format].mime_type,
             size_bytes=size_bytes,
         ),
     ).model_dump(mode="json")
