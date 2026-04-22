@@ -506,10 +506,10 @@ class TestUpsertFeedbackEndpoint:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-class TestDownloadArtifactEndpoint:
-    """Tests for GET /api/v1/chatbot/messages/{message_id}/artifacts/{artifact_id}/download"""
+class TestGenerateArtifactDownloadURLEndpoint:
+    """Tests for GET /api/v1/chatbot/messages/{message_id}/artifacts/{artifact_id}"""
 
-    def test_download_artifact_success(
+    def test_generate_artifact_download_url_success(
         self,
         client: TestClient,
         access_token: str,
@@ -527,27 +527,25 @@ class TestDownloadArtifactEndpoint:
         artifact = Artifact.model_validate(assistant_message.artifacts[0])
 
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}/download",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            follow_redirects=False,
         )
 
-        assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
-        assert response.headers["location"] == "https://storage.example.com/signed"
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["url"] == "https://storage.example.com/signed"
 
-    def test_download_artifact_message_not_found(
+    def test_generate_artifact_download_url_message_not_found(
         self, client: TestClient, access_token: str
     ):
         """Test message not found returns 404."""
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/artifacts/{uuid.uuid4()}/download",
+            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/artifacts/{uuid.uuid4()}",
             headers={"Authorization": f"Bearer {access_token}"},
-            follow_redirects=False,
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_download_artifact_thread_not_found(
+    def test_generate_artifact_download_url_thread_not_found(
         self,
         client: TestClient,
         access_token: str,
@@ -561,14 +559,13 @@ class TestDownloadArtifactEndpoint:
         artifact = Artifact.model_validate(assistant_message.artifacts[0])
 
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}/download",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            follow_redirects=False,
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_download_artifact_unauthorized_user(
+    def test_generate_artifact_download_url_unauthorized_user(
         self, client: TestClient, assistant_message: Message
     ):
         """Test user does not own the thread returns 404 (IDOR protection)."""
@@ -581,28 +578,26 @@ class TestDownloadArtifactEndpoint:
         artifact = Artifact.model_validate(assistant_message.artifacts[0])
 
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}/download",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {other_token}"},
-            follow_redirects=False,
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_download_artifact_not_found(
+    def test_generate_artifact_download_url_artifact_not_found(
         self, client: TestClient, access_token: str, assistant_message: Message
     ):
         """Test artifact not found returns 404."""
         artifact_id = uuid.uuid4()
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact_id}/download",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact_id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            follow_redirects=False,
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert response.json()["detail"] == f"Artifact {artifact_id} not found"
 
-    def test_download_artifact_no_longer_available(
+    def test_generate_artifact_download_url_artifact_no_longer_available(
         self,
         client: TestClient,
         access_token: str,
@@ -615,9 +610,8 @@ class TestDownloadArtifactEndpoint:
         artifact = Artifact.model_validate(assistant_message.artifacts[0])
 
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}/download",
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            follow_redirects=False,
         )
 
         assert response.status_code == status.HTTP_410_GONE
@@ -626,15 +620,14 @@ class TestDownloadArtifactEndpoint:
             == f"Artifact {artifact.id} is no longer available"
         )
 
-    def test_download_artifact_unauthorized(
+    def test_generate_artifact_download_url_unauthorized(
         self, client: TestClient, assistant_message: Message
     ):
         """Test download artifact unauthorized returns 401."""
         artifact = Artifact.model_validate(assistant_message.artifacts[0])
 
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}/download",
-            follow_redirects=False,
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
