@@ -10,6 +10,7 @@ from app.db.models import (
     FeedbackCreate,
     FeedbackRating,
     FeedbackSyncStatus,
+    Message,
     MessageCreate,
     Thread,
     ThreadCreate,
@@ -53,7 +54,7 @@ class TestAsyncDatabaseThread:
         assert thread_from_db.title == thread.title
 
     async def test_get_thread_not_found(self, database: AsyncDatabase):
-        """Test getting a non-existent thread."""
+        """Test getting a non-existent thread returns None."""
         thread = await database.get_thread(uuid.uuid4())
 
         assert thread is None
@@ -108,7 +109,7 @@ class TestAsyncDatabaseThread:
         assert thread_deleted.deleted is True
 
     async def test_delete_thread_not_found(self, database: AsyncDatabase):
-        """Test deleting non-existent thread returns."""
+        """Test deleting non-existent thread returns None."""
         thread_deleted = await database.delete_thread(uuid.uuid4())
 
         assert thread_deleted is None
@@ -154,6 +155,22 @@ class TestAsyncDatabaseMessage:
         assert message.events == assistant_message_create.events
         assert message.status == assistant_message_create.status
         assert isinstance(message.created_at, datetime)
+
+    async def test_get_message_found(
+        self, database: AsyncDatabase, user_message: Message
+    ):
+        """Test getting an existing message."""
+        message = await database.get_message(user_message.id)
+
+        assert message is not None
+        assert message.id == user_message.id
+        assert message.thread_id == user_message.thread_id
+
+    async def test_get_message_not_found(self, database: AsyncDatabase):
+        """Test getting a non-existent message returns None."""
+        message = await database.get_message(uuid.uuid4())
+
+        assert message is None
 
     async def test_get_messages(
         self, database: AsyncDatabase, messages_factory: MessagesFactory
