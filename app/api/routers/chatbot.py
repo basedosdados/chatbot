@@ -2,7 +2,7 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
 from app.api.schemas import ConfigDict, UserMessage
@@ -135,8 +135,8 @@ async def send_message(
     )
 
 
-@router.get("/messages/{message_id}/artifacts/{artifact_id}/download")
-async def download_artifact(
+@router.get("/messages/{message_id}/artifacts/{artifact_id}")
+async def generate_artifact_download_url(
     message_id: str,
     artifact_id: str,
     database: AsyncDB,
@@ -176,10 +176,7 @@ async def download_artifact(
         download_filename=artifact.metadata.filename,
     )
 
-    return RedirectResponse(
-        url=signed_url,
-        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-    )
+    return {"url": signed_url}
 
 
 @router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)
