@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import stream_response
-from app.artifacts import Artifact, RemoteObjectSource
+from app.artifacts import Artifact
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
@@ -164,16 +164,10 @@ async def download_artifact(
 
     artifact = Artifact.model_validate(raw)
 
-    if not isinstance(artifact.source, RemoteObjectSource):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Artifact {artifact_id} not downloadable",
-        )
-
     if not gcs_object_exists(artifact.source.bucket, artifact.source.object_key):
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail=f"Artifact {artifact_id} no longer available",
+            detail=f"Artifact {artifact_id} is no longer available",
         )
 
     signed_url = generate_signed_url(
