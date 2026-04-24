@@ -7,6 +7,7 @@ class Column(BaseModel):
     name: str
     type: str
     description: str | None
+    unit: str | None = Field(exclude_if=lambda v: v is None)
     reference_table_id: str | None = Field(exclude_if=lambda v: v is None)
 
 
