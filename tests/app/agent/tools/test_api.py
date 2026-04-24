@@ -347,9 +347,10 @@ class TestGetTableDetails:
                                         {
                                             "node": {
                                                 "id": "col-1",
-                                                "name": "column_name",
-                                                "description": "Column description",
-                                                "bigqueryType": {"name": "STRING"},
+                                                "name": "peso_liquido",
+                                                "description": "Peso líquido",
+                                                "measurementUnit": "kg",
+                                                "bigqueryType": {"name": "FLOAT64"},
                                                 "directoryPrimaryKey": None,
                                             }
                                         },
@@ -357,7 +358,8 @@ class TestGetTableDetails:
                                             "node": {
                                                 "id": "col-2",
                                                 "name": "id_municipio",
-                                                "description": "Municipality ID",
+                                                "description": "ID do município",
+                                                "measurementUnit": None,
                                                 "bigqueryType": {"name": "STRING"},
                                                 "directoryPrimaryKey": {
                                                     "table": {
@@ -394,15 +396,17 @@ class TestGetTableDetails:
 
         assert len(table["columns"]) == 2
 
-        assert table["columns"][0]["name"] == "column_name"
-        assert table["columns"][0]["type"] == "STRING"
-        assert table["columns"][0]["description"] == "Column description"
+        assert table["columns"][0]["name"] == "peso_liquido"
+        assert table["columns"][0]["type"] == "FLOAT64"
+        assert table["columns"][0]["description"] == "Peso líquido"
+        assert table["columns"][0]["unit"] == "kg"
         assert "reference_table_id" not in table["columns"][0]
 
         assert table["columns"][1]["name"] == "id_municipio"
         assert table["columns"][1]["type"] == "STRING"
-        assert table["columns"][1]["description"] == "Municipality ID"
+        assert table["columns"][1]["description"] == "ID do município"
         assert table["columns"][1]["reference_table_id"] == "dir-table-1"
+        assert "unit" not in table["columns"][1]
 
     @respx.mock
     async def test_get_table_details_without_cloud_tables(self, mock_response):
