@@ -80,6 +80,7 @@ query getTableDetails($id: ID!) {
                             id
                             name
                             description
+                            measurementUnit
                             bigqueryType {
                                 name
                             }

@@ -283,6 +283,7 @@ async def get_table_details(table_id: str) -> str:
                 name=column["name"],
                 type=column["bigqueryType"]["name"],
                 description=column.get("description"),
+                unit=column.get("measurementUnit"),
                 reference_table_id=directory_table_id,
             )
         )
