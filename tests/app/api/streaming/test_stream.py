@@ -362,6 +362,31 @@ class TestProcessChunk:
         assert event.type == "tool_output"
         assert event.data.tool_outputs == []
 
+    def test_model_call_limit_triggered_chunk(self):
+        """Test before_model chunk with jump_to=end yields final_answer event."""
+        chunk = {
+            "ModelCallLimitMiddleware.before_model": {
+                "jump_to": "end",
+                "messages": [AIMessage(content="Model call limits exceeded: ...")],
+            }
+        }
+
+        event = _process_chunk(chunk)
+
+        assert event is not None
+        assert event.type == "final_answer"
+        assert event.data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+
+    def test_model_call_limit_passthrough_chunk_returns_none(self):
+        """Test before_model passthrough chunk (None payload) returns None."""
+        chunk = {"ModelCallLimitMiddleware.before_model": None}
+        assert _process_chunk(chunk) is None
+
+    def test_model_call_limit_passthrough_chunk_no_jump_returns_none(self):
+        """Test before_model chunk without jump_to returns None."""
+        chunk = {"ModelCallLimitMiddleware.before_model": {"messages": []}}
+        assert _process_chunk(chunk) is None
+
     def test_unrecognized_chunk_returns_none(self):
         """Test unrecognized chunk returns None."""
         chunk = {"unknown_node": {"data": "something"}}
@@ -579,7 +604,14 @@ class TestStreamResponse:
         async def mock_astream(*args, **kwargs):
             yield (
                 "updates",
-                {"ModelCallLimitMiddleware.before_model": {"messages": []}},
+                {
+                    "ModelCallLimitMiddleware.before_model": {
+                        "jump_to": "end",
+                        "messages": [
+                            AIMessage(content="Model call limits exceeded: ...")
+                        ],
+                    }
+                },
             )
 
         mock_agent.astream = mock_astream
@@ -603,3 +635,44 @@ class TestStreamResponse:
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.SUCCESS
         assert call_args.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+
+    async def test_stream_response_before_model_passthrough_chunks_ignored(
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
+    ):
+        """Test before_model passthrough chunks do not produce final_answer events."""
+        mock_agent = MagicMock()
+
+        async def mock_astream(*args, **kwargs):
+            yield ("updates", {"ModelCallLimitMiddleware.before_model": None})
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Real answer.")]}},
+            )
+
+        mock_agent.astream = mock_astream
+
+        events = await self._collect_events(
+            stream_response(
+                database=mock_database,
+                agent=mock_agent,
+                user_message=mock_user_message,
+                config=mock_config,
+                thread_id=mock_thread_id,
+                model_uri=mock_model_uri,
+            )
+        )
+
+        assert len(events) == 2
+        assert '"type":"final_answer"' in events[0]
+        assert "Real answer." in events[0]
+        assert ErrorMessage.MODEL_CALL_LIMIT_REACHED not in events[0]
+        assert '"type":"complete"' in events[1]
+
+        call_args = mock_database.create_message.call_args[0][0]
+        assert call_args.status == MessageStatus.SUCCESS
+        assert call_args.content == "Real answer."
