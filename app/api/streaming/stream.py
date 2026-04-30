@@ -184,10 +184,14 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             type="tool_output", data=EventData(tool_outputs=tool_outputs)
         )
     elif "ModelCallLimitMiddleware.before_model" in chunk:
-        event_data = EventData(
-            content=ErrorMessage.MODEL_CALL_LIMIT_REACHED, tool_calls=None
-        )
-        return StreamEvent(type="final_answer", data=event_data)
+        # before_model runs on every model iteration; only the limit-exceeded
+        # path sets jump_to="end", so check that rather than the key's presence.
+        update = chunk["ModelCallLimitMiddleware.before_model"] or {}
+        if update.get("jump_to") == "end":
+            event_data = EventData(
+                content=ErrorMessage.MODEL_CALL_LIMIT_REACHED, tool_calls=None
+            )
+            return StreamEvent(type="final_answer", data=event_data)
     return None
 
 
