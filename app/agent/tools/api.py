@@ -29,6 +29,9 @@ SEARCH_URL = f"{settings.BASEDOSDADOS_BASE_URL}/search/"
 # URL for fetching dataset details
 GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 
+# datasets to skip
+SKIP_DIRECTORY_DATASETS = {"br_bd_diretorios_data_tempo"}
+
 # URL for fetching usage guides
 BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/refs/heads/main/next/content/userGuide/pt"
 
@@ -44,8 +47,8 @@ async def search_datasets(query: str) -> str:
 
     Args:
         query (str): 2-3 keywords maximum. Use Portuguese terms, organization acronyms, or dataset acronyms.
-            Good Examples: "censo", "educacao", "ibge", "inep", "rais", "saude"
-            Avoid: "Brazilian population data by municipality"
+            Good Examples: "censo", "educacao", "ibge", "inep", "rais", "saude".
+            Avoid: "Brazilian population data by municipality".
 
     Returns:
         str: JSON array of datasets. If empty/irrelevant results, try different keywords.
@@ -69,15 +72,14 @@ async def search_datasets(query: str) -> str:
         dataset_overview = DatasetOverview(
             id=dataset["id"],
             name=dataset["name"],
-            slug=dataset.get("slug"),
             description=dataset.get("description"),
+            organizations=[org["name"] for org in dataset.get("organizations", [])],
             tags=[tag["name"] for tag in dataset.get("tags", [])],
             themes=[theme["name"] for theme in dataset.get("themes", [])],
-            organizations=[org["name"] for org in dataset.get("organizations", [])],
         )
         overviews.append(dataset_overview.model_dump())
 
-    return json.dumps(overviews, ensure_ascii=False, indent=2)
+    return json.dumps(overviews, ensure_ascii=False)
 
 
 @tool
@@ -93,11 +95,10 @@ async def get_dataset_details(dataset_id: str) -> str:
 
     Returns:
         str: JSON object with complete dataset information, including:
-            - Basic metadata (name, description, tags, themes, organizations)
+            - Basic metadata (name, description, tags, themes, organizations).
             - tables: Array of all tables in the dataset with:
-                - gcp_id: Full BigQuery table reference (`project.dataset.table`)
-                - temporal coverage: Authoritative temporal coverage for the table
-                - table descriptions explaining what each table contains
+                - gcp_id: Full BigQuery table reference (`project.dataset.table`).
+                - table descriptions explaining what each table contains.
             - usage_guide: Provide key information and best practices for using the dataset.
 
     Next step: Use `get_table_details()` with returned table IDs.
@@ -125,7 +126,6 @@ async def get_dataset_details(dataset_id: str) -> str:
 
     dataset_id = dataset["id"].split("DatasetNode:")[-1]
     dataset_name = dataset["name"]
-    dataset_slug = dataset.get("slug")
     dataset_description = dataset.get("description")
 
     # Tags
@@ -158,9 +158,7 @@ async def get_dataset_details(dataset_id: str) -> str:
 
         table_id = table["id"].split("TableNode:")[-1]
         table_name = table["name"]
-        table_slug = table.get("slug")
         table_description = table.get("description")
-        table_temporal_coverage = table.get("temporalCoverage")
 
         cloud_table_edges = table["cloudTables"]["edges"]
         if cloud_table_edges:
@@ -177,9 +175,7 @@ async def get_dataset_details(dataset_id: str) -> str:
                 id=table_id,
                 gcp_id=table_gcp_id,
                 name=table_name,
-                slug=table_slug,
                 description=table_description,
-                temporal_coverage=table_temporal_coverage,
             )
         )
 
@@ -197,7 +193,6 @@ async def get_dataset_details(dataset_id: str) -> str:
     result = Dataset(
         id=dataset_id,
         name=dataset_name,
-        slug=dataset_slug,
         description=dataset_description,
         tags=dataset_tags,
         themes=dataset_themes,
@@ -206,7 +201,7 @@ async def get_dataset_details(dataset_id: str) -> str:
         usage_guide=usage_guide,
     )
 
-    return result.model_dump_json(indent=2)
+    return result.model_dump_json()
 
 
 @tool
@@ -222,10 +217,14 @@ async def get_table_details(table_id: str) -> str:
 
     Returns:
         str: JSON object with complete table information, including:
-            - Basic metadata (name, description, slug)
-            - gcp_id: Full BigQuery table reference (`project.dataset.table`)
-            - temporal coverage: Authoritative temporal coverage for the table
-            - columns: All column names, types, and descriptions
+            - Basic metadata (name, description).
+            - gcp_id: Full BigQuery table reference (`project.dataset.table`).
+            - columns: All column names, types, and descriptions, including
+                `needs_decoding` and `reference_table_id` for coded columns.
+            - partitioned_by: Columns to filter on for cost control.
+            - period_start / period_end: First and last period covered by the table.
+                Format varies (`2024`, `'2026-04-12'`, etc.) — use the value verbatim,
+                matched to the appropriate temporal column (`ano`, `data`, etc.).
 
     Next step: Use `execute_bigquery_sql()` to execute queries.
     """
@@ -252,9 +251,8 @@ async def get_table_details(table_id: str) -> str:
 
     table_id = table["id"].split("TableNode:")[-1]
     table_name = table["name"]
-    table_slug = table.get("slug")
     table_description = table.get("description")
-    table_temporal_coverage = table.get("temporalCoverage")
+    table_temporal_coverage = table.get("temporalCoverage", {})
 
     cloud_table_edges = table["cloudTables"]["edges"]
     if cloud_table_edges:
@@ -267,14 +265,23 @@ async def get_table_details(table_id: str) -> str:
         table_gcp_id = None
 
     table_columns = []
+    partitioned_by = []
+
     for edge in table["columns"]["edges"]:
         column = edge["node"]
+
+        if column["isPartition"]:
+            partitioned_by.append(column["name"])
 
         directory_primary_key = column["directoryPrimaryKey"]
 
         if directory_primary_key is not None:
             directory_table = directory_primary_key["table"]
-            directory_table_id = directory_table["id"].split("TableNode:")[-1]
+            directory_cloud_table = directory_table["cloudTables"]["edges"][0]["node"]
+            if directory_cloud_table["gcpDatasetId"] in SKIP_DIRECTORY_DATASETS:
+                directory_table_id = None
+            else:
+                directory_table_id = directory_table["id"].split("TableNode:")[-1]
         else:
             directory_table_id = None
 
@@ -285,6 +292,7 @@ async def get_table_details(table_id: str) -> str:
                 description=column.get("description"),
                 unit=column.get("measurementUnit"),
                 reference_table_id=directory_table_id,
+                needs_decoding=column["coveredByDictionary"],
             )
         )
 
@@ -292,10 +300,11 @@ async def get_table_details(table_id: str) -> str:
         id=table_id,
         gcp_id=table_gcp_id,
         name=table_name,
-        slug=table_slug,
         description=table_description,
-        temporal_coverage=table_temporal_coverage,
         columns=table_columns,
+        partitioned_by=partitioned_by,
+        period_start=table_temporal_coverage.get("start"),
+        period_end=table_temporal_coverage.get("end"),
     )
 
-    return result.model_dump_json(indent=2)
+    return result.model_dump_json()

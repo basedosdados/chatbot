@@ -30,20 +30,19 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
     It includes a 10GB processing limit for safety.
 
     Args:
-        sql_query (str): Standard GoogleSQL query. Must reference
-            tables using their full `gcp_id` from `get_dataset_details()`.
+        sql_query (str): Standard GoogleSQL query. Must reference tables using their full `gcp_id` from `get_dataset_details()`.
 
-    Best practices:
-        - Use fully qualified names: `project.dataset.table`
-        - Select only needed columns, avoid `SELECT *`
-        - Add `LIMIT` for exploration
-        - Filter early with `WHERE` clauses
-        - Order by relevant columns
-        - Never use DDL/DML commands
-        - Use appropriate data types in comparisons
+    Rules:
+        - Use fully qualified names: `project.dataset.table`.
+        - Select only needed columns, don't use `SELECT *`.
+        - Always filter by partitioned columns when present (see `partitioned_by` in `get_table_details` results). In `JOIN` queries, each partitioned table needs its own partition filter.
+        - Order by relevant columns.
+        - Use `LIMIT` for exploration.
+        - Use appropriate data types in comparisons.
+        - Only `SELECT` statements are allowed.
 
     Returns:
-        str: Query results as JSON array. Empty results return "[]".
+        str: Query results as JSON array.
     """
     client = _get_client()
 
@@ -70,15 +69,19 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
             ),
         )
         results = [dict(row) for row in job.result()]
+
+        if not results:
+            results = "Query returned 0 rows. Review the filters per the empty-result protocol."
+
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
         if reason == "bytesBilledLimitExceeded":
             raise ValueError(
-                f"Query exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. Add WHERE filters or select fewer columns."
+                f"Query exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. Filter by partitioned columns."
             ) from e
         raise
 
-    return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+    return json.dumps(results, ensure_ascii=False, default=str)
 
 
 @tool
@@ -86,18 +89,21 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
 def decode_table_values(
     table_gcp_id: str, config: RunnableConfig, column_name: str | None = None
 ) -> str:
-    """Decode coded values from a table using its dataset's `dicionario` table.
+    """Fetch the dictionary mapping (code -> human-readable value) for a coded column.
 
-    Use when column values appear to be codes (e.g., 1,2,3 or A,B,C) and the
-    column does NOT have a `reference_table_id` in `get_table_details()` metadata.
+    REQUIRED whenever a column has `needs_decoding: true` in `get_table_details`,
+    BEFORE writing any SQL that filters, joins, or displays that column.
+
+    Returns pairs of `chave` (the literal value stored in the table) and `valor` (its meaning).
 
     Args:
-        table_gcp_id (str): Full BigQuery table reference.
-        column_name (str | None, optional): Column with coded values. If `None`,
-            all columns will be used. Defaults to `None`.
+        table_gcp_id (str): Full BigQuery table reference (`project.dataset.table`).
+        column_name (str | None, optional): The specific column to decode. Always
+            provide this when you know which column you need; passing None returns
+            the entire dictionary for the table and wastes tokens.
 
     Returns:
-        str: JSON array with chave (code) and valor (meaning) mappings.
+        str: JSON array of {nome_coluna, chave, valor} entries.
     """
     if "`" in table_gcp_id:
         table_gcp_id = table_gcp_id.replace("`", "")
@@ -148,4 +154,4 @@ def decode_table_values(
             raise ValueError("Dictionary table not found for this dataset.") from e
         raise
 
-    return json.dumps(results, ensure_ascii=False, indent=2, default=str)
+    return json.dumps(results, ensure_ascii=False, default=str)
