@@ -5,13 +5,11 @@ query getDatasetDetails($id: ID!) {
             node {
                 id
                 name
-                slug
                 description
                 organizations {
                     edges {
                         node {
                             name
-                            slug
                         }
                     }
                 }
@@ -34,7 +32,6 @@ query getDatasetDetails($id: ID!) {
                         node {
                             id
                             name
-                            slug
                             description
                             temporalCoverage
                             cloudTables {
@@ -62,7 +59,6 @@ query getTableDetails($id: ID!) {
             node {
                 id
                 name
-                slug
                 description
                 temporalCoverage
                 cloudTables {
@@ -81,12 +77,22 @@ query getTableDetails($id: ID!) {
                             name
                             description
                             measurementUnit
+                            coveredByDictionary
+                            isPartition
                             bigqueryType {
                                 name
                             }
                             directoryPrimaryKey {
                                 table {
                                     id
+                                    cloudTables {
+                                        edges {
+                                            node {
+                                                gcpDatasetId
+                                                gcpTableId
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

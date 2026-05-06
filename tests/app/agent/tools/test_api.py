@@ -4,7 +4,12 @@ import httpx
 import pytest
 import respx
 
-from app.agent.tools.api import get_dataset_details, get_table_details, search_datasets
+from app.agent.tools.api import (
+    SKIP_DIRECTORY_DATASETS,
+    get_dataset_details,
+    get_table_details,
+    search_datasets,
+)
 from app.settings import settings
 
 
@@ -21,7 +26,6 @@ class TestSearchDatasets:
                 {
                     "id": "dataset-1",
                     "name": "Test Dataset",
-                    "slug": "test_dataset",
                     "description": "Dataset description",
                     "tags": [{"name": "tag1"}, {"name": "tag2"}],
                     "themes": [{"name": "theme1"}, {"name": "theme2"}],
@@ -43,7 +47,6 @@ class TestSearchDatasets:
 
         assert dataset["id"] == "dataset-1"
         assert dataset["name"] == "Test Dataset"
-        assert dataset["slug"] == "test_dataset"
         assert dataset["description"] == "Dataset description"
         assert dataset["tags"] == ["tag1", "tag2"]
         assert dataset["themes"] == ["theme1", "theme2"]
@@ -77,7 +80,6 @@ class TestGetDatasetDetails:
                             "node": {
                                 "id": "DatasetNode:dataset-1",
                                 "name": "Test Dataset",
-                                "slug": "test_dataset",
                                 "description": "Dataset description",
                                 "tags": {"edges": [{"node": {"name": "tag1"}}]},
                                 "themes": {"edges": [{"node": {"name": "theme1"}}]},
@@ -92,7 +94,6 @@ class TestGetDatasetDetails:
                                             "node": {
                                                 "id": "TableNode:table-1",
                                                 "name": "Test Table",
-                                                "slug": "test_table",
                                                 "description": "Table description",
                                                 "temporalCoverage": {
                                                     "start": "2020",
@@ -138,7 +139,6 @@ class TestGetDatasetDetails:
 
         assert dataset["id"] == "dataset-1"
         assert dataset["name"] == "Test Dataset"
-        assert dataset["slug"] == "test_dataset"
         assert dataset["description"] == "Dataset description"
         assert dataset["tags"] == ["tag1"]
         assert dataset["themes"] == ["theme1"]
@@ -152,9 +152,7 @@ class TestGetDatasetDetails:
         assert table["id"] == "table-1"
         assert table["gcp_id"] == "basedosdados.test_dataset.test_table"
         assert table["name"] == "Test Table"
-        assert table["slug"] == "test_table"
         assert table["description"] == "Table description"
-        assert table["temporal_coverage"] == {"start": "2020", "end": "2023"}
 
     @respx.mock
     async def test_get_dataset_details_success_with_usage_guide(self, mock_response):
@@ -173,8 +171,8 @@ class TestGetDatasetDetails:
         assert dataset["usage_guide"] == "# This is a usage guide."
 
     @respx.mock
-    async def test_table_without_tags_themes_orgs(self):
-        """Test dataset with table that has no tags, themes and orgs."""
+    async def test_get_dataset_details_without_tags_themes_orgs(self):
+        """Test dataset details that has no tags, themes and orgs."""
         mock_response = {
             "data": {
                 "allDataset": {
@@ -183,7 +181,6 @@ class TestGetDatasetDetails:
                             "node": {
                                 "id": "dataset-1",
                                 "name": "Test Dataset",
-                                "slug": "test_dataset",
                                 "description": "Dataset description",
                                 "tags": {"edges": [{"node": {}}]},
                                 "themes": {"edges": [{"node": {}}]},
@@ -194,7 +191,6 @@ class TestGetDatasetDetails:
                                             "node": {
                                                 "id": "table-1",
                                                 "name": "Test Table",
-                                                "slug": "test_table",
                                                 "description": "Table description",
                                                 "temporalCoverage": {
                                                     "start": "2020",
@@ -239,7 +235,7 @@ class TestGetDatasetDetails:
 
     @respx.mock
     async def test_table_without_cloud_tables(self):
-        """Test dataset with table that has no cloud tables."""
+        """Test dataset details with table that has no cloud tables."""
         mock_response = {
             "data": {
                 "allDataset": {
@@ -325,7 +321,6 @@ class TestGetTableDetails:
                             "node": {
                                 "id": "TableNode:table-1",
                                 "name": "Test Table",
-                                "slug": "test_table",
                                 "description": "Table description",
                                 "temporalCoverage": {
                                     "start": "2020",
@@ -350,6 +345,8 @@ class TestGetTableDetails:
                                                 "name": "peso_liquido",
                                                 "description": "Peso líquido",
                                                 "measurementUnit": "kg",
+                                                "coveredByDictionary": False,
+                                                "isPartition": False,
                                                 "bigqueryType": {"name": "FLOAT64"},
                                                 "directoryPrimaryKey": None,
                                             }
@@ -357,13 +354,67 @@ class TestGetTableDetails:
                                         {
                                             "node": {
                                                 "id": "col-2",
+                                                "name": "status",
+                                                "description": "Status",
+                                                "measurementUnit": None,
+                                                "coveredByDictionary": True,
+                                                "isPartition": False,
+                                                "bigqueryType": {"name": "STRING"},
+                                                "directoryPrimaryKey": None,
+                                            }
+                                        },
+                                        {
+                                            "node": {
+                                                "id": "col-3",
                                                 "name": "id_municipio",
                                                 "description": "ID do município",
                                                 "measurementUnit": None,
+                                                "coveredByDictionary": False,
+                                                "isPartition": False,
                                                 "bigqueryType": {"name": "STRING"},
                                                 "directoryPrimaryKey": {
                                                     "table": {
-                                                        "id": "TableNode:dir-table-1"
+                                                        "id": "TableNode:dir-table-1",
+                                                        "cloudTables": {
+                                                            "edges": [
+                                                                {
+                                                                    "node": {
+                                                                        "gcpDatasetId": "directory_dataset",
+                                                                        "gcpTableId": "directory_table",
+                                                                    }
+                                                                }
+                                                            ]
+                                                        },
+                                                    }
+                                                },
+                                            }
+                                        },
+                                        {
+                                            "node": {
+                                                "id": "col-4",
+                                                "name": "ano",
+                                                "description": "Ano",
+                                                "measurementUnit": None,
+                                                "coveredByDictionary": False,
+                                                "isPartition": True,
+                                                "bigqueryType": {"name": "INT64"},
+                                                "directoryPrimaryKey": {
+                                                    "table": {
+                                                        "id": "TableNode:dir-table-2",
+                                                        "cloudTables": {
+                                                            "edges": [
+                                                                {
+                                                                    "node": {
+                                                                        "gcpDatasetId": next(
+                                                                            iter(
+                                                                                SKIP_DIRECTORY_DATASETS
+                                                                            )
+                                                                        ),
+                                                                        "gcpTableId": "ano",
+                                                                    }
+                                                                }
+                                                            ]
+                                                        },
                                                     }
                                                 },
                                             }
@@ -390,23 +441,55 @@ class TestGetTableDetails:
         assert table["id"] == "table-1"
         assert table["gcp_id"] == "basedosdados.test_dataset.test_table"
         assert table["name"] == "Test Table"
-        assert table["slug"] == "test_table"
         assert table["description"] == "Table description"
-        assert table["temporal_coverage"] == {"start": "2020", "end": "2023"}
+        assert table["period_start"] == "2020"
+        assert table["period_end"] == "2023"
+        assert table["partitioned_by"] == ["ano"]
 
-        assert len(table["columns"]) == 2
+        assert len(table["columns"]) == 4
 
         assert table["columns"][0]["name"] == "peso_liquido"
         assert table["columns"][0]["type"] == "FLOAT64"
         assert table["columns"][0]["description"] == "Peso líquido"
         assert table["columns"][0]["unit"] == "kg"
+        assert table["columns"][0]["needs_decoding"] is False
         assert "reference_table_id" not in table["columns"][0]
 
-        assert table["columns"][1]["name"] == "id_municipio"
+        assert table["columns"][1]["name"] == "status"
         assert table["columns"][1]["type"] == "STRING"
-        assert table["columns"][1]["description"] == "ID do município"
-        assert table["columns"][1]["reference_table_id"] == "dir-table-1"
+        assert table["columns"][1]["description"] == "Status"
+        assert table["columns"][1]["needs_decoding"] is True
         assert "unit" not in table["columns"][1]
+        assert "reference_table_id" not in table["columns"][1]
+
+        assert table["columns"][2]["name"] == "id_municipio"
+        assert table["columns"][2]["type"] == "STRING"
+        assert table["columns"][2]["description"] == "ID do município"
+        assert table["columns"][2]["reference_table_id"] == "dir-table-1"
+        assert table["columns"][2]["needs_decoding"] is False
+        assert "unit" not in table["columns"][2]
+
+        assert table["columns"][3]["name"] == "ano"
+        assert table["columns"][3]["type"] == "INT64"
+        assert table["columns"][3]["description"] == "Ano"
+        assert table["columns"][3]["needs_decoding"] is False
+        assert "reference_table_id" not in table["columns"][3]
+        assert "unit" not in table["columns"][3]
+
+    @respx.mock
+    async def test_get_table_details_null_temporal_coverage(self, mock_response):
+        """Test table details when temporalCoverage is null."""
+        mock_response["data"]["allTable"]["edges"][0]["node"]["temporalCoverage"] = None
+
+        respx.post(self.GRAPHQL_URL).mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        result = await get_table_details.ainvoke({"table_id": "table-1"})
+        table = json.loads(result)
+
+        assert table["period_start"] is None
+        assert table["period_end"] is None
 
     @respx.mock
     async def test_get_table_details_without_cloud_tables(self, mock_response):

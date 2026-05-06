@@ -14,11 +14,11 @@ class BDToolkit:
 
         Returns:
             list[BaseTool]: Tools in suggested usage order:
-                - search_datasets: Find datasets using keywords
-                - get_dataset_details: Get comprehensive dataset information
-                - get_table_details: Get comprehensive table information
-                - execute_bigquery_sql: Execute SQL queries against BigQuery tables
-                - decode_table_values: Decode coded values using dictionary tables
+                - search_datasets: Find datasets using keywords.
+                - get_dataset_details: Get comprehensive dataset information.
+                - get_table_details: Get comprehensive table information.
+                - execute_bigquery_sql: Execute SQL queries against BigQuery tables.
+                - decode_table_values: Decode coded values using dictionary tables.
         """
         return [
             search_datasets,

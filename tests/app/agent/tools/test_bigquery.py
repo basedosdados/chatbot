@@ -46,6 +46,37 @@ class TestExecuteBigQuerySQL:
 
         assert output == [{"col1": "value1"}, {"col1": "value2"}]
 
+    def test_successful_query_empty_result(
+        self, mocker: MockerFixture, mock_config: dict
+    ):
+        """Test successful SELECT query execution with empty result"""
+        mock_dry_run_query_job = MagicMock()
+        mock_dry_run_query_job.statement_type = "SELECT"
+
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = []
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.side_effect = [
+            mock_dry_run_query_job,
+            mock_query_job,
+        ]
+
+        mocker.patch(
+            "app.agent.tools.bigquery._get_client", return_value=mock_bigquery_client
+        )
+
+        result = execute_bigquery_sql.invoke(
+            {"sql_query": "SELECT * FROM project.dataset.table", "config": mock_config}
+        )
+
+        output = json.loads(result)
+
+        assert (
+            output
+            == "Query returned 0 rows. Review the filters per the empty-result protocol."
+        )
+
     def test_forbidden_statement_type(self, mocker: MockerFixture, mock_config: dict):
         """Test error when statement is not SELECT."""
         mock_dry_run_query_job = MagicMock()
@@ -97,7 +128,7 @@ class TestExecuteBigQuerySQL:
         assert output["status"] == "error"
         assert output["message"] == (
             f"Query exceeds the {MAX_BYTES_BILLED // 10**9}GB processing limit. "
-            "Add WHERE filters or select fewer columns."
+            "Filter by partitioned columns."
         )
 
     def test_google_api_error_reraise(self, mocker: MockerFixture, mock_config: dict):
