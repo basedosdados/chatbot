@@ -23,14 +23,14 @@ READ_TIMEOUT = 60.0
 # maximum number of datasets returned on search
 PAGE_SIZE = 10
 
-# url for searching datasets
+# directory datasets to skip
+SKIP_DIRECTORY_DATASETS = {"br_bd_diretorios_data_tempo"}
+
+# URL for searching datasets
 SEARCH_URL = f"{settings.BASEDOSDADOS_BASE_URL}/search/"
 
 # URL for fetching dataset details
 GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
-
-# datasets to skip
-SKIP_DIRECTORY_DATASETS = {"br_bd_diretorios_data_tempo"}
 
 # URL for fetching usage guides
 BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/refs/heads/main/next/content/userGuide/pt"
@@ -252,7 +252,7 @@ async def get_table_details(table_id: str) -> str:
     table_id = table["id"].split("TableNode:")[-1]
     table_name = table["name"]
     table_description = table.get("description")
-    table_temporal_coverage = table.get("temporalCoverage", {})
+    table_temporal_coverage = table.get("temporalCoverage") or {}
 
     cloud_table_edges = table["cloudTables"]["edges"]
     if cloud_table_edges:
