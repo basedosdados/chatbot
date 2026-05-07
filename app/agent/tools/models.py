@@ -9,6 +9,7 @@ class Column(BaseModel):
     description: str | None
     unit: str | None = Field(exclude_if=lambda v: v is None)
     reference_table_id: str | None = Field(exclude_if=lambda v: v is None)
+    needs_decoding: bool
 
 
 class TableOverview(BaseModel):
@@ -17,15 +18,16 @@ class TableOverview(BaseModel):
     id: str
     gcp_id: str | None
     name: str
-    slug: str | None
     description: str | None
-    temporal_coverage: dict[str, str | None]
 
 
 class Table(TableOverview):
     """Complete table information including all its columns."""
 
     columns: list[Column]
+    partitioned_by: list[str]
+    period_start: str | None
+    period_end: str | None
 
 
 class DatasetOverview(BaseModel):
@@ -33,11 +35,10 @@ class DatasetOverview(BaseModel):
 
     id: str
     name: str
-    slug: str | None
     description: str | None
+    organizations: list[str]
     tags: list[str]
     themes: list[str]
-    organizations: list[str]
 
 
 class Dataset(DatasetOverview):
