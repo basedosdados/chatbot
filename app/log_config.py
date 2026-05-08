@@ -30,7 +30,7 @@ def _format(record):
 
 def setup_logging():
     logging.getLogger("uvicorn.access").addFilter(
-        EndpointFilter(excluded_endpoints=["/health"])
+        EndpointFilter(excluded_endpoints=["/health", "/metrics"])
     )
 
     logger.remove()
