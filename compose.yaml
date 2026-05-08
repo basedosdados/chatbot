@@ -32,6 +32,15 @@ services:
         restart: true
     container_name: chatbot-migration
 
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - 9090:9090
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    container_name: chatbot-prometheus
+
   chatbot-api:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --reload
@@ -79,3 +88,13 @@ services:
 
 volumes:
   pgdata:
+
+configs:
+  prometheus_config:
+    content: |
+      scrape_configs:
+        - job_name: chatbot
+          scrape_interval: 15s
+          static_configs:
+            - targets:
+                - chatbot-api:8000
