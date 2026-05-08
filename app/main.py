@@ -19,6 +19,7 @@ from app.agent.tools import BDToolkit
 from app.api.main import api_router
 from app.db.database import engine, init_database
 from app.log_config import setup_logging
+from app.metrics import MetricsMiddleware, metrics_endpoint
 from app.settings import settings
 
 setup_logging()
@@ -100,6 +101,9 @@ async def lifespan(app: FastAPI):  # pragma: no cover
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(MetricsMiddleware, excluded_paths={"/metrics"})
+app.add_route("/metrics", metrics_endpoint)
 
 app.include_router(api_router)
 
