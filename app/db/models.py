@@ -41,6 +41,7 @@ class MessageRole(str, Enum):
 class MessageStatus(str, Enum):
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
+    DISCONNECTED = "DISCONNECTED"
 
 
 class MessageCreate(SQLModel):
