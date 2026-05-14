@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from typing import Any, AsyncIterator
@@ -676,3 +677,197 @@ class TestStreamResponse:
         call_args = mock_database.create_message.call_args[0][0]
         assert call_args.status == MessageStatus.SUCCESS
         assert call_args.content == "Real answer."
+
+    async def test_stream_response_client_disconnect_before_any_event(
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
+    ):
+        """CancelledError before any event is streamed: re-raise, persist with DISCONNECTED status."""
+        mock_agent = MagicMock()
+
+        async def mock_astream(*args, **kwargs):
+            raise asyncio.CancelledError()
+            yield  # Makes this an async generator
+
+        mock_agent.astream = mock_astream
+
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect_events(
+                stream_response(
+                    database=mock_database,
+                    agent=mock_agent,
+                    user_message=mock_user_message,
+                    config=mock_config,
+                    thread_id=mock_thread_id,
+                    model_uri=mock_model_uri,
+                )
+            )
+
+        mock_database.create_message.assert_called_once()
+        call_args = mock_database.create_message.call_args[0][0]
+        assert call_args.status == MessageStatus.DISCONNECTED
+        assert call_args.content == ErrorMessage.CONNECTION_CLOSED
+        assert call_args.events is None
+
+    async def test_stream_response_client_disconnect_mid_tool_execution(
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
+    ):
+        """tool_call and tool_output events followed by CancelledError: re-raise, persist with DISCONNECTED status."""
+        mock_agent = MagicMock()
+
+        async def mock_astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [
+                            AIMessage(
+                                content="Let me search.",
+                                tool_calls=[
+                                    {"id": "call_1", "name": "search", "args": {}}
+                                ],
+                            )
+                        ]
+                    }
+                },
+            )
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"result": "data"}',
+                                tool_call_id="call_1",
+                                name="search",
+                                status="success",
+                                artifact={"url": "http://example.com"},
+                            )
+                        ]
+                    }
+                },
+            )
+            raise asyncio.CancelledError()
+
+        mock_agent.astream = mock_astream
+
+        gen = stream_response(
+            database=mock_database,
+            agent=mock_agent,
+            user_message=mock_user_message,
+            config=mock_config,
+            thread_id=mock_thread_id,
+            model_uri=mock_model_uri,
+        )
+
+        events = []
+        with pytest.raises(asyncio.CancelledError):
+            async for event in gen:
+                events.append(event)
+
+        assert len(events) == 2
+        assert '"type":"tool_call"' in events[0]
+        assert '"type":"tool_output"' in events[1]
+
+        mock_database.create_message.assert_called_once()
+        call_args = mock_database.create_message.call_args[0][0]
+        assert call_args.status == MessageStatus.DISCONNECTED
+        assert call_args.content == ErrorMessage.CONNECTION_CLOSED
+        assert call_args.artifacts == [{"url": "http://example.com"}]
+        assert call_args.events is not None
+        assert [e["type"] for e in call_args.events] == ["tool_call", "tool_output"]
+
+    async def test_stream_response_client_disconnect_preserves_partial_answer(
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
+    ):
+        """final_answer event followed by CancelledError: re-raise, persist content with SUCCESS status"""
+        mock_agent = MagicMock()
+
+        async def mock_astream(*args, **kwargs):
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Final answer.")]}},
+            )
+            raise asyncio.CancelledError()
+
+        mock_agent.astream = mock_astream
+
+        gen = stream_response(
+            database=mock_database,
+            agent=mock_agent,
+            user_message=mock_user_message,
+            config=mock_config,
+            thread_id=mock_thread_id,
+            model_uri=mock_model_uri,
+        )
+
+        events = []
+        with pytest.raises(asyncio.CancelledError):
+            async for event in gen:
+                events.append(event)
+
+        assert len(events) == 1
+        assert '"type":"final_answer"' in events[0]
+
+        mock_database.create_message.assert_called_once()
+        call_args = mock_database.create_message.call_args[0][0]
+        assert call_args.status == MessageStatus.SUCCESS
+        assert call_args.content == "Final answer."
+        assert call_args.events is not None
+        assert any(e["type"] == "final_answer" for e in call_args.events)
+
+    async def test_stream_response_client_disconnect_during_error_event(
+        self,
+        mock_database,
+        mock_user_message,
+        mock_config,
+        mock_thread_id,
+        mock_model_uri,
+    ):
+        """Generic exception followed by CancelledError: re-raise, persist content with ERROR status."""
+        mock_agent = MagicMock()
+
+        async def mock_astream(*args, **kwargs):
+            raise Exception("Something went wrong")
+            yield  # Makes this an async generator
+
+        mock_agent.astream = mock_astream
+
+        gen = stream_response(
+            database=mock_database,
+            agent=mock_agent,
+            user_message=mock_user_message,
+            config=mock_config,
+            thread_id=mock_thread_id,
+            model_uri=mock_model_uri,
+        )
+
+        # Pull the error event, then simulate the client disconnecting before
+        # the generator can yield it (the inner `yield event.to_sse()`)
+        first_event = await gen.__anext__()
+        assert '"type":"error"' in first_event
+        assert ErrorMessage.UNEXPECTED in first_event
+
+        with pytest.raises(asyncio.CancelledError):
+            await gen.athrow(asyncio.CancelledError())
+
+        mock_database.create_message.assert_called_once()
+        call_args = mock_database.create_message.call_args[0][0]
+        assert call_args.status == MessageStatus.ERROR
+        assert call_args.content == ErrorMessage.UNEXPECTED
+        assert call_args.events is not None
+        assert any(e["type"] == "error" for e in call_args.events)
