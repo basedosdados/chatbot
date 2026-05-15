@@ -107,7 +107,7 @@ async def send_message(
     user_id: UserID,
     running_runs: RunningRuns,
 ) -> StreamingResponse:
-    run_id = str(uuid.uuid4())
+    run_id = uuid.uuid4()
 
     config = ConfigDict(
         run_id=run_id,
