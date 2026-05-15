@@ -1,12 +1,14 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
 from app.api.schemas import ConfigDict, UserMessage
-from app.api.streaming import stream_response
+from app.api.streaming import run_agent, sse_forwarder
+from app.api.streaming.schemas import StreamEvent
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
@@ -98,6 +100,7 @@ async def list_messages(
 
 @router.post("/threads/{thread_id}/messages")
 async def send_message(
+    request: Request,
     thread_id: str,
     user_message: UserMessage,
     agent: Agent,
@@ -120,15 +123,37 @@ async def send_message(
 
     message = await database.create_message(message_create)
 
-    return StreamingResponse(
-        stream_response(
+    queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+    task = asyncio.create_task(
+        run_agent(
             database=database,
             agent=agent,
             user_message=message,
             config=config,
             thread_id=thread_id,
             model_uri=settings.MODEL_URI,
+            queue=queue,
         ),
+        name=f"run_agent:{run_id}",
+    )
+
+    running_runs: dict[str, asyncio.Task] = request.app.state.running_runs
+    running_runs[run_id] = task
+
+    def _cleanup(t: asyncio.Task) -> None:
+        running_runs.pop(run_id, None)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.opt(exception=exc).error(
+                f"run_agent task {run_id} crashed without persisting"
+            )
+
+    task.add_done_callback(_cleanup)
+
+    return StreamingResponse(
+        sse_forwarder(queue),
         status_code=status.HTTP_201_CREATED,
     )
 
