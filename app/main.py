@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -90,8 +91,24 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             )
 
             app.state.agent = agent
+            app.state.running_runs: dict[str, asyncio.Task] = {}
 
             yield
+
+            # Drain in-flight agent runs so they have a chance to persist.
+            running = list(app.state.running_runs.values())
+            if running:
+                logger.info(f"Draining {len(running)} in-flight agent runs")
+                done, pending = await asyncio.wait(
+                    running, timeout=settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS
+                )
+                if pending:
+                    logger.warning(
+                        f"{len(pending)} agent runs did not finish within "
+                        f"{settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS}s; cancelling"
+                    )
+                    for task in pending:
+                        task.cancel()
 
         await engine.dispose()
     except Exception:
