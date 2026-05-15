@@ -8,13 +8,13 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.api.schemas import ConfigDict
-from app.api.streaming.stream import (
+from app.api.streaming.agent_runner import (
     ErrorMessage,
     _parse_thinking,
     _process_chunk,
     _truncate_json,
-    stream_response,
 )
+from app.api.streaming.stream import stream_response
 from app.db.models import Message, MessageRole, MessageStatus
 
 
