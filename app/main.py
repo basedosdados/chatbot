@@ -91,11 +91,12 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             )
 
             app.state.agent = agent
-            app.state.running_runs: dict[str, asyncio.Task] = {}
+            app.state.running_runs = {}
 
             yield
 
-            # Drain in-flight agent runs so they have a chance to persist.
+            # Drain in-flight agent runs so they have a chance to persist
+            # NOTE: The connection pool must be open to persist checkpoints
             running = list(app.state.running_runs.values())
             if running:
                 logger.info(f"Draining {len(running)} in-flight agent runs")
@@ -105,7 +106,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
                 if pending:
                     logger.warning(
                         f"{len(pending)} agent runs did not finish within "
-                        f"{settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS}s; cancelling"
+                        f"{settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS}s; cancelling..."
                     )
                     for task in pending:
                         task.cancel()

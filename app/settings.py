@@ -150,7 +150,7 @@ class Settings(BaseSettings):
     )
 
     # ============================================================
-    # ==                  Streaming / shutdown                  ==
+    # ==                    Shutdown settings                   ==
     # ============================================================
     SHUTDOWN_DRAIN_TIMEOUT_SECONDS: float = Field(
         default=25.0,

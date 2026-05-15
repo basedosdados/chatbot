@@ -9,18 +9,15 @@ from loguru import logger
 from app.api.schemas import ConfigDict
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
-from app.db.database import AsyncDatabase
+from app.db.database import AsyncDatabase, sessionmaker
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
 
 
 class ErrorMessage:
-    UNEXPECTED = (
-        "Ops, algo deu errado! Ocorreu um erro inesperado. Por favor, tente novamente. "
-        "Se o problema persistir, avise-nos."
-    )
+    UNEXPECTED = "Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos."
 
     MODEL_CALL_LIMIT_REACHED = (
-        "Ops, essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
+        "Essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
         "Por favor, tente ser mais específico ou divida sua pergunta em partes menores."
     )
 
@@ -197,19 +194,27 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
 
 
 async def run_agent(
-    database: AsyncDatabase,
     agent: CompiledStateGraph,
-    user_message: Message,
     config: ConfigDict,
     thread_id: str,
+    user_message: Message,
     model_uri: str,
     queue: asyncio.Queue[StreamEvent],
 ):
-    """Drive the agent to completion and push events onto the queue.
+    """Run the agent to completion and push events onto the queue.
 
     Owns persistence: writes the assistant `messages` row in `finally` and
-    emits a terminal `complete` event with the persisted run_id. Never raises;
-    all errors are converted to an `error` event plus an ERROR-status row.
+    emits a terminal `complete` event carrying either the persisted run_id
+    (on success) or `error_details` (if persistence fails). Exactly one
+    `complete` event is emitted per run.
+
+    Args:
+        agent (CompiledStateGraph): Agent compiled state graph.
+        config (ConfigDict): Config for agent execution.
+        thread_id (str): Thread unique identifier.
+        user_message (Message): User message.
+        model_uri (str): Model URI.
+        queue (asyncio.Queue[StreamEvent]): Events queue.
     """
     events = []
     artifacts = []
@@ -236,7 +241,7 @@ async def run_agent(
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content
-                # Distinguish model-call-limit from a normal final answer
+                # Distinguish model-call-limit from a normal final answer (fragile)
                 if assistant_message == ErrorMessage.MODEL_CALL_LIMIT_REACHED:
                     status = MessageStatus.MODEL_CALL_LIMIT
                 else:
@@ -245,17 +250,17 @@ async def run_agent(
             events.append(event.model_dump())
             await queue.put(event)
     except Exception as e:
-        logger.exception(f"Unexpected error responding message {config['run_id']}:")
+        logger.exception(f"Unexpected error in run {config['run_id']}:")
         assistant_message = ErrorMessage.UNEXPECTED
         status = MessageStatus.ERROR
-        error_event = StreamEvent(
+        event = StreamEvent(
             type="error",
             data=EventData(
                 content=assistant_message, error_details={"message": str(e)}
             ),
         )
-        events.append(error_event.model_dump())
-        await queue.put(error_event)
+        events.append(event.model_dump())
+        await queue.put(event)
     finally:
         message_create = MessageCreate(
             id=config["run_id"],
@@ -269,18 +274,20 @@ async def run_agent(
             status=status or MessageStatus.ERROR,
         )
         try:
-            persisted = await database.create_message(message_create)
-            persisted_id = str(persisted.id)
+            async with sessionmaker() as session:
+                database = AsyncDatabase(session)
+                message = await database.create_message(message_create)
+            message_id = str(message.id)
             error_details = None
         except Exception as e:
             logger.exception(
                 f"Failed to persist assistant message for run {config['run_id']}:"
             )
-            persisted_id = None
+            message_id = None
             error_details = {"reason": "persistence_failed", "message": str(e)}
         await queue.put(
             StreamEvent(
                 type="complete",
-                data=EventData(run_id=persisted_id, error_details=error_details),
+                data=EventData(run_id=message_id, error_details=error_details),
             )
         )

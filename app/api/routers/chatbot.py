@@ -7,7 +7,7 @@ from loguru import logger
 
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
-from app.api.streaming import run_agent, sse_forwarder
+from app.api.streaming import run_agent, stream_events
 from app.api.streaming.schemas import StreamEvent
 from app.db.models import (
     FeedbackCreate,
@@ -98,14 +98,18 @@ async def list_messages(
     return await database.get_messages(thread.id, order_by)
 
 
-@router.post("/threads/{thread_id}/messages", response_class=StreamingResponse)
+@router.post(
+    "/threads/{thread_id}/messages",
+    response_class=StreamingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def send_message(
     thread_id: str,
     user_message: UserMessage,
-    agent: Agent,
     database: AsyncDB,
-    user_id: UserID,
+    agent: Agent,
     running_runs: RunningRuns,
+    user_id: UserID,
 ) -> StreamingResponse:
     run_id = str(uuid.uuid4())
 
@@ -124,13 +128,13 @@ async def send_message(
     message = await database.create_message(message_create)
 
     queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
     task = asyncio.create_task(
         run_agent(
-            database=database,
             agent=agent,
-            user_message=message,
             config=config,
             thread_id=thread_id,
+            user_message=message,
             model_uri=settings.MODEL_URI,
             queue=queue,
         ),
@@ -140,21 +144,22 @@ async def send_message(
     running_runs[run_id] = task
 
     def _cleanup(task: asyncio.Task):
-        running_runs.pop(run_id, None)
+        del running_runs[run_id]
+
         if task.cancelled():
+            logger.warning(f"run_agent task {run_id} was cancelled before persisting")
             return
-        exc = task.exception()
-        if exc is not None:
-            logger.opt(exception=exc).error(
+
+        e = task.exception()
+
+        if e is not None:
+            logger.opt(exception=e).error(
                 f"run_agent task {run_id} crashed without persisting"
             )
 
     task.add_done_callback(_cleanup)
 
-    return StreamingResponse(
-        sse_forwarder(queue),
-        status_code=status.HTTP_201_CREATED,
-    )
+    return StreamingResponse(stream_events(queue))
 
 
 @router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)
