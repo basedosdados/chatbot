@@ -83,7 +83,7 @@ def access_token(user_id: str) -> str:
 
 
 @pytest.fixture
-def client(database: AsyncDatabase):
+def client(database: AsyncDatabase, monkeypatch: pytest.MonkeyPatch):
     """Test client with mocked agent, database, and feedback sender."""
 
     @asynccontextmanager
@@ -101,6 +101,20 @@ def client(database: AsyncDatabase):
     app.dependency_overrides[get_database] = get_database_override
     app.dependency_overrides[get_feedback_sender] = get_feedback_sender_override
     app.router.lifespan_context = mock_lifespan
+
+    # The producer (run_agent) builds its own AsyncDatabase via sessionmaker()
+    # so the session lifetime matches the producer rather than the request.
+    # In tests, route it to the same testcontainers DB the dependency uses.
+    @asynccontextmanager
+    async def fake_sessionmaker():
+        yield None
+
+    monkeypatch.setattr(
+        "app.api.streaming.agent_runner.sessionmaker", fake_sessionmaker
+    )
+    monkeypatch.setattr(
+        "app.api.streaming.agent_runner.AsyncDatabase", lambda session: database
+    )
 
     with TestClient(app) as client:
         yield client
