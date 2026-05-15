@@ -1,10 +1,16 @@
+import asyncio
 import json
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.graph.state import CompiledStateGraph
+from loguru import logger
 
+from app.api.schemas import ConfigDict
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
+from app.db.database import AsyncDatabase
+from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
 
 
 class ErrorMessage:
@@ -188,3 +194,75 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             )
             return StreamEvent(type="final_answer", data=event_data)
     return None
+
+
+async def run_agent(
+    database: AsyncDatabase,
+    agent: CompiledStateGraph,
+    user_message: Message,
+    config: ConfigDict,
+    thread_id: str,
+    model_uri: str,
+    queue: asyncio.Queue[StreamEvent],
+) -> None:
+    """Drive the agent to completion and push events onto the queue.
+
+    Owns persistence: writes the assistant `messages` row in `finally` and
+    emits a terminal `complete` event with the persisted run_id. Never raises;
+    all errors are converted to an `error` event plus an ERROR-status row.
+    """
+    events: list[dict] = []
+    artifacts: list = []
+    assistant_message = ""
+    status: MessageStatus | None = None
+
+    try:
+        async for mode, chunk in agent.astream(
+            input={"messages": [{"role": "user", "content": user_message.content}]},
+            config=config,
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "values":
+                continue
+
+            event = _process_chunk(chunk)
+            if event is None:
+                continue
+
+            if event.type == "tool_output":
+                for output in event.data.tool_outputs:
+                    if output.artifact:
+                        artifacts.append(output.artifact)
+            elif event.type == "final_answer":
+                assistant_message = event.data.content
+                # Distinguish model-call-limit from a normal final answer.
+                if assistant_message == ErrorMessage.MODEL_CALL_LIMIT_REACHED:
+                    status = MessageStatus.MODEL_CALL_LIMIT
+                else:
+                    status = MessageStatus.SUCCESS
+
+            events.append(event.model_dump())
+            await queue.put(event)
+    except Exception:
+        logger.exception(f"Unexpected error responding message {config['run_id']}:")
+        assistant_message = ErrorMessage.UNEXPECTED
+        status = MessageStatus.ERROR
+        error_event = StreamEvent(
+            type="error", data=EventData(content=assistant_message)
+        )
+        events.append(error_event.model_dump())
+        await queue.put(error_event)
+    finally:
+        message_create = MessageCreate(
+            id=config["run_id"],
+            thread_id=thread_id,
+            user_message_id=user_message.id,
+            model_uri=model_uri,
+            role=MessageRole.ASSISTANT,
+            content=assistant_message,
+            artifacts=artifacts or None,
+            events=events or None,
+            status=status or MessageStatus.ERROR,
+        )
+        message = await database.create_message(message_create)
+        await queue.put(StreamEvent(type="complete", data=EventData(run_id=message.id)))
