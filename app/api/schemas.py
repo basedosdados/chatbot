@@ -1,11 +1,10 @@
-import uuid
 from typing import Any, TypedDict
 
 from pydantic import BaseModel
 
 
 class ConfigDict(TypedDict):
-    run_id: uuid.UUID
+    run_id: str
     configurable: dict[str, Any]
 
 

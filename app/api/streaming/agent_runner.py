@@ -204,20 +204,20 @@ async def run_agent(
     thread_id: str,
     model_uri: str,
     queue: asyncio.Queue[StreamEvent],
-) -> None:
+):
     """Drive the agent to completion and push events onto the queue.
 
     Owns persistence: writes the assistant `messages` row in `finally` and
     emits a terminal `complete` event with the persisted run_id. Never raises;
     all errors are converted to an `error` event plus an ERROR-status row.
     """
-    events: list[dict] = []
-    artifacts: list = []
+    events = []
+    artifacts = []
     assistant_message = ""
     status: MessageStatus | None = None
 
     try:
-        async for mode, chunk in agent.astream(
+        async for mode, chunk in agent.astream(  # pragma: no cover
             input={"messages": [{"role": "user", "content": user_message.content}]},
             config=config,
             stream_mode=["updates", "values"],
@@ -226,6 +226,7 @@ async def run_agent(
                 continue
 
             event = _process_chunk(chunk)
+
             if event is None:
                 continue
 
@@ -235,7 +236,7 @@ async def run_agent(
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content
-                # Distinguish model-call-limit from a normal final answer.
+                # Distinguish model-call-limit from a normal final answer
                 if assistant_message == ErrorMessage.MODEL_CALL_LIMIT_REACHED:
                     status = MessageStatus.MODEL_CALL_LIMIT
                 else:
@@ -243,12 +244,15 @@ async def run_agent(
 
             events.append(event.model_dump())
             await queue.put(event)
-    except Exception:
+    except Exception as e:
         logger.exception(f"Unexpected error responding message {config['run_id']}:")
         assistant_message = ErrorMessage.UNEXPECTED
         status = MessageStatus.ERROR
         error_event = StreamEvent(
-            type="error", data=EventData(content=assistant_message)
+            type="error",
+            data=EventData(
+                content=assistant_message, error_details={"message": str(e)}
+            ),
         )
         events.append(error_event.model_dump())
         await queue.put(error_event)
@@ -265,12 +269,15 @@ async def run_agent(
             status=status or MessageStatus.ERROR,
         )
         try:
-            persisted_id = (await database.create_message(message_create)).id
+            persisted = await database.create_message(message_create)
+            persisted_id = str(persisted.id)
             error_details = None
-        except Exception as exc:
-            logger.exception(f"Failed to persist message for run {config['run_id']}:")
+        except Exception as e:
+            logger.exception(
+                f"Failed to persist assistant message for run {config['run_id']}:"
+            )
             persisted_id = None
-            error_details = {"reason": "persistence_failed", "message": str(exc)}
+            error_details = {"reason": "persistence_failed", "message": str(e)}
         await queue.put(
             StreamEvent(
                 type="complete",

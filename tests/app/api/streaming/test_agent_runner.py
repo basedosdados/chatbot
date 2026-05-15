@@ -23,7 +23,7 @@ def model_uri() -> str:
 
 @pytest.fixture
 def config(thread_id: str) -> ConfigDict:
-    return {"run_id": uuid.uuid4(), "configurable": {"thread_id": thread_id}}
+    return {"run_id": str(uuid.uuid4()), "configurable": {"thread_id": thread_id}}
 
 
 @pytest.fixture

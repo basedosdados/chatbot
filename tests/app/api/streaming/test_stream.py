@@ -401,7 +401,7 @@ class TestProcessChunk:
 class TestSseForwarder:
     async def test_forwards_until_complete_then_exits(self):
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
-        run_id = uuid.uuid4()
+        run_id = str(uuid.uuid4())
         await queue.put(StreamEvent(type="final_answer", data=EventData(content="hi")))
         await queue.put(StreamEvent(type="complete", data=EventData(run_id=run_id)))
 
@@ -412,13 +412,13 @@ class TestSseForwarder:
         assert len(out) == 2
         assert '"type":"final_answer"' in out[0]
         assert '"type":"complete"' in out[1]
-        assert str(run_id) in out[1]
+        assert run_id in out[1]
 
     async def test_forwards_error_event_before_complete(self):
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
         await queue.put(StreamEvent(type="error", data=EventData(content="bad")))
         await queue.put(
-            StreamEvent(type="complete", data=EventData(run_id=uuid.uuid4()))
+            StreamEvent(type="complete", data=EventData(run_id=str(uuid.uuid4())))
         )
 
         out = []

@@ -89,7 +89,7 @@ def client(database: AsyncDatabase):
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
         app.state.agent = MockAgent()
-        app.state.running_runs: dict[uuid.UUID, asyncio.Task] = {}
+        app.state.running_runs: dict[str, asyncio.Task] = {}
         yield
 
     def get_database_override():
