@@ -1,4 +1,5 @@
-# Claude
+# Agents
+.agents/
 .claude/
 
 # Python-generated files
