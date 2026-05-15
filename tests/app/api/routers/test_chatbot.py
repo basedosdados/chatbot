@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -88,6 +89,7 @@ def client(database: AsyncDatabase):
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
         app.state.agent = MockAgent()
+        app.state.running_runs: dict[str, asyncio.Task] = {}
         yield
 
     def get_database_override():
@@ -410,6 +412,54 @@ class TestSendMessageEndpoint:
             json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_send_message_persists_when_client_disconnects(
+        self,
+        client: TestClient,
+        access_token: str,
+        thread: Thread,
+        database: AsyncDatabase,
+    ):
+        """Producer survives client disconnect and still writes the assistant row.
+
+        Reads one SSE event then aborts the stream. The background producer
+        must still complete (drive the agent, persist the row).
+        """
+        import time
+        from unittest.mock import patch
+
+        # Spy on database.create_message to count how many times it is called.
+        # The route handler calls it once for the user message; run_agent's
+        # finally block calls it a second time for the assistant message.
+        original_create_message = database.create_message
+        call_count = []
+
+        async def spy_create_message(message_create):
+            result = await original_create_message(message_create)
+            call_count.append(result)
+            return result
+
+        with patch.object(database, "create_message", side_effect=spy_create_message):
+            with client.stream(
+                method="POST",
+                url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+                json={"content": "Hello, chatbot!"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            ) as response:
+                assert response.status_code == status.HTTP_201_CREATED
+                # Read only the first SSE event, then drop the connection.
+                for _ in response.iter_lines():
+                    break
+
+        # Give the background producer task time to finish writing the assistant row.
+        time.sleep(1.0)
+
+        # The producer's finally block must have persisted the assistant message
+        # regardless of whether the consumer was still listening.
+        assert len(call_count) >= 2, (
+            f"Expected at least 2 create_message calls (user + assistant), "
+            f"got {len(call_count)}. Producer may not have survived client disconnect."
+        )
 
 
 class TestUpsertFeedbackEndpoint:
