@@ -264,5 +264,11 @@ async def run_agent(
             events=events or None,
             status=status or MessageStatus.ERROR,
         )
-        message = await database.create_message(message_create)
-        await queue.put(StreamEvent(type="complete", data=EventData(run_id=message.id)))
+        try:
+            persisted_id = (await database.create_message(message_create)).id
+        except Exception:
+            logger.exception(f"Failed to persist message for run {config['run_id']}:")
+            persisted_id = config["run_id"]
+        await queue.put(
+            StreamEvent(type="complete", data=EventData(run_id=persisted_id))
+        )

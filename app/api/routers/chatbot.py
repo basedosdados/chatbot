@@ -98,7 +98,7 @@ async def list_messages(
     return await database.get_messages(thread.id, order_by)
 
 
-@router.post("/threads/{thread_id}/messages")
+@router.post("/threads/{thread_id}/messages", response_class=StreamingResponse)
 async def send_message(
     request: Request,
     thread_id: str,
@@ -106,7 +106,7 @@ async def send_message(
     agent: Agent,
     database: AsyncDB,
     user_id: UserID,
-) -> Message:
+) -> StreamingResponse:
     run_id = str(uuid.uuid4())
 
     config = ConfigDict(

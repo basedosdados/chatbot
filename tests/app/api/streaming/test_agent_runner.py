@@ -200,3 +200,40 @@ class TestRunAgentSurvivesConsumerCancellation:
         # And the complete event is sitting in the queue waiting.
         events = await _drain(queue)
         assert events[-1].type == "complete"
+
+
+class TestRunAgentPersistenceFailure:
+    async def test_complete_still_emitted_when_db_write_fails(
+        self, user_message, config, thread_id, model_uri
+    ):
+        """If `database.create_message` raises, the consumer must still receive
+        a `complete` event — otherwise it hangs on `queue.get()`."""
+        database = MagicMock()
+        database.create_message = AsyncMock(side_effect=RuntimeError("db down"))
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="answer")]}},
+            )
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            database=database,
+            agent=agent,
+            user_message=user_message,
+            config=config,
+            thread_id=thread_id,
+            model_uri=model_uri,
+            queue=queue,
+        )
+
+        events = await _drain(queue)
+        assert events[-1].type == "complete"
+        # When persistence fails, fall back to config["run_id"] so the client
+        # still has a correlation id.
+        assert events[-1].data.run_id == config["run_id"]
