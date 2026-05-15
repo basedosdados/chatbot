@@ -249,14 +249,15 @@ async def run_agent(
 
             events.append(event.model_dump())
             await queue.put(event)
-    except Exception as e:
+    except Exception:
         logger.exception(f"Unexpected error in run {config['run_id']}:")
         assistant_message = ErrorMessage.UNEXPECTED
         status = MessageStatus.ERROR
         event = StreamEvent(
             type="error",
             data=EventData(
-                content=assistant_message, error_details={"message": str(e)}
+                content=assistant_message,
+                error_details={"reason": "agent_failed"},
             ),
         )
         events.append(event.model_dump())
@@ -279,12 +280,12 @@ async def run_agent(
                 message = await database.create_message(message_create)
             message_id = str(message.id)
             error_details = None
-        except Exception as e:
+        except Exception:
             logger.exception(
                 f"Failed to persist assistant message for run {config['run_id']}:"
             )
             message_id = None
-            error_details = {"reason": "persistence_failed", "message": str(e)}
+            error_details = {"reason": "persistence_failed"}
         await queue.put(
             StreamEvent(
                 type="complete",

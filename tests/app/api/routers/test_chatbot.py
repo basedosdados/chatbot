@@ -443,16 +443,16 @@ class TestSendMessageEndpoint:
             headers={"Authorization": f"Bearer {access_token}"},
         ) as response:
             assert response.status_code == status.HTTP_201_CREATED
-            # Read only the first SSE event, then drop the connection.
+            # Read only the first SSE event, then drop the connection
             for _ in response.iter_lines():
                 break
 
-        # Give the background producer task time to finish persisting.
+        # Give the background producer task time to finish persisting
         time.sleep(1.0)
 
         # Both the user message (written by the route handler) and the
-        # assistant message (written by run_agent's finally block) must be in
-        # the DB, regardless of whether the consumer was still listening
+        # assistant message (written by run_agent's finally block) must be
+        # in the DB, regardless of whether the consumer was still listening.
         messages = client.get(
             url=f"/api/v1/chatbot/threads/{thread.id}/messages",
             headers={"Authorization": f"Bearer {access_token}"},

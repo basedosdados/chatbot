@@ -545,6 +545,7 @@ class TestRunAgent:
         events = await self._drain(queue)
         assert [e.type for e in events] == ["error", "complete"]
         assert events[0].data.content == ErrorMessage.UNEXPECTED
+        assert events[0].data.error_details == {"reason": "agent_failed"}
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
@@ -642,12 +643,9 @@ class TestRunAgent:
 
         complete = events[-1]
         assert complete.type == "complete"
-        # No run_id - the message was never persisted, so there is nothing
-        # for the client to correlate against.
         assert complete.data.run_id is None
-        # error_details signals the failure mode to the client.
-        assert complete.data.error_details is not None
-        assert complete.data.error_details["reason"] == "persistence_failed"
+        assert complete.data.error_details == {"reason": "persistence_failed"}
+        assert "db down" not in str(complete.data.error_details)
 
     async def test_consumer_cancel_does_not_cancel_producer(
         self,
@@ -679,16 +677,16 @@ class TestRunAgent:
             )
         )
 
-        # Simulate the consumer never attaching: just await the producer.
+        # Simulate the consumer never attaching: just await the producer
         await asyncio.wait_for(task, timeout=2.0)
 
-        # Producer persisted the message regardless of consumer presence.
+        # Producer persisted the message regardless of consumer presence
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.SUCCESS
         assert message.content == "Final answer"
 
-        # The complete event is sitting in the queue waiting.
+        # The complete event is sitting in the queue waiting
         events = await self._drain(queue)
         assert events[-1].type == "complete"
