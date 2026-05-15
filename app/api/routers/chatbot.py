@@ -1,11 +1,11 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
+from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, sse_forwarder
 from app.api.streaming.schemas import StreamEvent
@@ -100,12 +100,12 @@ async def list_messages(
 
 @router.post("/threads/{thread_id}/messages", response_class=StreamingResponse)
 async def send_message(
-    request: Request,
     thread_id: str,
     user_message: UserMessage,
     agent: Agent,
     database: AsyncDB,
     user_id: UserID,
+    running_runs: RunningRuns,
 ) -> StreamingResponse:
     run_id = str(uuid.uuid4())
 
@@ -137,14 +137,13 @@ async def send_message(
         name=f"run_agent:{run_id}",
     )
 
-    running_runs: dict[str, asyncio.Task] = request.app.state.running_runs
     running_runs[run_id] = task
 
-    def _cleanup(t: asyncio.Task) -> None:
+    def _cleanup(task: asyncio.Task):
         running_runs.pop(run_id, None)
-        if t.cancelled():
+        if task.cancelled():
             return
-        exc = t.exception()
+        exc = task.exception()
         if exc is not None:
             logger.opt(exception=exc).error(
                 f"run_agent task {run_id} crashed without persisting"
