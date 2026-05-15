@@ -233,7 +233,11 @@ class TestRunAgentPersistenceFailure:
         )
 
         events = await _drain(queue)
-        assert events[-1].type == "complete"
-        # When persistence fails, fall back to config["run_id"] so the client
-        # still has a correlation id.
-        assert events[-1].data.run_id == config["run_id"]
+        complete = events[-1]
+        assert complete.type == "complete"
+        # No run_id — the message was never persisted, so there is nothing
+        # for the client to correlate against.
+        assert complete.data.run_id is None
+        # error_details signals the failure mode to the client.
+        assert complete.data.error_details is not None
+        assert complete.data.error_details["reason"] == "persistence_failed"
