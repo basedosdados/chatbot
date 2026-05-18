@@ -120,7 +120,9 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         raise
     finally:
         await engine.dispose()
-        logger.complete()
+        # No-ops when LOG_ENQUEUE=False; wait for enqueued messages
+        # and remove handlers to avoid leaked-semaphore warnings when LOG_ENQUEUE=True.
+        await logger.complete()
         logger.remove()
 
 
