@@ -110,11 +110,18 @@ async def lifespan(app: FastAPI):  # pragma: no cover
                     )
                     for task in pending:
                         task.cancel()
-
-        await engine.dispose()
+                    # Wait for cancelled tasks
+                    await asyncio.wait(pending)
+                logger.info(
+                    f"Drain complete: {len(done)} finished, {len(pending)} cancelled"
+                )
     except Exception:
         logger.exception("Lifespan failed:")
         raise
+    finally:
+        await engine.dispose()
+        logger.complete()
+        logger.remove()
 
 
 app = FastAPI(lifespan=lifespan)

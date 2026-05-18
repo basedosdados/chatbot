@@ -14,12 +14,16 @@ from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
 
 
 class ErrorMessage:
-    UNEXPECTED = "Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos."
+    INTERRUPTED = (
+        "A conexão com o servidor foi interrompida. Por favor, tente novamente."
+    )
 
     MODEL_CALL_LIMIT_REACHED = (
         "Essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
         "Por favor, tente ser mais específico ou divida sua pergunta em partes menores."
     )
+
+    UNEXPECTED = "Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos."
 
 
 def _truncate_json(
@@ -249,6 +253,11 @@ async def run_agent(
 
             events.append(event.model_dump())
             await queue.put(event)
+    except asyncio.CancelledError:
+        if status is None:
+            assistant_message = ErrorMessage.INTERRUPTED
+            status = MessageStatus.INTERRUPTED
+        raise
     except Exception:
         logger.exception(f"Unexpected error in run {config['run_id']}:")
         assistant_message = ErrorMessage.UNEXPECTED

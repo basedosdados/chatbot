@@ -146,17 +146,18 @@ async def send_message(
     def _cleanup(task: asyncio.Task):  # pragma: no cover
         del running_runs[run_id]
         if task.cancelled():
-            logger.warning(f"run_agent task {run_id} was cancelled before persisting")
+            logger.warning(f"run_agent task {run_id} was cancelled mid-run")
             return
         e = task.exception()
         if e is not None:
-            logger.opt(exception=e).error(
-                f"run_agent task {run_id} crashed without persisting"
-            )
+            logger.opt(exception=e).error(f"run_agent task {run_id} crashed mid-run:")
 
     task.add_done_callback(_cleanup)
 
-    return StreamingResponse(stream_events(queue), status_code=status.HTTP_201_CREATED)
+    return StreamingResponse(
+        stream_events(queue),
+        status_code=status.HTTP_201_CREATED,
+    )
 
 
 @router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)

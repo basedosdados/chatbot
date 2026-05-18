@@ -42,6 +42,7 @@ class MessageStatus(str, Enum):
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
     MODEL_CALL_LIMIT = "MODEL_CALL_LIMIT"
+    INTERRUPTED = "INTERRUPTED"
 
 
 class MessageCreate(SQLModel):
