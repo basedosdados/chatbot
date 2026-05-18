@@ -690,3 +690,104 @@ class TestRunAgent:
         # The complete event is sitting in the queue waiting
         events = await self._drain(queue)
         assert events[-1].type == "complete"
+
+    async def test_cancellation_before_final_answer_persists_interrupted(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """Cancelling the producer before any final_answer persists row with
+        INTERRUPTED content + INTERRUPTED status, and re-raises CancelledError."""
+        agent = MagicMock()
+        started = asyncio.Event()
+
+        async def astream(*args, **kwargs):
+            started.set()
+            # Block until cancelled — never yields a chunk
+            await asyncio.sleep(60)
+            yield  # make this a generator
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        task = asyncio.create_task(
+            run_agent(
+                agent=agent,
+                config=config,
+                thread_id=thread_id,
+                user_message=mock_user_message,
+                model_uri=MODEL_URI,
+                queue=queue,
+            )
+        )
+
+        # Wait until the producer reach the await inside agent.astream
+        await started.wait()
+
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert task.cancelled()
+
+        mock_database.create_message.assert_called_once()
+        message = mock_database.create_message.call_args[0][0]
+        assert isinstance(message, MessageCreate)
+        assert message.status == MessageStatus.INTERRUPTED
+        assert message.content == ErrorMessage.INTERRUPTED
+
+    async def test_cancellation_after_final_answer_preserves_success(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """Cancelling the producer after a final_answer has been processed
+        preserves the SUCCESS status — the CancelledError branch only sets
+        INTERRUPTED when no status has been observed yet."""
+        agent = MagicMock()
+        processed = asyncio.Event()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Final answer")]}},
+            )
+            # Reached when the producer asks for the next chunk, i.e., after it
+            # has set status=SUCCESS for the final_answer above.
+            processed.set()
+            await asyncio.sleep(60)
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        task = asyncio.create_task(
+            run_agent(
+                agent=agent,
+                config=config,
+                thread_id=thread_id,
+                user_message=mock_user_message,
+                model_uri=MODEL_URI,
+                queue=queue,
+            )
+        )
+
+        # Wait until the final_answer event is processed
+        await processed.wait()
+
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert task.cancelled()
+
+        mock_database.create_message.assert_called_once()
+        message = mock_database.create_message.call_args[0][0]
+        assert isinstance(message, MessageCreate)
+        assert message.status == MessageStatus.SUCCESS
+        assert message.content == "Final answer"
