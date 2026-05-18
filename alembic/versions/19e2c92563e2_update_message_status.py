@@ -1,4 +1,4 @@
-"""Add MODEL_CALL_LIMIT message status.
+"""Add MODEL_CALL_LIMIT and INTERRUPTED message statuses.
 
 Revision ID: 19e2c92563e2
 Revises: 1c6556bb74f2
@@ -17,7 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add MODEL_CALL_LIMIT to the messagestatus enum.
+    """Add MODEL_CALL_LIMIT and INTERRUPTED to the messagestatus enum.
 
     Note: `ALTER TYPE ... ADD VALUE` cannot run inside a transaction block
     on PostgreSQL pre-v12, so we use an autocommit block.
@@ -26,15 +26,16 @@ def upgrade() -> None:
         op.execute(
             "ALTER TYPE messagestatus ADD VALUE IF NOT EXISTS 'MODEL_CALL_LIMIT'"
         )
+        op.execute("ALTER TYPE messagestatus ADD VALUE IF NOT EXISTS 'INTERRUPTED'")
 
 
 def downgrade() -> None:
     """Downgrade is intentionally unsupported.
 
     Postgres cannot drop enum values, and rebuilding the type would require
-    remapping existing MODEL_CALL_LIMIT rows to another status — losing the
-    diagnostic signal this migration was added to capture.
+    remapping existing MODEL_CALL_LIMIT and INTERRUPTED rows to another status,
+    losing the diagnostic signal these statuses were added to capture.
     """
     raise NotImplementedError(
-        "Downgrade not supported: removing MODEL_CALL_LIMIT would silently rewrite rows."
+        "Downgrade not supported: removing enum values would silently rewrite rows."
     )
