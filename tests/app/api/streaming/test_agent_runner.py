@@ -440,7 +440,7 @@ class TestProcessChunk:
         event = _process_chunk(chunk)
 
         assert event is not None
-        assert event.type == "final_answer"
+        assert event.type == "model_call_limit"
         assert event.data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
 
     def test_model_call_limit_passthrough_chunk_returns_none(self):
@@ -582,7 +582,7 @@ class TestRunAgent:
         )
 
         events = await self._drain(queue)
-        assert [e.type for e in events] == ["final_answer", "complete"]
+        assert [e.type for e in events] == ["model_call_limit", "complete"]
         assert events[0].data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
         assert events[-1].data.run_id == config["run_id"]
 
