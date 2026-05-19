@@ -193,7 +193,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             event_data = EventData(
                 content=ErrorMessage.MODEL_CALL_LIMIT_REACHED, tool_calls=None
             )
-            return StreamEvent(type="final_answer", data=event_data)
+            return StreamEvent(type="model_call_limit", data=event_data)
     return None
 
 
@@ -245,11 +245,10 @@ async def run_agent(
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content
-                # Distinguish model-call-limit from a normal final answer (fragile)
-                if assistant_message == ErrorMessage.MODEL_CALL_LIMIT_REACHED:
-                    status = MessageStatus.MODEL_CALL_LIMIT
-                else:
-                    status = MessageStatus.SUCCESS
+                status = MessageStatus.SUCCESS
+            elif event.type == "model_call_limit":
+                assistant_message = event.data.content
+                status = MessageStatus.MODEL_CALL_LIMIT
 
             events.append(event.model_dump())
             await queue.put(event)

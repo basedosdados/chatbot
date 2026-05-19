@@ -22,6 +22,7 @@ EventType = Literal[
     "tool_call",
     "tool_output",
     "final_answer",
+    "model_call_limit",
     "error",
     "complete",
 ]
