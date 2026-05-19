@@ -1,4 +1,3 @@
-import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, JsonValue
@@ -23,13 +22,14 @@ EventType = Literal[
     "tool_call",
     "tool_output",
     "final_answer",
+    "model_call_limit",
     "error",
     "complete",
 ]
 
 
 class EventData(BaseModel):
-    run_id: uuid.UUID | None = None
+    run_id: str | None = None
     content: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_outputs: list[ToolOutput] | None = None

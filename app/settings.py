@@ -149,6 +149,18 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ============================================================
+    # ==                    Shutdown settings                   ==
+    # ============================================================
+    SHUTDOWN_DRAIN_TIMEOUT_SECONDS: float = Field(
+        default=25.0,
+        description=(
+            "Seconds to wait for in-flight agent runs to finish during lifespan "
+            "shutdown before cancelling. Must stay below the pod's "
+            "terminationGracePeriodSeconds (k8s default 30s)."
+        ),
+    )
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
 

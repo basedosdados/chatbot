@@ -3,10 +3,12 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
-from app.api.dependencies import Agent, AsyncDB, FeedbackSender, UserID
+from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
-from app.api.streaming import stream_response
+from app.api.streaming import run_agent, stream_events
+from app.api.streaming.schemas import StreamEvent
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
@@ -96,14 +98,19 @@ async def list_messages(
     return await database.get_messages(thread.id, order_by)
 
 
-@router.post("/threads/{thread_id}/messages")
+@router.post(
+    "/threads/{thread_id}/messages",
+    response_class=StreamingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def send_message(
     thread_id: str,
     user_message: UserMessage,
-    agent: Agent,
     database: AsyncDB,
+    agent: Agent,
+    running_runs: RunningRuns,
     user_id: UserID,
-) -> Message:
+) -> StreamingResponse:
     run_id = str(uuid.uuid4())
 
     config = ConfigDict(
@@ -120,15 +127,35 @@ async def send_message(
 
     message = await database.create_message(message_create)
 
-    return StreamingResponse(
-        stream_response(
-            database=database,
+    queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+    task = asyncio.create_task(
+        run_agent(
             agent=agent,
-            user_message=message,
             config=config,
             thread_id=thread_id,
+            user_message=message,
             model_uri=settings.MODEL_URI,
+            queue=queue,
         ),
+        name=f"run_agent:{run_id}",
+    )
+
+    running_runs[run_id] = task
+
+    def _cleanup(task: asyncio.Task):  # pragma: no cover
+        del running_runs[run_id]
+        if task.cancelled():
+            logger.warning(f"run_agent task {run_id} was cancelled mid-run")
+            return
+        e = task.exception()
+        if e is not None:
+            logger.opt(exception=e).error(f"run_agent task {run_id} crashed mid-run:")
+
+    task.add_done_callback(_cleanup)
+
+    return StreamingResponse(
+        stream_events(queue),
         status_code=status.HTTP_201_CREATED,
     )
 

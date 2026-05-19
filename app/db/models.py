@@ -34,13 +34,15 @@ class Thread(ThreadCreate, table=True):
 # ==                              Message Models                              ==
 # ==============================================================================
 class MessageRole(str, Enum):
-    ASSISTANT = "ASSISTANT"
     USER = "USER"
+    ASSISTANT = "ASSISTANT"
 
 
 class MessageStatus(str, Enum):
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
+    INTERRUPTED = "INTERRUPTED"
+    MODEL_CALL_LIMIT = "MODEL_CALL_LIMIT"
 
 
 class MessageCreate(SQLModel):
