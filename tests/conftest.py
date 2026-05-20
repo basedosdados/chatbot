@@ -127,7 +127,7 @@ def assistant_message_create(user_message: Message) -> MessageCreate:
     return MessageCreate(
         thread_id=user_message.thread_id,
         user_message_id=user_message.id,
-        model_uri="mock_model",
+        model_uri="mock-model",
         role=MessageRole.ASSISTANT,
         content="Mock assistant message",
         artifacts=[{"mock_artifact": "artifact"}],
@@ -162,7 +162,7 @@ async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesF
         assistant_message_create = MessageCreate(
             thread_id=user_message.thread_id,
             user_message_id=user_message.id,
-            model_uri="mock_model",
+            model_uri="mock-model",
             role=MessageRole.ASSISTANT,
             content="Mock assistant message",
             artifacts=[{"mock_artifact": "artifact"}],

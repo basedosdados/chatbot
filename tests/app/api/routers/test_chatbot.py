@@ -82,12 +82,13 @@ def access_token(user_id: str) -> str:
 
 
 @pytest.fixture
-def client(database: AsyncDatabase):
+def client(database: AsyncDatabase, monkeypatch: pytest.MonkeyPatch):
     """Test client with mocked agent, database, and feedback sender."""
 
     @asynccontextmanager
     async def mock_lifespan(app: FastAPI):
         app.state.agent = MockAgent()
+        app.state.running_runs = {}
         yield
 
     def get_database_override():
@@ -99,6 +100,20 @@ def client(database: AsyncDatabase):
     app.dependency_overrides[get_database] = get_database_override
     app.dependency_overrides[get_feedback_sender] = get_feedback_sender_override
     app.router.lifespan_context = mock_lifespan
+
+    # The producer (run_agent) builds its own AsyncDatabase via sessionmaker()
+    # so the session lifetime matches the producer rather than the request.
+    # In tests, route it to the same testcontainers DB the dependency uses.
+    @asynccontextmanager
+    async def fake_sessionmaker():
+        yield None
+
+    monkeypatch.setattr(
+        "app.api.streaming.agent_runner.sessionmaker", fake_sessionmaker
+    )
+    monkeypatch.setattr(
+        "app.api.streaming.agent_runner.AsyncDatabase", lambda session: database
+    )
 
     with TestClient(app) as client:
         yield client
@@ -410,6 +425,41 @@ class TestSendMessageEndpoint:
             json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_send_message_persists_when_client_disconnects(
+        self, client: TestClient, access_token: str, thread: Thread
+    ):
+        """Test producer survives client disconnect and still writes the assistant message.
+
+        Reads one SSE event then aborts the stream. The background producer
+        must still complete (run the agent, persist the message).
+        """
+        import time
+
+        with client.stream(
+            method="POST",
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            json={"content": "Hello, chatbot!"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        ) as response:
+            assert response.status_code == status.HTTP_201_CREATED
+            # Read only the first SSE event, then drop the connection
+            for _ in response.iter_lines():
+                break
+
+        # Give the background producer task time to finish persisting
+        time.sleep(1.0)
+
+        # Both the user message (written by the route handler) and the
+        # assistant message (written by run_agent's finally block) must be
+        # in the DB, regardless of whether the consumer was still listening.
+        messages = client.get(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert messages.status_code == status.HTTP_200_OK
+        assert len(messages.json()) == 2
 
 
 class TestUpsertFeedbackEndpoint:

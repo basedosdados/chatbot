@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -90,13 +91,39 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             )
 
             app.state.agent = agent
+            app.state.running_runs = {}
 
             yield
 
-        await engine.dispose()
+            # Drain in-flight agent runs so they have a chance to persist
+            # NOTE: The connection pool must be open to persist checkpoints
+            running = list(app.state.running_runs.values())
+            if running:
+                logger.info(f"Draining {len(running)} in-flight agent runs")
+                done, pending = await asyncio.wait(
+                    running, timeout=settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS
+                )
+                if pending:
+                    logger.warning(
+                        f"{len(pending)} agent runs did not finish within "
+                        f"{settings.SHUTDOWN_DRAIN_TIMEOUT_SECONDS}s; cancelling..."
+                    )
+                    for task in pending:
+                        task.cancel()
+                    # Wait for cancelled tasks
+                    await asyncio.wait(pending)
+                logger.info(
+                    f"Drain complete: {len(done)} finished, {len(pending)} cancelled"
+                )
     except Exception:
         logger.exception("Lifespan failed:")
         raise
+    finally:
+        await engine.dispose()
+        # No-ops when LOG_ENQUEUE=False; wait for enqueued messages
+        # and remove handlers to avoid leaked-semaphore warnings when LOG_ENQUEUE=True.
+        await logger.complete()
+        logger.remove()
 
 
 app = FastAPI(lifespan=lifespan)
