@@ -60,6 +60,9 @@ class MessageCreate(SQLModel):
     events: JsonValue | None = Field(
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
+    structured_response: JsonValue | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True))
+    )
     status: MessageStatus = Field(
         sa_column=Column(SAEnum(MessageStatus), nullable=False),
         default=MessageStatus.SUCCESS,

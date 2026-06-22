@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
+from app.agent.schemas import StructuredResponse
 from app.api.schemas import ConfigDict
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
@@ -128,7 +129,27 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             - None for ignored chunks
     """
     if "model" in chunk:
-        ai_messages: list[AIMessage] = chunk["model"]["messages"]
+        update: dict[str, Any] = chunk["model"]
+
+        # When `response_format` is set (see app.main:91), the model node sets `structured_response`
+        # (a StructuredResponse) on the turn it produces the final answer. This is the final answer;
+        # the accompanying structured-output tool call / ToolMessage in `update["messages"]` is
+        # internal and must not be emitted as a tool_call.
+        structured: StructuredResponse | None = update.get("structured_response")
+
+        if structured is not None:
+            response_text = sanitize_markdown_links(structured.response)
+            structured_response = structured.model_dump()
+            structured_response["response"] = response_text
+            return StreamEvent(
+                type="final_answer",
+                data=EventData(
+                    content=response_text,
+                    structured_response=structured_response,
+                ),
+            )
+
+        ai_messages: list[AIMessage] = update["messages"]
 
         # If no messages are returned, the model returned an empty response
         # with no tool calls. This also counts as a final (but empty) answer.
@@ -183,7 +204,8 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         ]
 
         return StreamEvent(
-            type="tool_output", data=EventData(tool_outputs=tool_outputs)
+            type="tool_output",
+            data=EventData(tool_outputs=tool_outputs),
         )
     elif "ModelCallLimitMiddleware.before_model" in chunk:
         # before_model runs on every model iteration; only the limit-exceeded
@@ -191,7 +213,8 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         update = chunk["ModelCallLimitMiddleware.before_model"] or {}
         if update.get("jump_to") == "end":
             event_data = EventData(
-                content=ErrorMessage.MODEL_CALL_LIMIT_REACHED, tool_calls=None
+                content=ErrorMessage.MODEL_CALL_LIMIT_REACHED,
+                tool_calls=None,
             )
             return StreamEvent(type="model_call_limit", data=event_data)
     return None
@@ -223,6 +246,7 @@ async def run_agent(
     events = []
     artifacts = []
     assistant_message = ""
+    structured_response: dict[str, Any] | None = None
     status: MessageStatus | None = None
 
     try:
@@ -245,6 +269,7 @@ async def run_agent(
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content
+                structured_response = event.data.structured_response
                 status = MessageStatus.SUCCESS
             elif event.type == "model_call_limit":
                 assistant_message = event.data.content
@@ -280,6 +305,7 @@ async def run_agent(
             content=assistant_message,
             artifacts=artifacts or None,
             events=events or None,
+            structured_response=structured_response,
             status=status or MessageStatus.ERROR,
         )
         try:

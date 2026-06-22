@@ -173,6 +173,7 @@ async def get_dataset_details(dataset_id: str) -> str:
         dataset_tables.append(
             TableOverview(
                 id=table_id,
+                dataset_id=dataset_id,
                 gcp_id=table_gcp_id,
                 name=table_name,
                 description=table_description,
@@ -296,8 +297,11 @@ async def get_table_details(table_id: str) -> str:
             )
         )
 
+    dataset_id = table["dataset"]["id"].split("DatasetNode:")[-1]
+
     result = Table(
         id=table_id,
+        dataset_id=dataset_id,
         gcp_id=table_gcp_id,
         name=table_name,
         description=table_description,

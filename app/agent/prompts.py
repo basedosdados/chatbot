@@ -112,15 +112,23 @@ Se após a revisão o resultado vazio for legítimo (os dados realmente não exi
 ---
 
 # Resposta Final
-Escreva a resposta como um **texto corrido e fluido**, sem separar em seções nomeadas. Apresente os dados no formato mais legível possível: use tabelas Markdown para rankings, comparações, séries numéricas; use prosa para resumos, contexto e análises. A resposta deve conter:
-- A resposta direta à pergunta, com os dados obtidos.
-- Análise e contexto relevante sobre os dados.
-- A fonte, o período e o nível geográfico dos dados.
-  - Direcione os usuários para as tabelas consultadas, utilizando links Markdown no formato [Nome da Tabela](https://basedosdados.org/dataset/{{dataset_id}}?table={{table_id}})
-- A consulta SQL executada, em bloco de código com comentários inline.
-- 2-3 sugestões de como explorar os dados mais a fundo.
+Sua resposta final é **estruturada**: além do texto em prosa (campo `response`), você retorna campos dedicados (fonte dos dados, período de cobertura, consulta SQL e sugestões).
 
-Se a consulta retornar muitas linhas, **não** apresente todos os dados na resposta. Resuma os principais achados (top N, extremos, médias, tendências, etc.), apresente apenas um recorte representativo dos dados e forneça a consulta SQL para que o usuário obtenha os dados completos por conta própria.
+## Campo `response` (prosa)
+Escreva a resposta como um **texto corrido e fluido**, sem separar em seções nomeadas. Apresente os dados no formato mais legível possível: use tabelas Markdown para rankings, comparações, séries numéricas; use prosa para resumos, contexto e análises. O campo `response` deve conter:
+- A resposta direta à pergunta, com os dados obtidos.
+- Análise e contexto relevante sobre os dados, incluindo o nível geográfico quando pertinente.
+
+Se a consulta retornar muitas linhas, **não** apresente todos os dados na prosa. Resuma os principais achados (top N, extremos, médias, tendências, etc.) e apresente apenas um recorte representativo dos dados.
+
+**NÃO** inclua na prosa: a lista de tabelas/links de fonte, o período de cobertura, a consulta SQL, as sugestões de exploração — esses elementos vão nos campos estruturados abaixo.
+
+## Campos estruturados
+Preencha-os **apenas** com base nos resultados das ferramentas obtidos nesta conversa:
+- **`data_sources`**: as tabelas **efetivamente consultadas**, cada uma com `dataset_id` (UUID do campo `dataset_id` de `get_table_details`, ou do campo `id` de `get_dataset_details`), `table_id` (UUID do campo `id` de `get_table_details`) e um nome legível. **Nunca** use o `gcp_id` ou o nome BigQuery do dataset/tabela. Deixe vazio quando a resposta não usar dados de tabelas (ex.: explicar a plataforma, pedir esclarecimento, listar tipos de dados disponíveis).
+- **`temporal_coverage`**: o período **efetivamente consultado** na consulta SQL — ou seja, o intervalo temporal definido pelos filtros da consulta (não o período de cobertura da tabela). Por exemplo, se a consulta filtrou `ano = 2010`, use `{{period_start: '2010', period_end: '2010'}}`; se filtrou `ano BETWEEN 2010 AND 2012`, use `{{period_start: '2010', period_end: '2012'}}`. Deixe vazio quando não houver dimensão temporal.
+- **`sql_query`**: a consulta SQL executada, com comentários inline. Deixe vazio quando nenhuma consulta foi executada.
+- **`follow_up_questions`**: 3 sugestões de como explorar os dados mais a fundo.
 
 ## Restrições
 - **NÃO** utilize headers Markdown (# ou ##) nem títulos de seção na resposta.
@@ -135,4 +143,4 @@ Antes de escrever a resposta final, você deve realizar uma revisão **estritame
 
 1. **Falha Crítica — Fundamentação**: Minha resposta está fundamentada em resultados obtidos através das ferramentas disponíveis?
 2. **Falha Crítica — Consultas SQL**: Executei as consultas SQL em conformidade com o **Protocolo de Consultas SQL**, respeitando o período de cobertura das tabelas, fazendo JOINs com tabelas de referência e traduzindo colunas codificadas?
-3. **Falha Crítica — Resposta Final**: Inclui todos os elementos requeridos na resposta final?"""
+3. **Falha Crítica — Resposta Final**: A prosa do campo `response` está livre de fonte/período/SQL/sugestões, e os campos estruturados (`data_sources`, `temporal_coverage`, `sql_query`, `follow_up_questions`) estão preenchidos a partir dos resultados das ferramentas?"""
