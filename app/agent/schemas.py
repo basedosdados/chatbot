@@ -12,29 +12,24 @@ class TemporalGranularity(str, Enum):
 
 
 class TemporalCoverage(BaseModel):
-    """Período de cobertura dos dados utilizados na resposta."""
+    """Intervalo efetivamente filtrado pela consulta SQL na resposta."""
 
     period_start: str = Field(
         description=(
-            "Início do período **efetivamente consultado** na consulta SQL (ex.: se a "
-            "consulta filtrou `ano = 2010`, use '2010'; se filtrou `ano BETWEEN 2010 AND "
-            "2012`, use '2010'). NÃO use o `period_start` dos metadados da tabela — "
-            "use o valor que aparece nos filtros temporais da consulta SQL executada."
+            "Início do intervalo filtrado pela consulta SQL (ex.: '2010' para "
+            "`ano = 2010` ou `ano BETWEEN 2010 AND 2012`). Pode ser mais estreito "
+            "que a cobertura total da tabela."
         )
     )
     period_end: str = Field(
         description=(
-            "Fim do período **efetivamente consultado** na consulta SQL (ex.: se a consulta "
-            "filtrou `ano = 2010`, use '2010'; se filtrou `ano BETWEEN 2010 AND 2012`, "
-            "use '2012'). NÃO use o `period_end` dos metadados da tabela — use o "
-            "valor que aparece nos filtros temporais da consulta SQL executada."
+            "Fim do intervalo filtrado pela consulta SQL (ex.: '2010' para "
+            "`ano = 2010`; '2012' para `ano BETWEEN 2010 AND 2012`). Pode ser mais "
+            "estreito que a cobertura total da tabela."
         )
     )
     granularity: TemporalGranularity = Field(
-        description=(
-            "Granularidade do período: 'day' (dia), 'month' (mês) ou 'year' (ano), "
-            "de acordo com o formato de `period_start`/`period_end`."
-        )
+        description="Granularidade de `period_start`/`period_end`: 'day', 'month' ou 'year'."
     )
 
 
@@ -43,16 +38,13 @@ class DataSource(BaseModel):
 
     dataset_id: str = Field(
         description=(
-            "UUID do dataset retornado pelo campo `dataset_id` de `get_table_details` "
-            "ou pelo campo `id` de `get_dataset_details` (ex.: 'a1b2c3d4-...'). "
-            "NÃO use o `gcp_id` nem o nome BigQuery do dataset "
-            "(ex.: 'br_bd_diretorios') — use o UUID da API da Base dos Dados."
+            "UUID do dataset (campo `dataset_id` de `get_table_details` ou `id` de "
+            "`get_dataset_details`), não o nome BigQuery (ex.: 'br_bd_diretorios')."
         )
     )
     table_id: str = Field(
         description=(
-            "UUID da tabela retornado pelo campo `id` de `get_table_details` (ex.: '3027c0d8-...'). "
-            "NÃO use o `gcp_id` nem o nome BigQuery da tabela — use o UUID da API da Base dos Dados."
+            "UUID da tabela (campo `id` de `get_table_details`), não o nome BigQuery."
         )
     )
     name: str = Field(description="Nome legível da tabela utilizada.")
@@ -63,11 +55,9 @@ class StructuredResponse(BaseModel):
 
     response: str = Field(
         description=(
-            "A resposta em prosa exibida ao usuário, em Markdown. Contém a resposta "
-            "direta à pergunta com os dados obtidos, além de análise e contexto "
-            "relevante. NÃO inclua aqui a fonte/tabelas, o período de cobertura, a "
-            "consulta SQL nem as sugestões de exploração — esses elementos são "
-            "retornados nos campos dedicados."
+            "A resposta em prosa (Markdown): resposta direta à pergunta com os dados "
+            "obtidos, mais análise e contexto. Não repita aqui fonte, período, SQL "
+            "ou sugestões — cada um desses elementos tem seu campo dedicado."
         )
     )
     data_sources: list[DataSource] | None = Field(
