@@ -82,7 +82,7 @@ class StructuredResponse(BaseModel):
             "Deixe vazio (None) quando nenhuma consulta foi executada."
         ),
     )
-    follow_up_questions: list[str] = Field(
-        default_factory=list,
+    follow_up_questions: list[str] | None = Field(
+        default=None,
         description="3 sugestões de perguntas para explorar os dados mais a fundo.",
     )
