@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class TemporalGranularity(str, Enum):
-    """Granularidade do período de cobertura dos dados utilizados."""
+    """Granularity of the data's temporal coverage."""
 
     DAY = "day"
     MONTH = "month"
@@ -12,77 +12,83 @@ class TemporalGranularity(str, Enum):
 
 
 class TemporalCoverage(BaseModel):
-    """Intervalo efetivamente filtrado pela consulta SQL na resposta."""
+    """The interval the SQL query actually filtered on in the answer."""
 
     period_start: str = Field(
         description=(
-            "Início do intervalo filtrado pela consulta SQL (ex.: '2010' para "
-            "`ano = 2010` ou `ano BETWEEN 2010 AND 2012`). Pode ser mais estreito "
-            "que a cobertura total da tabela."
+            "Start of the interval filtered by the SQL query (e.g. '2010' for "
+            "`ano = 2010` or `ano BETWEEN 2010 AND 2012`). May be narrower than the "
+            "table's full coverage."
         )
     )
     period_end: str = Field(
         description=(
-            "Fim do intervalo filtrado pela consulta SQL (ex.: '2010' para "
-            "`ano = 2010`; '2012' para `ano BETWEEN 2010 AND 2012`). Pode ser mais "
-            "estreito que a cobertura total da tabela."
+            "End of the interval filtered by the SQL query (e.g. '2010' for "
+            "`ano = 2010`; '2012' for `ano BETWEEN 2010 AND 2012`). May be narrower "
+            "than the table's full coverage."
         )
     )
     granularity: TemporalGranularity = Field(
-        description="Granularidade de `period_start`/`period_end`: 'day', 'month' ou 'year'."
+        description="Granularity of `period_start`/`period_end`: 'day', 'month' or 'year'."
     )
 
 
 class DataSource(BaseModel):
-    """Uma tabela da Base dos Dados utilizada para responder à pergunta."""
+    """A Base dos Dados table used to answer the question."""
 
     dataset_id: str = Field(
         description=(
-            "UUID do dataset (campo `dataset_id` de `get_table_details` ou `id` de "
-            "`get_dataset_details`), não o nome BigQuery (ex.: 'br_bd_diretorios')."
+            "Dataset UUID (the `dataset_id` field from `get_table_details` or the `id` "
+            "field from `get_dataset_details`), not the BigQuery name (e.g. 'br_bd_diretorios')."
         )
     )
     table_id: str = Field(
         description=(
-            "UUID da tabela (campo `id` de `get_table_details`), não o nome BigQuery."
+            "Table UUID (the `id` field from `get_table_details`), not the BigQuery name."
         )
     )
-    name: str = Field(description="Nome legível da tabela utilizada.")
+    name: str = Field(description="Human-readable name of the table used.")
 
 
 class StructuredResponse(BaseModel):
-    """Resposta estruturada do agente para a interface do usuário."""
+    """The agent's structured response for the user interface."""
 
     response: str = Field(
         description=(
-            "A resposta em prosa (Markdown): resposta direta à pergunta com os dados "
-            "obtidos, mais análise e contexto. Não repita aqui fonte, período, SQL "
-            "ou sugestões — cada um desses elementos tem seu campo dedicado."
+            "The prose answer in Markdown, written in the user's language: a direct answer to the question "
+            "with the data obtained, plus analysis and context. Do NOT repeat the source, period, SQL, "
+            "or suggestions here — each of those has its own dedicated field."
         )
     )
     data_sources: list[DataSource] | None = Field(
         default=None,
         description=(
-            "As tabelas efetivamente consultadas para responder à pergunta. Deixe "
-            "vazio (None) quando a resposta não usar dados de tabelas (ex.: explicar "
-            "a plataforma, pedir esclarecimento ou listar os tipos de dados disponíveis)."
+            "The tables actually queried to answer the question. Leave empty (None) "
+            "when the answer doesn't use table data (e.g. explaining the platform, "
+            "asking for clarification, or listing the available data types)."
         ),
     )
     temporal_coverage: TemporalCoverage | None = Field(
         default=None,
         description=(
-            "O período geral dos dados utilizados. Deixe vazio (None) "
-            "quando a resposta não envolver uma dimensão temporal."
+            "The overall period of the data used. Leave empty (None) when the answer "
+            "has no temporal dimension."
         ),
     )
-    sql_query: str | None = Field(
+    sql_queries: list[str] | None = Field(
         default=None,
         description=(
-            "A consulta SQL executada para obter os dados, com comentários inline. "
-            "Deixe vazio (None) quando nenhuma consulta foi executada."
+            "The SQL queries whose results the answer is based on, each with "
+            "inline comments, so the user can reproduce the result. Include every "
+            "query that contributed to the answer (e.g. one query per metric when the "
+            "answer combines several), but EXCLUDE exploratory or failed-then-corrected queries. "
+            "Leave empty (None) when no query was executed."
         ),
     )
     follow_up_questions: list[str] | None = Field(
         default=None,
-        description="3 sugestões de perguntas para explorar os dados mais a fundo.",
+        description=(
+            "3 suggested follow-up questions (in the user's language) to explore the "
+            "data further."
+        ),
     )
