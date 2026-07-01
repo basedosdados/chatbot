@@ -17,19 +17,24 @@ class TemporalCoverage(BaseModel):
     period_start: str = Field(
         description=(
             "Start of the interval filtered by the SQL query (e.g. '2010' for "
-            "`ano = 2010` or `ano BETWEEN 2010 AND 2012`). May be narrower than the "
-            "table's full coverage."
+            "`ano = 2010` or `ano BETWEEN 2010 AND 2012`). Format it to match `granularity`: "
+            "YYYY (year), YYYY-MM (month) or YYYY-MM-DD (day) — e.g. '2010', '2010-01', '2010-01-01'. "
+            "May be narrower than the table's full coverage."
         )
     )
     period_end: str = Field(
         description=(
             "End of the interval filtered by the SQL query (e.g. '2010' for "
-            "`ano = 2010`; '2012' for `ano BETWEEN 2010 AND 2012`). May be narrower "
-            "than the table's full coverage."
+            "`ano = 2010`; '2012' for `ano BETWEEN 2010 AND 2012`). Format it to match `granularity`: "
+            "YYYY (year), YYYY-MM (month) or YYYY-MM-DD (day) — e.g. '2012', '2012-01', '2012-01-01'. "
+            "May be narrower than the table's full coverage."
         )
     )
     granularity: TemporalGranularity = Field(
-        description="Granularity of `period_start`/`period_end`: 'day', 'month' or 'year'."
+        description=(
+            "Granularity of `period_start`/`period_end`, matching their format: "
+            "YYYY (year), YYYY-MM (month), YYYY-MM-DD (day)."
+        )
     )
 
 
