@@ -39,20 +39,21 @@ class TemporalCoverage(BaseModel):
 
 
 class DataSource(BaseModel):
-    """A Base dos Dados table used to answer the question."""
+    """A Base dos Dados table the answer draws on or points the user to."""
 
     dataset_id: str = Field(
         description=(
             "Dataset UUID (the `dataset_id` field from `get_table_details` or the `id` "
-            "field from `get_dataset_details`), not the BigQuery name (e.g. 'br_bd_diretorios')."
+            "field from `get_dataset_details`), not the BigQuery id (e.g. 'br_bd_diretorios')."
         )
     )
     table_id: str = Field(
         description=(
-            "Table UUID (the `id` field from `get_table_details`), not the BigQuery name."
+            "Table UUID (the `id` field from `get_table_details`, or a table's `id` from "
+            "the tables list of `get_dataset_details`). Not the dataset UUID, not the BigQuery id."
         )
     )
-    name: str = Field(description="Human-readable name of the table used.")
+    name: str = Field(description="Human-readable name of the table.")
 
 
 class StructuredResponse(BaseModel):
@@ -68,16 +69,15 @@ class StructuredResponse(BaseModel):
     data_sources: list[DataSource] | None = Field(
         default=None,
         description=(
-            "The tables actually queried to answer the question. Leave empty (None) "
-            "when the answer doesn't use table data (e.g. explaining the platform, "
-            "asking for clarification, or listing the available data types)."
+            "The tables the answer draws on — those you queried, or specific tables you recommend "
+            "on clarification turns. Leave empty (None) when no table is relevant."
         ),
     )
     temporal_coverage: TemporalCoverage | None = Field(
         default=None,
         description=(
-            "The overall period of the data used. Leave empty (None) when the answer "
-            "has no temporal dimension."
+            "The interval your SQL query actually filtered. Leave empty (None) when no query "
+            "was run (e.g. a clarification turn) or the answer has no temporal dimension."
         ),
     )
     sql_queries: list[str] | None = Field(
@@ -93,7 +93,6 @@ class StructuredResponse(BaseModel):
     follow_up_questions: list[str] | None = Field(
         default=None,
         description=(
-            "3 suggested follow-up questions (in the user's language) to explore the "
-            "data further."
+            "3 suggested follow-up questions (in the user's language) to explore the data further."
         ),
     )
