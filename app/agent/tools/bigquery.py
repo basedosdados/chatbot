@@ -26,6 +26,11 @@ def _get_client() -> bq.Client:  # pragma: no cover
 def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
     """Execute a SQL query against BigQuery tables from the Base dos Dados database.
 
+    PRECONDITION — only call this when the question is already specific enough to
+    answer with data. For a broad/exploratory question (a bare topic) or one that
+    references an entity the user did not name, do NOT call this tool: explore the
+    metadata and ask the user to refine the question first.
+
     Use AFTER identifying the right datasets and understanding tables structure.
     It includes a 10GB processing limit for safety.
 

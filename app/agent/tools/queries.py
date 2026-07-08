@@ -98,6 +98,9 @@ query getTableDetails($id: ID!) {
                         }
                     }
                 }
+                dataset {
+                    id
+                }
             }
         }
     }

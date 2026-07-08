@@ -29,3 +29,6 @@ wheels/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Eval artifacts (generated transcripts + scores; regenerable, can be large)
+eval/*.json

@@ -46,14 +46,19 @@ async def search_datasets(query: str) -> str:
     CRITICAL: Use individual KEYWORDS only, not full sentences. The search engine uses Elasticsearch.
 
     Args:
-        query (str): 2-3 keywords maximum. Use Portuguese terms, organization acronyms, or dataset acronyms.
-            Good Examples: "censo", "educacao", "ibge", "inep", "rais", "saude".
+        query (str): 2-3 keywords maximum. Use Portuguese terms, organization names, or dataset names.
+            Good Examples: "censo", "rais", "ibge", "inep", "educacao", "saude".
             Avoid: "Brazilian population data by municipality".
 
     Returns:
         str: JSON array of datasets. If empty/irrelevant results, try different keywords.
 
-    Strategy: Start with broad terms like "censo", "ibge", "inep", "rais", then get specific if needed.
+    Strategy: hierarchical funnel — ALWAYS start with a SINGLE keyword and broaden a level only if it returns nothing:
+        1. Dataset name ("censo", "rais", "enem") or organization ("ibge", "inep", "tse").
+        2. Core theme ("educacao", "saude", "economia", "emprego").
+        3. English term ("health", "education").
+        4. A 2-3 word combination only if the levels above fail ("saude ms", "censo municipio").
+
     Next step: Use `get_dataset_details()` with returned dataset IDs.
     """
     response = await _client.get(
@@ -91,7 +96,7 @@ async def get_dataset_details(dataset_id: str) -> str:
 
     Args:
         dataset_id (str): Dataset ID obtained from `search_datasets()`.
-            This is typically a UUID-like string, not the human-readable name.
+            This is a UUID-like string, not the human-readable name.
 
     Returns:
         str: JSON object with complete dataset information, including:
@@ -173,6 +178,7 @@ async def get_dataset_details(dataset_id: str) -> str:
         dataset_tables.append(
             TableOverview(
                 id=table_id,
+                dataset_id=dataset_id,
                 gcp_id=table_gcp_id,
                 name=table_name,
                 description=table_description,
@@ -225,8 +231,6 @@ async def get_table_details(table_id: str) -> str:
             - period_start / period_end: First and last period covered by the table.
                 Format varies (`2024`, `'2026-04-12'`, etc.) — use the value verbatim,
                 matched to the appropriate temporal column (`ano`, `data`, etc.).
-
-    Next step: Use `execute_bigquery_sql()` to execute queries.
     """
     response = await _client.post(
         url=GRAPHQL_URL,
@@ -296,8 +300,11 @@ async def get_table_details(table_id: str) -> str:
             )
         )
 
+    dataset_id = table["dataset"]["id"].split("DatasetNode:")[-1]
+
     result = Table(
         id=table_id,
+        dataset_id=dataset_id,
         gcp_id=table_gcp_id,
         name=table_name,
         description=table_description,

@@ -33,6 +33,7 @@ class EventData(BaseModel):
     content: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_outputs: list[ToolOutput] | None = None
+    structured_response: dict[str, Any] | None = None
     error_details: dict[str, Any] | None = None
 
 
