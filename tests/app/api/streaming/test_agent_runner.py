@@ -8,10 +8,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from app.agent.schemas import (
+    DataSource,
+    StructuredResponse,
+    TemporalCoverage,
+    TemporalGranularity,
+)
 from app.api.schemas import ConfigDict
 from app.api.streaming.agent_runner import (
     ErrorMessage,
-    _parse_thinking,
     _process_chunk,
     _truncate_json,
     run_agent,
@@ -183,64 +188,6 @@ class TestTruncateJSON:
         assert _truncate_json(invalid_json_string) == invalid_json_string
 
 
-class TestParseThinking:
-    """Tests for _parse_thinking function."""
-
-    def test_string_content_returns_none(self):
-        """Test that plain string content returns None."""
-        message = AIMessage(content="Hello, world!")
-        assert _parse_thinking(message) is None
-
-    def test_single_thinking_block(self):
-        """Test extraction of a single thinking block."""
-        message = AIMessage(
-            content=[
-                {"type": "thinking", "thinking": "Let me reason about this."},
-                {"type": "text", "text": "Here is my answer."},
-            ]
-        )
-        assert _parse_thinking(message) == "Let me reason about this."
-
-    def test_multiple_thinking_blocks_are_concatenated(self):
-        """Test that multiple thinking blocks are concatenated."""
-        message = AIMessage(
-            content=[
-                {"type": "thinking", "thinking": "First thought. "},
-                {"type": "text", "text": "Some text."},
-                {"type": "thinking", "thinking": "Second thought."},
-            ]
-        )
-        assert _parse_thinking(message) == "First thought. Second thought."
-
-    def test_no_thinking_blocks_returns_none(self):
-        """Test that content with no thinking blocks returns None."""
-        message = AIMessage(
-            content=[
-                {"type": "text", "text": "Just text."},
-            ]
-        )
-        assert _parse_thinking(message) is None
-
-    def test_empty_thinking_block_returns_none(self):
-        """Test that an empty thinking string returns None."""
-        message = AIMessage(
-            content=[
-                {"type": "thinking", "thinking": ""},
-            ]
-        )
-        assert _parse_thinking(message) is None
-
-    def test_non_dict_blocks_are_skipped(self):
-        """Test that non-dict items in content are safely skipped."""
-        message = AIMessage(
-            content=[
-                "plain string block",
-                {"type": "thinking", "thinking": "Actual thinking."},
-            ]
-        )
-        assert _parse_thinking(message) == "Actual thinking."
-
-
 class TestProcessChunk:
     """Tests for _process_chunk function."""
 
@@ -330,6 +277,84 @@ class TestProcessChunk:
         assert event is not None
         assert event.type == "final_answer"
         assert event.data.content == ""
+
+    def test_agent_chunk_structured_response(self):
+        """A model chunk carrying `structured_response` yields a final_answer event
+        whose content is the prose and whose structured_response holds all fields."""
+        structured = StructuredResponse(
+            response="Here is your answer.",
+            data_sources=[
+                DataSource(dataset_id="ds1", table_id="tb1", name="Tabela 1")
+            ],
+            temporal_coverage=TemporalCoverage(
+                period_start="2020",
+                period_end="2025",
+                granularity=TemporalGranularity.YEAR,
+            ),
+            sql_queries=["SELECT 1 -- comment"],
+            follow_up_questions=["E em 2026?", "Por estado?", "Por região?"],
+        )
+
+        # The model node sets `structured_response` alongside the internal
+        # structured-output tool call; that tool call must NOT become a tool_call event.
+        chunk = {
+            "model": {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "id": "call_struct",
+                                "name": "StructuredResponse",
+                                "args": structured.model_dump(),
+                            }
+                        ],
+                    )
+                ],
+                "structured_response": structured,
+            }
+        }
+
+        event = _process_chunk(chunk)
+
+        assert event is not None
+        assert event.type == "final_answer"
+        assert event.data.tool_calls is None
+        assert event.data.content == "Here is your answer."
+        assert event.data.structured_response is not None
+        assert event.data.structured_response["response"] == "Here is your answer."
+        assert event.data.structured_response["data_sources"] == [
+            {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
+        ]
+        assert event.data.structured_response["temporal_coverage"] == {
+            "period_start": "2020",
+            "period_end": "2025",
+            "granularity": "year",
+        }
+        assert event.data.structured_response["sql_queries"] == ["SELECT 1 -- comment"]
+        assert event.data.structured_response["follow_up_questions"] == [
+            "E em 2026?",
+            "Por estado?",
+            "Por região?",
+        ]
+
+    def test_agent_chunk_structured_response_sanitizes_links(self):
+        """The prose in a structured response has its markdown links sanitized."""
+        structured = StructuredResponse(response="See [evil](http://evil.com).")
+
+        chunk = {
+            "model": {
+                "messages": [AIMessage(content="")],
+                "structured_response": structured,
+            }
+        }
+
+        event = _process_chunk(chunk)
+
+        assert event is not None
+        assert event.type == "final_answer"
+        assert "http://evil.com" not in event.data.content
+        assert event.data.content == event.data.structured_response["response"]
 
     def test_tools_chunk_single_tool(self):
         """Test tools chunk with single tool output (dict format)."""
@@ -515,6 +540,80 @@ class TestRunAgent:
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.SUCCESS
         assert message.content == "Final answer"
+
+    async def test_structured_response_is_emitted_and_persisted(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A structured final answer is streamed and persisted on the message row."""
+        structured = StructuredResponse(
+            response="Final answer",
+            data_sources=[
+                DataSource(dataset_id="ds1", table_id="tb1", name="Tabela 1")
+            ],
+            temporal_coverage=TemporalCoverage(
+                period_start="2020",
+                period_end="2025",
+                granularity=TemporalGranularity.YEAR,
+            ),
+            sql_queries=["SELECT 1"],
+            follow_up_questions=["E em 2026?"],
+        )
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [AIMessage(content="")],
+                        "structured_response": structured,
+                    }
+                },
+            )
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            queue=queue,
+        )
+
+        events = await self._drain(queue)
+        assert [e.type for e in events] == ["final_answer", "complete"]
+        assert events[0].data.content == "Final answer"
+        assert events[-1].data.run_id == config["run_id"]
+
+        assert events[0].data.structured_response is not None
+        assert events[0].data.structured_response["response"] == "Final answer"
+        assert events[0].data.structured_response["data_sources"] == [
+            {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
+        ]
+        assert events[0].data.structured_response["temporal_coverage"] == {
+            "period_start": "2020",
+            "period_end": "2025",
+            "granularity": "year",
+        }
+        assert events[0].data.structured_response["sql_queries"] == ["SELECT 1"]
+        assert events[0].data.structured_response["follow_up_questions"] == [
+            "E em 2026?"
+        ]
+
+        mock_database.create_message.assert_called_once()
+        message = mock_database.create_message.call_args[0][0]
+        assert isinstance(message, MessageCreate)
+        assert message.status == MessageStatus.SUCCESS
+        assert message.content == "Final answer"
+        assert message.structured_response == events[0].data.structured_response
 
     async def test_unexpected_exception_persists_error_row(
         self,
