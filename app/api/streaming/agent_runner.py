@@ -170,7 +170,15 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 tool_call_id=message.tool_call_id,
                 tool_name=message.name,
                 content=_truncate_json(message.content),
-                artifact=message.artifact,
+                # Governs what the client and the persisted `events` see. Only surface
+                # user-facing file artifacts; internal handles (e.g. the query-result
+                # table reference from execute_bigquery_sql) stay in agent state.
+                # NOTE: distinct from the file-only filter in run_agent below, which
+                # guards a different boundary (message.artifacts) — keep both.
+                artifact=message.artifact
+                if isinstance(message.artifact, dict)
+                and message.artifact.get("type") == "file"
+                else None,
             )
             for message in tool_messages
         ]
@@ -237,7 +245,14 @@ async def run_agent(
 
             if event.type == "tool_output":
                 for output in event.data.tool_outputs:
-                    if output.artifact:
+                    # Guards the message.artifacts column, which the download endpoint
+                    # indexes by `id` and validates as Artifact. Only file artifacts
+                    # belong here — independent of what _process_chunk streams, which
+                    # will diverge once non-file artifacts are surfaced to the client.
+                    if (
+                        isinstance(output.artifact, dict)
+                        and output.artifact.get("type") == "file"
+                    ):
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content

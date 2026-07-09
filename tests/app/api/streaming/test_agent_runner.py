@@ -360,15 +360,16 @@ class TestProcessChunk:
 
     def test_tools_chunk_single_tool(self):
         """Test tools chunk with single tool output (dict format)."""
+        file_artifact = {"type": "file", "id": "a1", "source": {"bucket": "b"}}
         chunk = {
             "tools": {
                 "messages": [
                     ToolMessage(
                         content='{"result": "found"}',
                         tool_call_id="call_123",
-                        name="search",
+                        name="export_query_results",
                         status="success",
-                        artifact={"url": "http://example.com"},
+                        artifact=file_artifact,
                     )
                 ]
             }
@@ -384,10 +385,35 @@ class TestProcessChunk:
 
         assert tool_output.status == "success"
         assert tool_output.tool_call_id == "call_123"
-        assert tool_output.tool_name == "search"
+        assert tool_output.tool_name == "export_query_results"
         assert tool_output.content == '{\n  "result": "found"\n}'
-        assert tool_output.artifact == {"url": "http://example.com"}
+        assert tool_output.artifact == file_artifact
         assert tool_output.metadata is None
+
+    def test_tools_chunk_suppresses_non_file_artifact(self):
+        """Internal handles (e.g. query-result table refs) must not reach the client."""
+        chunk = {
+            "tools": {
+                "messages": [
+                    ToolMessage(
+                        content='{"query_ref": "q_abc", "row_count": 1, "results": []}',
+                        tool_call_id="call_123",
+                        name="execute_bigquery_sql",
+                        status="success",
+                        artifact={
+                            "type": "query_result",
+                            "query_ref": "q_abc",
+                            "destination_table": {"projectId": "p"},
+                        },
+                    )
+                ]
+            }
+        }
+
+        event = _process_chunk(chunk)
+
+        assert event is not None
+        assert event.data.tool_outputs[0].artifact is None
 
     def test_tools_chunk_multiple_parallel_tools(self):
         """Test tools chunk with multiple parallel tool outputs (list format)."""
