@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import selectinload
 from sqlmodel import SQLModel, select
 
 from app.db.models import (
+    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackSyncStatus,
@@ -201,12 +203,51 @@ class AsyncDatabase:
         Returns:
             list[Message]: A list of Message objects.
         """
-        query = select(Message).where(Message.thread_id == thread_id)
+        query = (
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .options(selectinload(Message.artifacts))
+        )
         query = self._apply_order_by(query, Message, order_by)
+
         results = await self.session.execute(query)
         messages = results.scalars().all()
 
         return messages
+
+    # ==================================== Artifact ====================================
+    async def create_artifacts(self, artifacts: list[Artifact]) -> list[Artifact]:
+        """Create artifact rows in the artifacts table.
+
+        Args:
+            artifacts (list[Artifact]): Artifact rows to persist.
+
+        Returns:
+            list[Artifact]: The persisted Artifact objects.
+        """
+        self.session.add_all(artifacts)
+        await self.session.commit()
+
+        for artifact in artifacts:
+            await self.session.refresh(artifact)
+
+        return artifacts
+
+    async def get_artifact(self, artifact_id: str | UUID) -> Artifact | None:
+        """Get an artifact from the artifacts table.
+
+        Args:
+            artifact_id (str | UUID): The artifact unique identifier.
+
+        Returns:
+            Artifact | None: An Artifact object if found, None otherwise.
+        """
+        artifact = await self.session.get(Artifact, artifact_id)
+
+        if artifact is None:
+            self.logger.warning(f"Artifact {artifact_id} not found")
+
+        return artifact
 
     # ==================================== Feedback ====================================
     async def upsert_feedback(

@@ -12,9 +12,9 @@ from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
 from app.api.streaming.schemas import StreamEvent
-from app.artifacts import Artifact
 from app.db.database import AsyncDatabase
 from app.db.models import (
+    Artifact,
     Feedback,
     FeedbackPublic,
     FeedbackRating,
@@ -300,10 +300,21 @@ class TestListMessagesEndpoint:
 
         assert response.status_code == status.HTTP_200_OK
 
-        messages = [Message.model_validate(message) for message in response.json()]
+        payload = response.json()
+        messages = [Message.model_validate(message) for message in payload]
 
         assert isinstance(messages, list)
         assert len(messages) == 2
+
+        # The assistant message exposes its artifacts via ArtifactPublic, projecting
+        # display metadata while hiding internal storage fields.
+        assistant = next(m for m in payload if m["role"] == "ASSISTANT")
+        assert len(assistant["artifacts"]) == 1
+        artifact = assistant["artifacts"][0]
+        assert artifact["filename"] == "test-file.csv"
+        assert "data" not in artifact
+        assert "bucket" not in artifact
+        assert "object_key" not in artifact
 
     def test_list_messages_empty(
         self, client: TestClient, access_token: str, thread: Thread
@@ -557,16 +568,16 @@ class TestUpsertFeedbackEndpoint:
 
 
 class TestGenerateArtifactDownloadURLEndpoint:
-    """Tests for GET /api/v1/chatbot/messages/{message_id}/artifacts/{artifact_id}"""
+    """Tests for GET /api/v1/chatbot/artifacts/{artifact_id}"""
 
     def test_generate_artifact_download_url_success(
         self,
         client: TestClient,
         access_token: str,
-        assistant_message: Message,
+        artifact: Artifact,
         mocker: MockerFixture,
     ):
-        """Test successful download redirects to signed URL."""
+        """Test successful download returns a signed URL."""
         mocker.patch("app.api.routers.chatbot.gcs_object_exists", return_value=True)
 
         mocker.patch(
@@ -574,49 +585,34 @@ class TestGenerateArtifactDownloadURLEndpoint:
             return_value="https://storage.example.com/signed",
         )
 
-        artifact = Artifact.model_validate(assistant_message.artifacts[0])
-
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
+            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["url"] == "https://storage.example.com/signed"
 
-    def test_generate_artifact_download_url_message_not_found(
-        self, client: TestClient, access_token: str
-    ):
-        """Test message not found returns 404."""
-        response = client.get(
-            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/artifacts/{uuid.uuid4()}",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
     def test_generate_artifact_download_url_thread_not_found(
         self,
         client: TestClient,
         access_token: str,
-        assistant_message: Message,
+        artifact: Artifact,
         database: AsyncDatabase,
         mocker: MockerFixture,
     ):
         """Test thread not found returns 404."""
         mocker.patch.object(database, "get_thread", AsyncMock(return_value=None))
 
-        artifact = Artifact.model_validate(assistant_message.artifacts[0])
-
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
+            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_generate_artifact_download_url_unauthorized_user(
-        self, client: TestClient, assistant_message: Message
+        self, client: TestClient, artifact: Artifact
     ):
         """Test user does not own the thread returns 404 (IDOR protection)."""
         other_token = jwt.encode(
@@ -625,22 +621,20 @@ class TestGenerateArtifactDownloadURLEndpoint:
             algorithm=settings.JWT_ALGORITHM,
         )
 
-        artifact = Artifact.model_validate(assistant_message.artifacts[0])
-
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
+            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_generate_artifact_download_url_artifact_not_found(
-        self, client: TestClient, access_token: str, assistant_message: Message
+        self, client: TestClient, access_token: str
     ):
         """Test artifact not found returns 404."""
         artifact_id = uuid.uuid4()
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact_id}",
+            url=f"/api/v1/chatbot/artifacts/{artifact_id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -651,16 +645,14 @@ class TestGenerateArtifactDownloadURLEndpoint:
         self,
         client: TestClient,
         access_token: str,
-        assistant_message: Message,
+        artifact: Artifact,
         mocker: MockerFixture,
     ):
         """Test non-existent artifact in GCS returns 410."""
         mocker.patch("app.api.routers.chatbot.gcs_object_exists", return_value=False)
 
-        artifact = Artifact.model_validate(assistant_message.artifacts[0])
-
         response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
+            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -671,13 +663,9 @@ class TestGenerateArtifactDownloadURLEndpoint:
         )
 
     def test_generate_artifact_download_url_unauthorized(
-        self, client: TestClient, assistant_message: Message
+        self, client: TestClient, artifact: Artifact
     ):
         """Test download artifact unauthorized returns 401."""
-        artifact = Artifact.model_validate(assistant_message.artifacts[0])
-
-        response = client.get(
-            url=f"/api/v1/chatbot/messages/{assistant_message.id}/artifacts/{artifact.id}",
-        )
+        response = client.get(url=f"/api/v1/chatbot/artifacts/{artifact.id}")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

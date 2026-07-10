@@ -72,6 +72,7 @@ def mock_database(
             status=MessageStatus.SUCCESS,
         )
     )
+    db.create_artifacts = AsyncMock(return_value=[])
 
     @asynccontextmanager
     async def mock_sessionmaker():
@@ -568,6 +569,80 @@ class TestRunAgent:
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.SUCCESS
         assert message.content == "Final answer"
+
+    async def test_artifact_failure_still_persists_message(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A failed artifact write must not lose the message (artifacts are best-effort)."""
+        mock_database.create_artifacts = AsyncMock(
+            side_effect=RuntimeError("artifact boom")
+        )
+
+        file_artifact = {
+            "id": str(uuid.uuid4()),
+            "type": "file",
+            "source": {
+                "provider": "gcs",
+                "bucket": "b",
+                "object_key": "exports/t/x.csv",
+            },
+            "metadata": {
+                "filename": "x.csv",
+                "mime_type": "text/csv",
+                "size_bytes": 10,
+            },
+            "created_at": "2026-07-09T00:00:00Z",
+        }
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content="{}",
+                                tool_call_id="1",
+                                name="export_query_results",
+                                status="success",
+                                artifact=file_artifact,
+                            )
+                        ]
+                    }
+                },
+            )
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Final answer")]}},
+            )
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            queue=queue,
+        )
+
+        complete = (await self._drain(queue))[-1]
+
+        # The artifact write was attempted and failed, but the message still
+        # persisted and the run completes without a persistence error.
+        mock_database.create_message.assert_called_once()
+        mock_database.create_artifacts.assert_called_once()
+        assert complete.type == "complete"
+        assert complete.data.run_id == config["run_id"]
+        assert complete.data.error_details is None
 
     async def test_structured_response_is_emitted_and_persisted(
         self,

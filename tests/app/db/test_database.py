@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.database import AsyncDatabase, init_database
 from app.db.models import (
+    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackRating,
@@ -28,6 +29,7 @@ async def test_init_database(async_engine: AsyncEngine):
     assert "thread" in tables
     assert "message" in tables
     assert "feedback" in tables
+    assert "artifact" in tables
 
 
 class TestAsyncDatabaseThread:
@@ -133,7 +135,6 @@ class TestAsyncDatabaseMessage:
         assert message.model_uri == user_message_create.model_uri
         assert message.role == user_message_create.role
         assert message.content == user_message_create.content
-        assert message.artifacts == user_message_create.artifacts
         assert message.events == user_message_create.events
         assert message.status == user_message_create.status
         assert isinstance(message.created_at, datetime)
@@ -151,7 +152,6 @@ class TestAsyncDatabaseMessage:
         assert message.model_uri == assistant_message_create.model_uri
         assert message.role == assistant_message_create.role
         assert message.content == assistant_message_create.content
-        assert message.artifacts == assistant_message_create.artifacts
         assert message.events == assistant_message_create.events
         assert message.status == assistant_message_create.status
         assert isinstance(message.created_at, datetime)
@@ -218,6 +218,68 @@ class TestAsyncDatabaseMessage:
         messages = await database.get_messages(thread.id)
         assert isinstance(messages, list)
         assert len(messages) == 0
+
+
+class TestAsyncDatabaseArtifact:
+    """Tests for Artifact operations."""
+
+    async def test_create_artifacts_persists_and_links(
+        self,
+        database: AsyncDatabase,
+        assistant_message: Message,
+    ):
+        """create_artifacts persists artifact rows linked to their message."""
+        artifact = Artifact(
+            message_id=assistant_message.id,
+            thread_id=assistant_message.thread_id,
+            type="file",
+            data={
+                "source": {
+                    "type": "remote_object",
+                    "provider": "gcs",
+                    "bucket": "test-bucket",
+                    "object_key": "exports/test-thread/abc123.csv",
+                },
+                "metadata": {"filename": "test-file.csv"},
+            },
+        )
+
+        await database.create_artifacts([artifact])
+
+        persisted = await database.get_artifact(artifact.id)
+
+        assert persisted is not None
+        assert persisted.message_id == assistant_message.id
+        assert (
+            persisted.data["source"]["object_key"] == "exports/test-thread/abc123.csv"
+        )
+
+    async def test_get_artifact_found(
+        self, database: AsyncDatabase, artifact: Artifact
+    ):
+        """Test getting an existing artifact."""
+        found = await database.get_artifact(artifact.id)
+
+        assert found is not None
+        assert found.id == artifact.id
+        assert found.type == artifact.type
+        assert found.data == artifact.data
+
+    async def test_get_artifact_not_found(self, database: AsyncDatabase):
+        """Test getting a non-existent artifact returns None."""
+        assert await database.get_artifact(uuid.uuid4()) is None
+
+    async def test_get_messages_loads_artifacts(
+        self, database: AsyncDatabase, messages_factory: MessagesFactory
+    ):
+        """get_messages eager-loads each message's artifacts."""
+        _, assistant_message = await messages_factory()
+
+        messages = await database.get_messages(assistant_message.thread_id)
+
+        assistant = next(m for m in messages if m.id == assistant_message.id)
+        assert len(assistant.artifacts) == 1
+        assert assistant.artifacts[0].data["metadata"]["filename"] == "test-file.csv"
 
 
 class TestAsyncDatabaseFeedback:

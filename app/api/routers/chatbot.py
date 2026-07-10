@@ -9,13 +9,12 @@ from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, Us
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
 from app.api.streaming.schemas import StreamEvent
-from app.artifacts import Artifact
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
     FeedbackPublic,
-    Message,
     MessageCreate,
+    MessagePublic,
     MessageRole,
     Thread,
     ThreadCreate,
@@ -79,7 +78,7 @@ async def delete_thread_and_checkpoints(
 @router.get("/threads/{thread_id}/messages")
 async def list_messages(
     thread_id: str, database: AsyncDB, user_id: UserID, order_by: str | None = None
-) -> list[Message]:
+) -> list[MessagePublic]:
     if order_by and order_by not in {"created_at", "-created_at"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -162,45 +161,43 @@ async def send_message(
     )
 
 
-@router.get("/messages/{message_id}/artifacts/{artifact_id}")
+@router.get("/artifacts/{artifact_id}")
 async def generate_artifact_download_url(
-    message_id: str,
     artifact_id: str,
     database: AsyncDB,
     user_id: UserID,
 ):
-    message = await database.get_message(message_id)
+    artifact = await database.get_artifact(artifact_id)
 
-    if message is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-
-    thread = await database.get_thread(message.thread_id)
-
-    if thread is None or str(thread.user_id) != user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-
-    artifacts = message.artifacts or []
-
-    raw = next((a for a in artifacts if a["id"] == artifact_id), None)
-
-    if raw is None:
+    if artifact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Artifact {artifact_id} not found",
         )
 
-    artifact = Artifact.model_validate(raw)
+    thread = await database.get_thread(artifact.thread_id)
 
-    if not gcs_object_exists(artifact.source.bucket, artifact.source.object_key):
+    if thread is None or str(thread.user_id) != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+
+    file_artifact = artifact.to_file_artifact()
+
+    if not gcs_object_exists(
+        bucket=file_artifact.source.bucket,
+        object_key=file_artifact.source.object_key,
+    ):
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail=f"Artifact {artifact_id} is no longer available",
         )
 
     signed_url = generate_signed_url(
-        bucket=artifact.source.bucket,
-        object_key=artifact.source.object_key,
-        download_filename=artifact.metadata.filename,
+        bucket=file_artifact.source.bucket,
+        object_key=file_artifact.source.object_key,
+        download_filename=file_artifact.metadata.filename,
     )
 
     return {"url": signed_url}

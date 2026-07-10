@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from app.agent.tools.exceptions import handle_tool_errors
-from app.artifacts import Artifact, ArtifactMetadata, RemoteObjectSource
+from app.artifacts import ArtifactMetadata, FileArtifact, RemoteObjectSource
 from app.settings import settings
 from app.storage import get_object_size
 
@@ -359,7 +359,7 @@ def export_query_results(
         }
     )
 
-    artifact = Artifact(
+    artifact = FileArtifact(
         source=RemoteObjectSource(
             bucket=settings.GOOGLE_GCS_BUCKET,
             object_key=object_key,

@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlmodel import SQLModel
 from testcontainers.postgres import PostgresContainer
 
-from app.artifacts import Artifact, ArtifactMetadata, RemoteObjectSource
 from app.db.database import AsyncDatabase
 from app.db.models import (
+    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackRating,
@@ -103,21 +103,6 @@ async def thread_factory(database: AsyncDatabase, user_id: int) -> ThreadFactory
 # Message Fixtures
 # =============================================================
 @pytest.fixture
-def artifact() -> Artifact:
-    return Artifact(
-        source=RemoteObjectSource(
-            bucket="test-bucket",
-            object_key="exports/test-thread/abc123.csv",
-        ),
-        metadata=ArtifactMetadata(
-            filename="test-file.csv",
-            mime_type="text/csv",
-            size_bytes=1024,
-        ),
-    )
-
-
-@pytest.fixture
 def user_message_create(thread: Thread) -> MessageCreate:
     """Mock MessageCreate instance for testing (user)."""
     return MessageCreate(
@@ -138,9 +123,7 @@ async def user_message(
 
 
 @pytest.fixture
-def assistant_message_create(
-    user_message: Message, artifact: Artifact
-) -> MessageCreate:
+def assistant_message_create(user_message: Message) -> MessageCreate:
     """Mock MessageCreate instance for testing (assistant)."""
 
     return MessageCreate(
@@ -149,7 +132,6 @@ def assistant_message_create(
         model_uri="mock-model",
         role=MessageRole.ASSISTANT,
         content="Mock assistant message",
-        artifacts=[artifact.model_dump(mode="json")],
         events=[{"mock-event": "event"}],
         status=MessageStatus.SUCCESS,
     )
@@ -164,9 +146,36 @@ async def assistant_message(
 
 
 @pytest_asyncio.fixture
-async def messages_factory(
-    database: AsyncDatabase, thread: Thread, artifact: Artifact
-) -> MessagesFactory:
+async def artifact(database: AsyncDatabase, assistant_message: Message) -> Artifact:
+    """A persisted file artifact belonging to the assistant message."""
+    artifact = Artifact(
+        message_id=assistant_message.id,
+        thread_id=assistant_message.thread_id,
+        type="file",
+        data={
+            "source": {
+                "type": "remote_object",
+                "provider": "gcs",
+                "bucket": "test-bucket",
+                "object_key": "exports/test-thread/abc123.csv",
+            },
+            "metadata": {
+                "filename": "test-file.csv",
+                "mime_type": "text/csv",
+                "size_bytes": 1024,
+            },
+        },
+    )
+
+    database.session.add(artifact)
+    await database.session.commit()
+    await database.session.refresh(artifact)
+
+    return artifact
+
+
+@pytest_asyncio.fixture
+async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesFactory:
     """Factory to create a (user message, assistant message) tuple in a single test."""
 
     async def factory() -> tuple[Message, Message]:
@@ -186,12 +195,34 @@ async def messages_factory(
             model_uri="mock-model",
             role=MessageRole.ASSISTANT,
             content="Mock assistant message",
-            artifacts=[artifact.model_dump(mode="json")],
             events=[{"mock-event": "event"}],
             status=MessageStatus.SUCCESS,
         )
 
         assistant_message = await database.create_message(assistant_message_create)
+
+        await database.create_artifacts(
+            [
+                Artifact(
+                    message_id=assistant_message.id,
+                    thread_id=assistant_message.thread_id,
+                    type="file",
+                    data={
+                        "source": {
+                            "type": "remote_object",
+                            "provider": "gcs",
+                            "bucket": "test-bucket",
+                            "object_key": "exports/test-thread/abc123.csv",
+                        },
+                        "metadata": {
+                            "filename": "test-file.csv",
+                            "mime_type": "text/csv",
+                            "size_bytes": 1024,
+                        },
+                    },
+                )
+            ]
+        )
 
         return user_message, assistant_message
 

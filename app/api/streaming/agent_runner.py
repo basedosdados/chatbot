@@ -12,7 +12,7 @@ from app.api.streaming.data_sources import resolve_data_source_names
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
 from app.db.database import AsyncDatabase, sessionmaker
-from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
+from app.db.models import Artifact, Message, MessageCreate, MessageRole, MessageStatus
 
 
 class ErrorMessage:
@@ -170,9 +170,8 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 tool_call_id=message.tool_call_id,
                 tool_name=message.name,
                 content=_truncate_json(message.content),
-                # Governs what the client and the persisted `events` see. Only surface
-                # user-facing file artifacts; internal handles (e.g. the query-result
-                # table reference from execute_bigquery_sql) stay in agent state.
+                # Guards what the client and the persisted events see. Only surface
+                # user-facing file artifacts; internal artifacts stay in agent state.
                 # NOTE: distinct from the file-only filter in run_agent below, which
                 # guards a different boundary (message.artifacts) — keep both.
                 artifact=message.artifact
@@ -292,7 +291,6 @@ async def run_agent(
             model_uri=model_uri,
             role=MessageRole.ASSISTANT,
             content=assistant_message,
-            artifacts=artifacts or None,
             events=events or None,
             structured_response=structured_response,
             status=status or MessageStatus.ERROR,
@@ -301,8 +299,26 @@ async def run_agent(
             async with sessionmaker() as session:
                 database = AsyncDatabase(session)
                 message = await database.create_message(message_create)
-            message_id = str(message.id)
-            error_details = None
+                message_id = str(message.id)
+                error_details = None
+                # Artifacts are a best-effort download convenience, persisted in a
+                # separate transaction: neither mapping nor writing them may lose the
+                # message. Worst case, the download 404s until the data is re-exported.
+                try:
+                    artifact_rows = [
+                        Artifact.from_tool_artifact(
+                            artifact,
+                            message_id=message_id,
+                            thread_id=thread_id,
+                        )
+                        for artifact in artifacts
+                    ]
+                    if artifact_rows:
+                        await database.create_artifacts(artifact_rows)
+                except Exception:
+                    logger.exception(
+                        f"Failed to persist artifacts for run {config['run_id']}:"
+                    )
         except Exception:
             logger.exception(
                 f"Failed to persist assistant message for run {config['run_id']}:"

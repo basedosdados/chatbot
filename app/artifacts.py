@@ -25,7 +25,9 @@ class ArtifactMetadata(BaseModel):
     size_bytes: int | None = None
 
 
-class Artifact(BaseModel):
+class FileArtifact(BaseModel):
+    """Transport shape for a downloadable file artifact (one artifact *kind*)."""
+
     model_config = ConfigDict(frozen=True)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
