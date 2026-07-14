@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -20,8 +20,15 @@ from app.db.models import (
     ThreadCreate,
     ThreadPayload,
 )
+from app.exports import (
+    ExportFormat,
+    ResultTableExpired,
+    ResultTooLarge,
+    derive_downloads,
+    materialize_export,
+)
 from app.settings import settings
-from app.storage import gcs_object_exists, generate_signed_url
+from app.storage import generate_signed_url
 
 router = APIRouter(prefix="/chatbot")
 
@@ -161,43 +168,103 @@ async def send_message(
     )
 
 
-@router.get("/artifacts/{artifact_id}")
-async def generate_artifact_download_url(
-    artifact_id: str,
+# User-facing details the frontend surfaces to the end user when a download fails.
+RESULTS_EXPIRED_DETAIL = "Estes resultados não estão mais disponíveis para download."
+
+RESULTS_TOO_LARGE_DETAIL = (
+    "Estes resultados são grandes demais para baixar em um único arquivo."
+)
+
+# Base name for the downloaded file (materialization appends the extension).
+DEFAULT_EXPORT_FILENAME = "resultados"
+
+
+def _download_filename(query_ref: str, query_refs: list[str]) -> str:
+    """Build the base name for a download (the extension is appended on materialization).
+
+    Suffixed with the query's 1-based position only when the answer backs more than one
+    query, so a lone result stays `resultados`.
+
+    Args:
+        query_ref (str): The `query_ref` being downloaded.
+        query_refs (list[str]): The answer's downloadable `query_ref`s, in order.
+
+    Returns:
+        str: The base filename, without extension.
+    """
+    if len(query_refs) <= 1:
+        return DEFAULT_EXPORT_FILENAME
+    return f"{DEFAULT_EXPORT_FILENAME}_{query_refs.index(query_ref) + 1}"
+
+
+@router.post("/messages/{message_id}/exports")
+async def export_message_results(
+    message_id: str,
     database: AsyncDB,
     user_id: UserID,
+    query_ref: str,
+    file_format: ExportFormat = Query("CSV", alias="format"),
 ):
-    artifact = await database.get_artifact(artifact_id)
+    message = await database.get_message(message_id)
 
-    if artifact is None:
+    if message is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Artifact {artifact_id} not found",
+            detail=f"Message {message_id} not found",
         )
 
-    thread = await database.get_thread(artifact.thread_id)
+    thread = await database.get_thread(message.thread_id)
 
+    # Identical 404 whether the message is missing or the caller doesn't own its
+    # thread, so a non-owner can't tell the two apart (IDOR protection).
     if thread is None or str(thread.user_id) != user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Artifact {artifact_id} not found",
+            detail=f"Message {message_id} not found",
         )
 
-    file_artifact = artifact.to_file_artifact()
+    query_refs = [
+        item["query_ref"] for item in derive_downloads(message.structured_response)
+    ]
 
-    if not gcs_object_exists(
-        bucket=file_artifact.source.bucket,
-        object_key=file_artifact.source.object_key,
-    ):
+    if query_ref not in query_refs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No downloadable results for query_ref '{query_ref}'",
+        )
+
+    query_handle = await database.get_query_handle(query_ref)
+
+    if query_handle is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No downloadable results for query_ref '{query_ref}'",
+        )
+
+    try:
+        exported = await asyncio.to_thread(
+            materialize_export,
+            query_ref=query_ref,
+            destination_table=query_handle.destination_table,
+            file_format=file_format,
+            filename=_download_filename(query_ref, query_refs),
+            thread_id=str(message.thread_id),
+        )
+    except ResultTableExpired as e:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail=f"Artifact {artifact_id} is no longer available",
-        )
+            detail=RESULTS_EXPIRED_DETAIL,
+        ) from e
+    except ResultTooLarge as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=RESULTS_TOO_LARGE_DETAIL,
+        ) from e
 
     signed_url = generate_signed_url(
-        bucket=file_artifact.source.bucket,
-        object_key=file_artifact.source.object_key,
-        download_filename=file_artifact.metadata.filename,
+        bucket=exported.bucket,
+        object_key=exported.object_key,
+        download_filename=exported.filename,
     )
 
     return {"url": signed_url}

@@ -3,22 +3,22 @@ from typing import TypeVar
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import selectinload
 from sqlmodel import SQLModel, select
 
 from app.db.models import (
-    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackSyncStatus,
     Message,
     MessageCreate,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -203,11 +203,7 @@ class AsyncDatabase:
         Returns:
             list[Message]: A list of Message objects.
         """
-        query = (
-            select(Message)
-            .where(Message.thread_id == thread_id)
-            .options(selectinload(Message.artifacts))
-        )
+        query = select(Message).where(Message.thread_id == thread_id)
         query = self._apply_order_by(query, Message, order_by)
 
         results = await self.session.execute(query)
@@ -215,39 +211,44 @@ class AsyncDatabase:
 
         return messages
 
-    # ==================================== Artifact ====================================
-    async def create_artifacts(self, artifacts: list[Artifact]) -> list[Artifact]:
-        """Create artifact rows in the artifacts table.
+    # ================================== QueryHandle ===================================
+    async def create_query_handles(self, query_handles: list[QueryHandle]) -> None:
+        """Bulk-insert query handles, skipping any whose `query_ref` already exists.
+
+        One round-trip with ON CONFLICT DO NOTHING (keyed by `query_ref`), preserving
+        create-if-not-exists: a `query_ref` reused across messages keeps its original
+        handle rather than overwriting it.
 
         Args:
-            artifacts (list[Artifact]): Artifact rows to persist.
-
-        Returns:
-            list[Artifact]: The persisted Artifact objects.
+            query_handles (list[QueryHandle]): The handles to persist.
         """
-        self.session.add_all(artifacts)
+        if not query_handles:
+            return
+
+        stmt = (
+            pg_insert(QueryHandle)
+            .values([handle.model_dump() for handle in query_handles])
+            .on_conflict_do_nothing(index_elements=["query_ref"])
+        )
+
+        await self.session.execute(stmt)
         await self.session.commit()
 
-        for artifact in artifacts:
-            await self.session.refresh(artifact)
-
-        return artifacts
-
-    async def get_artifact(self, artifact_id: str | UUID) -> Artifact | None:
-        """Get an artifact from the artifacts table.
+    async def get_query_handle(self, query_ref: str) -> QueryHandle | None:
+        """Get a stored query handle by its `query_ref`.
 
         Args:
-            artifact_id (str | UUID): The artifact unique identifier.
+            query_ref (str): The handle minted by `execute_bigquery_sql`.
 
         Returns:
-            Artifact | None: An Artifact object if found, None otherwise.
+            QueryHandle | None: The handle if found, None otherwise.
         """
-        artifact = await self.session.get(Artifact, artifact_id)
+        query_result = await self.session.get(QueryHandle, query_ref)
 
-        if artifact is None:
-            self.logger.warning(f"Artifact {artifact_id} not found")
+        if query_result is None:
+            self.logger.warning(f"Query handle {query_ref} not found")
 
-        return artifact
+        return query_result
 
     # ==================================== Feedback ====================================
     async def upsert_feedback(

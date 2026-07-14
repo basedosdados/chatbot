@@ -12,7 +12,20 @@ from app.api.streaming.data_sources import resolve_data_source_names
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
 from app.db.database import AsyncDatabase, sessionmaker
-from app.db.models import Artifact, Message, MessageCreate, MessageRole, MessageStatus
+from app.db.models import (
+    Message,
+    MessageCreate,
+    MessageRole,
+    MessageStatus,
+    QueryHandle,
+)
+from app.exports import (
+    DestinationTable,
+    Download,
+    collect_query_handles,
+    derive_downloads,
+    sanitize_sql_query_refs,
+)
 
 
 class ErrorMessage:
@@ -87,17 +100,17 @@ def _truncate_json(
 
 
 def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
-    """Process a streaming chunk from a react agent workflow into a standardized StreamEvent.
+    """Process a streaming chunk from a react agent workflow into a StreamEvent.
 
     Args:
-        chunk (dict[str, Any]): Raw chunk from agent workflow.
-            Only processes "agent" and "tools" nodes.
+        chunk (dict[str, Any]): A raw update chunk from the agent workflow.
 
     Returns:
         StreamEvent | None: Structured event or None if the chunk is ignored:
             - "tool_call" for agent messages with tool calls
             - "tool_output" for tool execution results
             - "final_answer" for agent messages without tool calls
+            - "model_call_limit" when the model call limit is reached
             - None for ignored chunks
     """
     if "model" in chunk:
@@ -170,14 +183,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 tool_call_id=message.tool_call_id,
                 tool_name=message.name,
                 content=_truncate_json(message.content),
-                # Guards what the client and the persisted events see. Only surface
-                # user-facing file artifacts; internal artifacts stay in agent state.
-                # NOTE: distinct from the file-only filter in run_agent below, which
-                # guards a different boundary (message.artifacts) — keep both.
-                artifact=message.artifact
-                if isinstance(message.artifact, dict)
-                and message.artifact.get("type") == "file"
-                else None,
+                artifact=message.artifact,  # internal artifacts are redacted on serialization (see ToolOutput)
             )
             for message in tool_messages
         ]
@@ -197,6 +203,36 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             )
             return StreamEvent(type="model_call_limit", data=event_data)
     return None
+
+
+async def _persist_query_handles(
+    database: AsyncDatabase,
+    *,
+    query_refs: list[str],
+    query_handles: dict[str, DestinationTable],
+    thread_id: str,
+):
+    """Persist the handle for each backing query so its download can be materialized.
+
+    Bulk create-if-not-exists: a `query_ref` reused across messages keeps its single
+    handle. `query_refs` are the answer's backing refs (already sanitized to the ones
+    that actually executed), so each is present in `query_handles`.
+
+    Args:
+        database (AsyncDatabase): The repository to persist through.
+        query_refs (list[str]): The answer's backing `query_ref`s.
+        query_handles (dict[str, DestinationTable]): Executed (query_ref -> result table) mapping.
+        thread_id (str): Owning thread for the persisted handles.
+    """
+    handles = [
+        QueryHandle(
+            query_ref=query_ref,
+            thread_id=thread_id,
+            destination_table=query_handles[query_ref],
+        )
+        for query_ref in query_refs
+    ]
+    await database.create_query_handles(handles)
 
 
 async def run_agent(
@@ -223,9 +259,10 @@ async def run_agent(
         queue (asyncio.Queue[StreamEvent]): Events queue.
     """
     events = []
-    artifacts = []
     assistant_message = ""
+    query_handles: dict[str, DestinationTable] = {}
     structured_response: dict[str, Any] | None = None
+    downloads: list[Download] = []
     status: MessageStatus | None = None
 
     try:
@@ -243,22 +280,26 @@ async def run_agent(
                 continue
 
             if event.type == "tool_output":
-                for output in event.data.tool_outputs:
-                    # Guards the message.artifacts column, which the download endpoint
-                    # indexes by `id` and validates as Artifact. Only file artifacts
-                    # belong here — independent of what _process_chunk streams, which
-                    # will diverge once non-file artifacts are surfaced to the client.
-                    if (
-                        isinstance(output.artifact, dict)
-                        and output.artifact.get("type") == "file"
-                    ):
-                        artifacts.append(output.artifact)
+                # Collect execute_bigquery_sql handles (query_ref -> destination_table)
+                # from the tool outputs' artifacts, for lazy on-click downloads.
+                query_handles |= collect_query_handles(
+                    output.artifact for output in event.data.tool_outputs
+                )
             elif event.type == "final_answer":
                 assistant_message = event.data.content
                 if event.data.structured_response is not None:
                     await resolve_data_source_names(event.data.structured_response)
                 structured_response = event.data.structured_response
                 status = MessageStatus.SUCCESS
+                # Sanitise the model's reported query_refs against those
+                # that actually executed this run
+                structured_response = sanitize_sql_query_refs(
+                    event.data.structured_response, set(query_handles)
+                )
+                event.data.structured_response = structured_response
+                # Derive the downloads offered for this answer
+                downloads = derive_downloads(structured_response)
+                event.data.downloads = downloads
             elif event.type == "model_call_limit":
                 assistant_message = event.data.content
                 status = MessageStatus.MODEL_CALL_LIMIT
@@ -301,24 +342,20 @@ async def run_agent(
                 message = await database.create_message(message_create)
                 message_id = str(message.id)
                 error_details = None
-                # Artifacts are a best-effort download convenience, persisted in a
-                # separate transaction: neither mapping nor writing them may lose the
-                # message. Worst case, the download 404s until the data is re-exported.
-                try:
-                    artifact_rows = [
-                        Artifact.from_tool_artifact(
-                            artifact,
-                            message_id=message_id,
+                # Query handles are a best-effort download convenience, persisted after
+                # the message (its own commit) so a handle failure never loses the message.
+                if downloads:
+                    try:
+                        await _persist_query_handles(
+                            database,
+                            query_refs=[item["query_ref"] for item in downloads],
+                            query_handles=query_handles,
                             thread_id=thread_id,
                         )
-                        for artifact in artifacts
-                    ]
-                    if artifact_rows:
-                        await database.create_artifacts(artifact_rows)
-                except Exception:
-                    logger.exception(
-                        f"Failed to persist artifacts for run {config['run_id']}:"
-                    )
+                    except Exception:
+                        logger.exception(
+                            f"Failed to persist query handles for run {config['run_id']}:"
+                        )
         except Exception:
             logger.exception(
                 f"Failed to persist assistant message for run {config['run_id']}:"
