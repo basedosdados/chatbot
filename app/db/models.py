@@ -96,10 +96,9 @@ class MessagePublic(MessageCreate):
 class QueryHandle(SQLModel, table=True):
     """The durable handle to an executed query, used to materialize downloads.
 
-    Not an artifact (it is never shown or downloaded as-is): it's plumbing. Keyed
-    by `query_ref` and scoped to a thread with no `message_id`, so a `query_ref`
-    reused across messages resolves to one handle regardless of which message
-    references it. Persisted when a backing `query_ref` is committed to download.
+    Not an artifact. Keyed by `query_ref` and scoped to a thread with no `message_id`,
+    so a `query_ref` reused across messages resolves to one handle regardless of which
+    message references it. Persisted when a backing `query_ref` is committed to download.
     """
 
     __tablename__ = "query_handles"
