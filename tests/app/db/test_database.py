@@ -6,13 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.database import AsyncDatabase, init_database
 from app.db.models import (
-    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackRating,
     FeedbackSyncStatus,
     Message,
     MessageCreate,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -29,7 +29,8 @@ async def test_init_database(async_engine: AsyncEngine):
     assert "thread" in tables
     assert "message" in tables
     assert "feedback" in tables
-    assert "artifact" in tables
+    assert "query_handles" in tables
+    assert "artifact" not in tables
 
 
 class TestAsyncDatabaseThread:
@@ -220,66 +221,85 @@ class TestAsyncDatabaseMessage:
         assert len(messages) == 0
 
 
-class TestAsyncDatabaseArtifact:
-    """Tests for Artifact operations."""
+class TestAsyncDatabaseQueryHandle:
+    """Tests for QueryHandle operations."""
 
-    async def test_create_artifacts_persists_and_links(
-        self,
-        database: AsyncDatabase,
-        assistant_message: Message,
-    ):
-        """create_artifacts persists artifact rows linked to their message."""
-        artifact = Artifact(
-            message_id=assistant_message.id,
-            thread_id=assistant_message.thread_id,
-            type="file",
-            data={
-                "source": {
-                    "type": "remote_object",
-                    "provider": "gcs",
-                    "bucket": "test-bucket",
-                    "object_key": "exports/test-thread/abc123.csv",
-                },
-                "metadata": {"filename": "test-file.csv"},
-            },
+    DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+    OTHER = {"projectId": "other", "datasetId": "d", "tableId": "t"}
+
+    def _handle(self, thread: Thread, query_ref: str, destination: dict) -> QueryHandle:
+        return QueryHandle(
+            query_ref=query_ref, thread_id=thread.id, destination_table=destination
         )
 
-        await database.create_artifacts([artifact])
-
-        persisted = await database.get_artifact(artifact.id)
-
-        assert persisted is not None
-        assert persisted.message_id == assistant_message.id
-        assert (
-            persisted.data["source"]["object_key"] == "exports/test-thread/abc123.csv"
+    async def test_create_query_handles_persists(
+        self, database: AsyncDatabase, thread: Thread
+    ):
+        """create_query_handles bulk-inserts every handle."""
+        await database.create_query_handles(
+            [
+                self._handle(thread, "qr_a", self.DESTINATION),
+                self._handle(thread, "qr_b", self.DESTINATION),
+            ]
         )
 
-    async def test_get_artifact_found(
-        self, database: AsyncDatabase, artifact: Artifact
+        first = await database.get_query_handle("qr_a")
+        second = await database.get_query_handle("qr_b")
+
+        assert first is not None and first.destination_table == self.DESTINATION
+        assert second is not None and second.thread_id == thread.id
+
+    async def test_create_query_handles_skips_existing_ref(
+        self, database: AsyncDatabase, thread: Thread
     ):
-        """Test getting an existing artifact."""
-        found = await database.get_artifact(artifact.id)
+        """A reused query_ref keeps its original handle (ON CONFLICT DO NOTHING)."""
+        await database.create_query_handles(
+            [self._handle(thread, "qr_dup", self.DESTINATION)]
+        )
+        await database.create_query_handles(
+            [self._handle(thread, "qr_dup", self.OTHER)]
+        )
+
+        handle = await database.get_query_handle("qr_dup")
+
+        # The original handle is preserved, not overwritten.
+        assert handle.destination_table == self.DESTINATION
+
+    async def test_create_query_handles_tolerates_duplicate_refs_in_one_batch(
+        self, database: AsyncDatabase, thread: Thread
+    ):
+        """A ref repeated within a single batch is inserted once, not an error.
+
+        Reachable when an answer lists the same query twice in sql_queries.
+        """
+        await database.create_query_handles(
+            [
+                self._handle(thread, "qr_same", self.DESTINATION),
+                self._handle(thread, "qr_same", self.OTHER),
+            ]
+        )
+
+        handle = await database.get_query_handle("qr_same")
+
+        assert handle is not None
+        assert handle.destination_table == self.DESTINATION
+
+    async def test_create_query_handles_empty_is_noop(self, database: AsyncDatabase):
+        """An empty list persists nothing and does not error."""
+        await database.create_query_handles([])
+
+    async def test_get_query_handle_found(
+        self, database: AsyncDatabase, query_handle: QueryHandle
+    ):
+        """An existing handle is returned by its query_ref."""
+        found = await database.get_query_handle(query_handle.query_ref)
 
         assert found is not None
-        assert found.id == artifact.id
-        assert found.type == artifact.type
-        assert found.data == artifact.data
+        assert found.query_ref == query_handle.query_ref
 
-    async def test_get_artifact_not_found(self, database: AsyncDatabase):
-        """Test getting a non-existent artifact returns None."""
-        assert await database.get_artifact(uuid.uuid4()) is None
-
-    async def test_get_messages_loads_artifacts(
-        self, database: AsyncDatabase, messages_factory: MessagesFactory
-    ):
-        """get_messages eager-loads each message's artifacts."""
-        _, assistant_message = await messages_factory()
-
-        messages = await database.get_messages(assistant_message.thread_id)
-
-        assistant = next(m for m in messages if m.id == assistant_message.id)
-        assert len(assistant.artifacts) == 1
-        assert assistant.artifacts[0].data["metadata"]["filename"] == "test-file.csv"
+    async def test_get_query_handle_not_found(self, database: AsyncDatabase):
+        """A missing query_ref returns None."""
+        assert await database.get_query_handle("qr_missing") is None
 
 
 class TestAsyncDatabaseFeedback:

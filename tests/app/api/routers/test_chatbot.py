@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import jwt
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
@@ -14,14 +15,18 @@ from app.api.dependencies import get_database, get_feedback_sender
 from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
-    Artifact,
     Feedback,
     FeedbackPublic,
     FeedbackRating,
     FeedbackSyncStatus,
     Message,
+    MessageCreate,
+    MessageRole,
+    MessageStatus,
+    QueryHandle,
     Thread,
 )
+from app.exports import ExportedFile, ResultTableExpired, ResultTooLarge
 from app.main import app
 from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
@@ -300,21 +305,43 @@ class TestListMessagesEndpoint:
 
         assert response.status_code == status.HTTP_200_OK
 
-        payload = response.json()
-        messages = [Message.model_validate(message) for message in payload]
+        messages = [Message.model_validate(message) for message in response.json()]
 
         assert isinstance(messages, list)
         assert len(messages) == 2
 
-        # The assistant message exposes its artifacts via ArtifactPublic, projecting
-        # display metadata while hiding internal storage fields.
-        assistant = next(m for m in payload if m["role"] == "ASSISTANT")
-        assert len(assistant["artifacts"]) == 1
-        artifact = assistant["artifacts"][0]
-        assert artifact["filename"] == "test-file.csv"
-        assert "data" not in artifact
-        assert "bucket" not in artifact
-        assert "object_key" not in artifact
+    async def test_list_messages_derives_download_from_sql_queries(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        thread: Thread,
+    ):
+        """The download affordance is derived from the answer's sql_queries on read."""
+        await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+                structured_response={
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_test"}]
+                },
+            )
+        )
+
+        response = client.get(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        [message] = response.json()
+        [download] = message["downloads"]
+        assert download["type"] == "query_result"
+        assert download["query_ref"] == "q_test"
+        assert "CSV" in download["formats"]
 
     def test_list_messages_empty(
         self, client: TestClient, access_token: str, thread: Thread
@@ -567,105 +594,203 @@ class TestUpsertFeedbackEndpoint:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-class TestGenerateArtifactDownloadURLEndpoint:
-    """Tests for GET /api/v1/chatbot/artifacts/{artifact_id}"""
+class TestExportMessageResultsEndpoint:
+    """Tests for POST /api/v1/chatbot/messages/{message_id}/exports"""
 
-    def test_generate_artifact_download_url_success(
+    DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+
+    @pytest_asyncio.fixture
+    async def downloadable_message(
+        self, database: AsyncDatabase, thread: Thread
+    ) -> Message:
+        """An assistant message backed by q_test, with its query handle persisted."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+                structured_response={
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_test"}]
+                },
+            )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="q_test",
+                    thread_id=thread.id,
+                    destination_table=self.DESTINATION,
+                )
+            ]
+        )
+        return message
+
+    @staticmethod
+    def _exported() -> ExportedFile:
+        return ExportedFile(
+            bucket="test-bucket",
+            object_key="exports/t/q_test.csv",
+            filename="resultados.csv",
+            mime_type="text/csv",
+            size_bytes=10,
+        )
+
+    def test_materialization_returns_signed_url(
         self,
         client: TestClient,
         access_token: str,
-        artifact: Artifact,
+        downloadable_message: Message,
         mocker: MockerFixture,
     ):
-        """Test successful download returns a signed URL."""
-        mocker.patch("app.api.routers.chatbot.gcs_object_exists", return_value=True)
-
+        """A click materializes the requested query+format and returns a signed URL."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
         mocker.patch(
-            "app.api.routers.chatbot.generate_signed_url",
-            return_value="https://storage.example.com/signed",
+            "app.api.routers.chatbot.generate_signed_url", return_value="https://signed"
         )
 
-        response = client.get(
-            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["url"] == "https://storage.example.com/signed"
+        assert response.json() == {"url": "https://signed"}
+        assert materialize.call_args.kwargs["query_ref"] == "q_test"
+        assert materialize.call_args.kwargs["file_format"] == "CSV"
 
-    def test_generate_artifact_download_url_thread_not_found(
-        self,
-        client: TestClient,
-        access_token: str,
-        artifact: Artifact,
-        database: AsyncDatabase,
-        mocker: MockerFixture,
+    def test_query_ref_not_backing_the_answer_404(
+        self, client: TestClient, access_token: str, downloadable_message: Message
     ):
-        """Test thread not found returns 404."""
-        mocker.patch.object(database, "get_thread", AsyncMock(return_value=None))
-
-        response = client.get(
-            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
+        """A query_ref not among the message's backing queries is rejected."""
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_other&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_generate_artifact_download_url_unauthorized_user(
-        self, client: TestClient, artifact: Artifact
+    def test_message_not_found(self, client: TestClient, access_token: str):
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/exports"
+            "?query_ref=q_test&format=CSV",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_unauthorized_user_cannot_export(
+        self, client: TestClient, downloadable_message: Message
     ):
-        """Test user does not own the thread returns 404 (IDOR protection)."""
+        """A user who does not own the thread gets 404 (IDOR protection)."""
         other_token = jwt.encode(
             {"uuid": str(uuid.uuid4())},
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
 
-        response = client.get(
-            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_test&format=CSV",
             headers={"Authorization": f"Bearer {other_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_generate_artifact_download_url_artifact_not_found(
-        self, client: TestClient, access_token: str
+    async def test_missing_handle_is_not_found(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        thread: Thread,
     ):
-        """Test artifact not found returns 404."""
-        artifact_id = uuid.uuid4()
-        response = client.get(
-            url=f"/api/v1/chatbot/artifacts/{artifact_id}",
+        """A backing ref whose handle was never persisted returns 404 (not expiry)."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+                structured_response={
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_no_handle"}]
+                },
+            )
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{message.id}/exports"
+            "?query_ref=q_no_handle&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert response.json()["detail"] == f"Artifact {artifact_id} not found"
 
-    def test_generate_artifact_download_url_artifact_no_longer_available(
+    def test_expired_table_is_gone(
         self,
         client: TestClient,
         access_token: str,
-        artifact: Artifact,
+        downloadable_message: Message,
         mocker: MockerFixture,
     ):
-        """Test non-existent artifact in GCS returns 410."""
-        mocker.patch("app.api.routers.chatbot.gcs_object_exists", return_value=False)
+        """An expired result table surfaces as 410."""
+        mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            side_effect=ResultTableExpired("gone"),
+        )
 
-        response = client.get(
-            url=f"/api/v1/chatbot/artifacts/{artifact.id}",
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_410_GONE
-        assert (
-            response.json()["detail"]
-            == f"Artifact {artifact.id} is no longer available"
+
+    def test_result_too_large_is_bad_request(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A too-large result set surfaces as 400."""
+        mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            side_effect=ResultTooLarge("too large"),
         )
 
-    def test_generate_artifact_download_url_unauthorized(
-        self, client: TestClient, artifact: Artifact
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_test&format=CSV",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_missing_query_ref_param_is_unprocessable(
+        self, client: TestClient, access_token: str, downloadable_message: Message
     ):
-        """Test download artifact unauthorized returns 401."""
-        response = client.get(url=f"/api/v1/chatbot/artifacts/{artifact.id}")
+        """`query_ref` is a required query parameter."""
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports?format=CSV",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def test_export_unauthorized(
+        self, client: TestClient, downloadable_message: Message
+    ):
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=q_test&format=CSV"
+        )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

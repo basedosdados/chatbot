@@ -9,7 +9,6 @@ from testcontainers.postgres import PostgresContainer
 
 from app.db.database import AsyncDatabase
 from app.db.models import (
-    Artifact,
     Feedback,
     FeedbackCreate,
     FeedbackRating,
@@ -17,6 +16,7 @@ from app.db.models import (
     MessageCreate,
     MessageRole,
     MessageStatus,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -146,32 +146,15 @@ async def assistant_message(
 
 
 @pytest_asyncio.fixture
-async def artifact(database: AsyncDatabase, assistant_message: Message) -> Artifact:
-    """A persisted file artifact belonging to the assistant message."""
-    artifact = Artifact(
-        message_id=assistant_message.id,
-        thread_id=assistant_message.thread_id,
-        type="file",
-        data={
-            "source": {
-                "type": "remote_object",
-                "provider": "gcs",
-                "bucket": "test-bucket",
-                "object_key": "exports/test-thread/abc123.csv",
-            },
-            "metadata": {
-                "filename": "test-file.csv",
-                "mime_type": "text/csv",
-                "size_bytes": 1024,
-            },
-        },
+async def query_handle(database: AsyncDatabase, thread: Thread) -> QueryHandle:
+    """A persisted query handle for the thread."""
+    handle = QueryHandle(
+        query_ref="qr_test",
+        thread_id=thread.id,
+        destination_table={"projectId": "p", "datasetId": "d", "tableId": "t"},
     )
-
-    database.session.add(artifact)
-    await database.session.commit()
-    await database.session.refresh(artifact)
-
-    return artifact
+    await database.create_query_handles([handle])
+    return handle
 
 
 @pytest_asyncio.fixture
@@ -200,29 +183,6 @@ async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesF
         )
 
         assistant_message = await database.create_message(assistant_message_create)
-
-        await database.create_artifacts(
-            [
-                Artifact(
-                    message_id=assistant_message.id,
-                    thread_id=assistant_message.thread_id,
-                    type="file",
-                    data={
-                        "source": {
-                            "type": "remote_object",
-                            "provider": "gcs",
-                            "bucket": "test-bucket",
-                            "object_key": "exports/test-thread/abc123.csv",
-                        },
-                        "metadata": {
-                            "filename": "test-file.csv",
-                            "mime_type": "text/csv",
-                            "size_bytes": 1024,
-                        },
-                    },
-                )
-            ]
-        )
 
         return user_message, assistant_message
 
