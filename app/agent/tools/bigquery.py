@@ -98,8 +98,9 @@ def execute_bigquery_sql(
         return json.dumps(message, ensure_ascii=False), None
 
     # Reference the anonymous result table BigQuery already materialized (~24h TTL)
-    # so a later export can hand back exactly these rows without re-running.
-    query_ref = f"qr_{uuid.uuid4().hex}"
+    # so a later export can hand back exactly these rows without re-running;
+    # kept short (unlike a full uuid) so the model reproduces it reliably.
+    query_ref = f"qr_{uuid.uuid4().hex[:8]}"
 
     content = json.dumps(
         {"query_ref": query_ref, "row_count": len(rows), "results": rows},
@@ -107,8 +108,6 @@ def execute_bigquery_sql(
         default=str,
     )
 
-    # Carried server-side on the ToolMessage (never streamed):
-    # the handle the answer's download is materialized from.
     artifact = {
         "type": "query_result",
         "query_ref": query_ref,

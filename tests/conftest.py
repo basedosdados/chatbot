@@ -146,11 +146,13 @@ async def assistant_message(
 
 
 @pytest_asyncio.fixture
-async def query_handle(database: AsyncDatabase, thread: Thread) -> QueryHandle:
-    """A persisted query handle for the thread."""
+async def query_handle(
+    database: AsyncDatabase, assistant_message: Message
+) -> QueryHandle:
+    """Mock query handle scoped to an assistant message."""
     handle = QueryHandle(
         query_ref="qr_test",
-        thread_id=thread.id,
+        message_id=assistant_message.id,
         destination_table={"projectId": "p", "datasetId": "d", "tableId": "t"},
     )
     await database.create_query_handles([handle])

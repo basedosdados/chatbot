@@ -69,7 +69,7 @@ class TestExecuteBigQuerySQL:
 
         assert output["results"] == [{"col1": "value1"}, {"col1": "value2"}]
         assert output["row_count"] == 2
-        assert re.fullmatch(r"qr_[0-9a-f]{32}", output["query_ref"])
+        assert re.fullmatch(r"qr_[0-9a-f]{8}", output["query_ref"])
 
     def test_successful_query_exposes_destination_table_on_artifact(
         self, mocker: MockerFixture, mock_config: dict

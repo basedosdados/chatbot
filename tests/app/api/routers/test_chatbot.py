@@ -326,7 +326,7 @@ class TestListMessagesEndpoint:
                 content="Answer",
                 status=MessageStatus.SUCCESS,
                 structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_test"}]
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_test"}]
                 },
             )
         )
@@ -340,7 +340,7 @@ class TestListMessagesEndpoint:
         [message] = response.json()
         [download] = message["downloads"]
         assert download["type"] == "query_result"
-        assert download["query_ref"] == "q_test"
+        assert download["query_ref"] == "qr_test"
         assert "CSV" in download["formats"]
 
     def test_list_messages_empty(
@@ -603,7 +603,7 @@ class TestExportMessageResultsEndpoint:
     async def downloadable_message(
         self, database: AsyncDatabase, thread: Thread
     ) -> Message:
-        """An assistant message backed by q_test, with its query handle persisted."""
+        """An assistant message backed by qr_test, with its query handle persisted."""
         message = await database.create_message(
             MessageCreate(
                 thread_id=thread.id,
@@ -612,15 +612,15 @@ class TestExportMessageResultsEndpoint:
                 content="Answer",
                 status=MessageStatus.SUCCESS,
                 structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_test"}]
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_test"}]
                 },
             )
         )
         await database.create_query_handles(
             [
                 QueryHandle(
-                    query_ref="q_test",
-                    thread_id=thread.id,
+                    query_ref="qr_test",
+                    message_id=message.id,
                     destination_table=self.DESTINATION,
                 )
             ]
@@ -631,7 +631,7 @@ class TestExportMessageResultsEndpoint:
     def _exported() -> ExportedFile:
         return ExportedFile(
             bucket="test-bucket",
-            object_key="exports/t/q_test.csv",
+            object_key="exports/m1/qr_test.csv",
             filename="resultados.csv",
             mime_type="text/csv",
             size_bytes=10,
@@ -655,13 +655,13 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_test&format=CSV",
+            "?query_ref=qr_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {"url": "https://signed"}
-        assert materialize.call_args.kwargs["query_ref"] == "q_test"
+        assert materialize.call_args.kwargs["query_ref"] == "qr_test"
         assert materialize.call_args.kwargs["file_format"] == "CSV"
 
     def test_query_ref_not_backing_the_answer_404(
@@ -670,7 +670,7 @@ class TestExportMessageResultsEndpoint:
         """A query_ref not among the message's backing queries is rejected."""
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_other&format=CSV",
+            "?query_ref=qr_other&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -679,7 +679,7 @@ class TestExportMessageResultsEndpoint:
     def test_message_not_found(self, client: TestClient, access_token: str):
         response = client.post(
             url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/exports"
-            "?query_ref=q_test&format=CSV",
+            "?query_ref=qr_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -697,7 +697,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_test&format=CSV",
+            "?query_ref=qr_test&format=CSV",
             headers={"Authorization": f"Bearer {other_token}"},
         )
 
@@ -719,14 +719,14 @@ class TestExportMessageResultsEndpoint:
                 content="Answer",
                 status=MessageStatus.SUCCESS,
                 structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "q_no_handle"}]
+                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_no_handle"}]
                 },
             )
         )
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{message.id}/exports"
-            "?query_ref=q_no_handle&format=CSV",
+            "?query_ref=qr_no_handle&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -747,7 +747,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_test&format=CSV",
+            "?query_ref=qr_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -768,7 +768,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_test&format=CSV",
+            "?query_ref=qr_test&format=CSV",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -790,7 +790,7 @@ class TestExportMessageResultsEndpoint:
     ):
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=q_test&format=CSV"
+            "?query_ref=qr_test&format=CSV"
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

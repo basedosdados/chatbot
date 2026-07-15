@@ -135,7 +135,7 @@ class TestMaterializeExport:
                 "destination_table": DESTINATION,
                 "file_format": "CSV",
                 "filename": "resultados",
-                "thread_id": "t1",
+                "message_id": "m1",
                 **overrides,
             }
         )
@@ -151,7 +151,7 @@ class TestMaterializeExport:
         exported = self._materialize()
 
         assert exported.bucket == settings.GOOGLE_GCS_BUCKET
-        assert exported.object_key == "exports/t1/qr_1.csv"
+        assert exported.object_key == "exports/m1/qr_1.csv"
         assert exported.filename == "resultados.csv"
         assert exported.mime_type == "text/csv"
         assert exported.size_bytes == 1024
@@ -171,7 +171,7 @@ class TestMaterializeExport:
 
         exported = self._materialize(file_format="PARQUET")
 
-        assert exported.object_key == "exports/t1/qr_1.parquet"
+        assert exported.object_key == "exports/m1/qr_1.parquet"
         assert exported.mime_type == "application/vnd.apache.parquet"
         assert exported.size_bytes == 512
         client.extract_table.assert_not_called()

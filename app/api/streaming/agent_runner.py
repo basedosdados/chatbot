@@ -208,26 +208,26 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
 async def _persist_query_handles(
     database: AsyncDatabase,
     *,
+    message_id: str,
     query_refs: list[str],
     query_handles: dict[str, DestinationTable],
-    thread_id: str,
 ):
     """Persist the handle for each backing query so its download can be materialized.
 
-    Bulk create-if-not-exists: a `query_ref` reused across messages keeps its single
-    handle. `query_refs` are the answer's backing refs (already sanitized to the ones
-    that actually executed), so each is present in `query_handles`.
+    Handles are scoped to the answer's message, since a `query_ref` is only unique
+    within its run. `query_refs` are the answer's backing refs (already sanitized
+    to the ones that actually executed), so each is present in `query_handles`.
 
     Args:
         database (AsyncDatabase): The repository to persist through.
         query_refs (list[str]): The answer's backing `query_ref`s.
         query_handles (dict[str, DestinationTable]): Executed (query_ref -> result table) mapping.
-        thread_id (str): Owning thread for the persisted handles.
+        message_id (str): The owning message/run the handles are scoped to.
     """
     handles = [
         QueryHandle(
             query_ref=query_ref,
-            thread_id=thread_id,
+            message_id=message_id,
             destination_table=query_handles[query_ref],
         )
         for query_ref in query_refs
@@ -348,9 +348,9 @@ async def run_agent(
                     try:
                         await _persist_query_handles(
                             database,
+                            message_id=message_id,
                             query_refs=[item["query_ref"] for item in downloads],
                             query_handles=query_handles,
-                            thread_id=thread_id,
                         )
                     except Exception:
                         logger.exception(

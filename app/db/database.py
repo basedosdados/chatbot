@@ -213,11 +213,11 @@ class AsyncDatabase:
 
     # ================================== QueryHandle ===================================
     async def create_query_handles(self, query_handles: list[QueryHandle]) -> None:
-        """Bulk-insert query handles, skipping any whose `query_ref` already exists.
+        """Bulk-insert query handles, skipping any that already exist.
 
-        One round-trip with ON CONFLICT DO NOTHING (keyed by `query_ref`), preserving
-        create-if-not-exists: a `query_ref` reused across messages keeps its original
-        handle rather than overwriting it.
+        One round-trip with ON CONFLICT DO NOTHING keyed by (`message_id`, `query_ref`),
+        so a `query_ref` the answer lists more than once keeps its first handle rather
+        than erroring on the duplicate.
 
         Args:
             query_handles (list[QueryHandle]): The handles to persist.
@@ -228,27 +228,34 @@ class AsyncDatabase:
         stmt = (
             pg_insert(QueryHandle)
             .values([handle.model_dump() for handle in query_handles])
-            .on_conflict_do_nothing(index_elements=["query_ref"])
+            .on_conflict_do_nothing(index_elements=["message_id", "query_ref"])
         )
 
         await self.session.execute(stmt)
         await self.session.commit()
 
-    async def get_query_handle(self, query_ref: str) -> QueryHandle | None:
-        """Get a stored query handle by its `query_ref`.
+    async def get_query_handle(
+        self, message_id: str | UUID, query_ref: str
+    ) -> QueryHandle | None:
+        """Get a stored query handle by its (`message_id`, `query_ref`).
 
         Args:
-            query_ref (str): The handle minted by `execute_bigquery_sql`.
+            message_id (str | UUID): The message the handle is scoped to.
+            query_ref (str): The short handle minted by `execute_bigquery_sql`.
 
         Returns:
             QueryHandle | None: The handle if found, None otherwise.
         """
-        query_result = await self.session.get(QueryHandle, query_ref)
+        query_handle = await self.session.get(
+            QueryHandle, {"message_id": message_id, "query_ref": query_ref}
+        )
 
-        if query_result is None:
-            self.logger.warning(f"Query handle {query_ref} not found")
+        if query_handle is None:
+            self.logger.warning(
+                f"Query handle {query_ref} for message {message_id} not found"
+            )
 
-        return query_result
+        return query_handle
 
     # ==================================== Feedback ====================================
     async def upsert_feedback(

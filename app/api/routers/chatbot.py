@@ -233,7 +233,7 @@ async def export_message_results(
             detail=f"No downloadable results for query_ref '{query_ref}'",
         )
 
-    query_handle = await database.get_query_handle(query_ref)
+    query_handle = await database.get_query_handle(message.id, query_ref)
 
     if query_handle is None:
         raise HTTPException(
@@ -248,7 +248,7 @@ async def export_message_results(
             destination_table=query_handle.destination_table,
             file_format=file_format,
             filename=_download_filename(query_ref, query_refs),
-            thread_id=str(message.thread_id),
+            message_id=str(message.id),
         )
     except ResultTableExpired as e:
         raise HTTPException(

@@ -40,8 +40,7 @@ class ExportedFile:
     """A materialized download: a single GCS object ready to be signed.
 
     The return of `materialize_export` — a transient description of the object
-    just extracted (or reused via its deterministic key). Downloads are stateless,
-    so this is deliberately not persisted; an exported file is not an artifact.
+    just extracted or reused; downloads are stateless, so it is not persisted.
     """
 
     bucket: str
@@ -53,17 +52,13 @@ class ExportedFile:
 
 class ResultTableExpired(Exception):
     """The BigQuery result table backing a query_ref no longer exists (~24h TTL).
-
-    A typed signal for the endpoint to map to a 410 — it carries the raw BigQuery
-    cause for logs, not user-facing text (the endpoint owns that).
+    A typed signal for the endpoint to map to a 410.
     """
 
 
 class ResultTooLarge(Exception):
     """The result set is too big to export to a single file.
-
-    A typed signal for the endpoint to map to a 400 — carries the raw cause for logs,
-    not user-facing text (the endpoint owns that).
+    A typed signal for the endpoint to map to a 400.
     """
 
 
@@ -129,8 +124,7 @@ def _extract_table_to_gcs(
     bucket = settings.GOOGLE_GCS_BUCKET
     gcs_uri = f"gs://{bucket}/{object_key}"
 
-    # Extract the result table BigQuery already materialized straight to GCS. No re-run:
-    # the file is byte-identical to what the model saw, and no query bytes are re-billed.
+    # Extract straight from the table BigQuery already materialized.
     try:
         _bq_client().extract_table(
             bq.TableReference.from_api_repr(destination_table),
@@ -140,9 +134,6 @@ def _extract_table_to_gcs(
             ),
         ).result()
     except NotFound as e:
-        # The result table lives only ~24h; once BigQuery expires it (or the query was
-        # never actually run) the extract job 404s. Caught by type rather than by the
-        # raw `reason` string. Surfaced as a typed signal the caller maps to a 410.
         raise ResultTableExpired(str(e)) from e
     except GoogleAPICallError as e:
         # "Too large for a single file" is a generic 400 with no dedicated exception
@@ -167,23 +158,21 @@ def materialize_export(
     destination_table: DestinationTable,
     file_format: ExportFormat,
     filename: str,
-    thread_id: str,
+    message_id: str,
 ) -> ExportedFile:
     """Materialize a query handle as a downloadable GCS object.
 
-    Extracts the already-materialized result table to a single GCS object,
-    byte-identical to what the model saw — no query is ever re-run. The object key is
-    deterministic (`exports/{thread_id}/{query_ref}.{ext}`), so a repeat download of the
-    same (query_ref, format) reuses the existing object instead of re-extracting, and a
-    click after the object was lifecycle-deleted re-extracts it in place — as long as the
-    result table still exists, otherwise `ResultTableExpired` (mapped to a 410).
+    Extracts the result table (see `_extract_table_to_gcs`) to a deterministic,
+    message-scoped key (`exports/{message_id}/{query_ref}.{ext}`; `query_ref` is
+    only unique within its run). The determinism makes downloads idempotent: a repeat
+    reuses the existing object, and a lifecycle-deleted one is re-extracted in place.
 
     Args:
         query_ref (str): The handle whose result table is exported.
         destination_table (DestinationTable): `TableReference.to_api_repr()` of that table.
         file_format (ExportFormat): The output format.
         filename (str): Base name for the file (the extension is appended).
-        thread_id (str): Owning thread, used for the deterministic object key.
+        message_id (str): The owning message/run, used for the deterministic object key.
 
     Returns:
         ExportedFile: The GCS object (bucket, key, filename, mime type, size) to sign.
@@ -194,10 +183,9 @@ def materialize_export(
     """
     bucket = settings.GOOGLE_GCS_BUCKET
     extension = EXPORT_FORMATS[file_format].extension
-    object_key = f"exports/{thread_id}/{query_ref}.{extension}"
+    object_key = f"exports/{message_id}/{query_ref}.{extension}"
 
-    # Reuse the object if it's already there (a prior download of this query+format);
-    # a missing object (never made, or lifecycle-deleted) is (re-)extracted in place.
+    # Reuse a previously extracted object; (re-)extract only when it is absent.
     size_bytes = get_object_size(bucket, object_key)
 
     if size_bytes is None:

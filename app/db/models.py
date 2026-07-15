@@ -96,17 +96,17 @@ class MessagePublic(MessageCreate):
 class QueryHandle(SQLModel, table=True):
     """The durable handle to an executed query, used to materialize downloads.
 
-    Not an artifact. Keyed by `query_ref` and scoped to a thread with no `message_id`,
-    so a `query_ref` reused across messages resolves to one handle regardless of which
-    message references it. Persisted when a backing `query_ref` is committed to download.
+    Keyed by (`message_id`, `query_ref`): the `query_ref` is a short token the model
+    echoes into its answer and is only unique within the run that produced it, so it is
+    scoped to that run's message. Persisted when a backing `query_ref` is committed to download.
     """
 
     __tablename__ = "query_handles"
 
+    # Field order defines the composite PK column order (message_id, query_ref) — keep
+    # message_id first to match the migration; reordering these fields changes the PK.
+    message_id: uuid.UUID = Field(foreign_key="message.id", primary_key=True)
     query_ref: str = Field(primary_key=True)
-    thread_id: uuid.UUID = Field(foreign_key="thread.id", index=True)
-    # `TableReference.to_api_repr()` of the BigQuery result table (~24h TTL). Downloads
-    # extract straight from it; once BigQuery expires it the download 410s (no re-run).
     destination_table: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

@@ -227,46 +227,50 @@ class TestAsyncDatabaseQueryHandle:
     DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
     OTHER = {"projectId": "other", "datasetId": "d", "tableId": "t"}
 
-    def _handle(self, thread: Thread, query_ref: str, destination: dict) -> QueryHandle:
+    def _handle(
+        self, message: Message, query_ref: str, destination: dict
+    ) -> QueryHandle:
         return QueryHandle(
-            query_ref=query_ref, thread_id=thread.id, destination_table=destination
+            query_ref=query_ref,
+            message_id=message.id,
+            destination_table=destination,
         )
 
     async def test_create_query_handles_persists(
-        self, database: AsyncDatabase, thread: Thread
+        self, database: AsyncDatabase, assistant_message: Message
     ):
         """create_query_handles bulk-inserts every handle."""
         await database.create_query_handles(
             [
-                self._handle(thread, "qr_a", self.DESTINATION),
-                self._handle(thread, "qr_b", self.DESTINATION),
+                self._handle(assistant_message, "qr_a", self.DESTINATION),
+                self._handle(assistant_message, "qr_b", self.DESTINATION),
             ]
         )
 
-        first = await database.get_query_handle("qr_a")
-        second = await database.get_query_handle("qr_b")
+        first = await database.get_query_handle(assistant_message.id, "qr_a")
+        second = await database.get_query_handle(assistant_message.id, "qr_b")
 
         assert first is not None and first.destination_table == self.DESTINATION
-        assert second is not None and second.thread_id == thread.id
+        assert second is not None and second.message_id == assistant_message.id
 
     async def test_create_query_handles_skips_existing_ref(
-        self, database: AsyncDatabase, thread: Thread
+        self, database: AsyncDatabase, assistant_message: Message
     ):
-        """A reused query_ref keeps its original handle (ON CONFLICT DO NOTHING)."""
+        """A reused (message, query_ref) keeps its original handle (ON CONFLICT DO NOTHING)."""
         await database.create_query_handles(
-            [self._handle(thread, "qr_dup", self.DESTINATION)]
+            [self._handle(assistant_message, "qr_dup", self.DESTINATION)]
         )
         await database.create_query_handles(
-            [self._handle(thread, "qr_dup", self.OTHER)]
+            [self._handle(assistant_message, "qr_dup", self.OTHER)]
         )
 
-        handle = await database.get_query_handle("qr_dup")
+        handle = await database.get_query_handle(assistant_message.id, "qr_dup")
 
         # The original handle is preserved, not overwritten.
         assert handle.destination_table == self.DESTINATION
 
     async def test_create_query_handles_tolerates_duplicate_refs_in_one_batch(
-        self, database: AsyncDatabase, thread: Thread
+        self, database: AsyncDatabase, assistant_message: Message
     ):
         """A ref repeated within a single batch is inserted once, not an error.
 
@@ -274,12 +278,12 @@ class TestAsyncDatabaseQueryHandle:
         """
         await database.create_query_handles(
             [
-                self._handle(thread, "qr_same", self.DESTINATION),
-                self._handle(thread, "qr_same", self.OTHER),
+                self._handle(assistant_message, "qr_same", self.DESTINATION),
+                self._handle(assistant_message, "qr_same", self.OTHER),
             ]
         )
 
-        handle = await database.get_query_handle("qr_same")
+        handle = await database.get_query_handle(assistant_message.id, "qr_same")
 
         assert handle is not None
         assert handle.destination_table == self.DESTINATION
@@ -291,15 +295,17 @@ class TestAsyncDatabaseQueryHandle:
     async def test_get_query_handle_found(
         self, database: AsyncDatabase, query_handle: QueryHandle
     ):
-        """An existing handle is returned by its query_ref."""
-        found = await database.get_query_handle(query_handle.query_ref)
+        """An existing handle is returned by its (message_id, query_ref)."""
+        found = await database.get_query_handle(
+            query_handle.message_id, query_handle.query_ref
+        )
 
         assert found is not None
         assert found.query_ref == query_handle.query_ref
 
     async def test_get_query_handle_not_found(self, database: AsyncDatabase):
-        """A missing query_ref returns None."""
-        assert await database.get_query_handle("qr_missing") is None
+        """A missing (message_id, query_ref) returns None."""
+        assert await database.get_query_handle(uuid.uuid4(), "qr_missing") is None
 
 
 class TestAsyncDatabaseFeedback:

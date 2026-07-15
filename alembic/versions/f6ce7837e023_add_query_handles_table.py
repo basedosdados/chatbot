@@ -21,24 +21,21 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
         "query_handles",
+        sa.Column("message_id", sa.Uuid(), nullable=False),
         sa.Column("query_ref", sa.String(), nullable=False),
-        sa.Column("thread_id", sa.Uuid(), nullable=False),
         sa.Column("destination_table", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
-            ["thread_id"],
-            ["thread.id"],
+            ["message_id"],
+            ["message.id"],
         ),
-        sa.PrimaryKeyConstraint("query_ref"),
+        sa.PrimaryKeyConstraint("message_id", "query_ref"),
     )
     op.create_index(
         op.f("ix_query_handles_created_at"),
         "query_handles",
         ["created_at"],
         unique=False,
-    )
-    op.create_index(
-        op.f("ix_query_handles_thread_id"), "query_handles", ["thread_id"], unique=False
     )
     # Safe to drop outright only because the artifacts feature never shipped to
     # production, so there is no message.artifacts data to preserve. Otherwise
@@ -55,6 +52,5 @@ def downgrade() -> None:
         "message",
         sa.Column("artifacts", sa.JSON(none_as_null=True), nullable=True),
     )
-    op.drop_index(op.f("ix_query_handles_thread_id"), table_name="query_handles")
     op.drop_index(op.f("ix_query_handles_created_at"), table_name="query_handles")
     op.drop_table("query_handles")
