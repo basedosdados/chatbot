@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.agent.schemas import StructuredResponse
 from app.api.schemas import ConfigDict
+from app.api.streaming.data_sources import resolve_data_source_names
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
 from app.db.database import AsyncDatabase, sessionmaker
@@ -240,6 +241,8 @@ async def run_agent(
                         artifacts.append(output.artifact)
             elif event.type == "final_answer":
                 assistant_message = event.data.content
+                if event.data.structured_response is not None:
+                    await resolve_data_source_names(event.data.structured_response)
                 structured_response = event.data.structured_response
                 status = MessageStatus.SUCCESS
             elif event.type == "model_call_limit":

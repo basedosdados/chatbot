@@ -323,6 +323,8 @@ class TestProcessChunk:
         assert event.data.content == "Here is your answer."
         assert event.data.structured_response is not None
         assert event.data.structured_response["response"] == "Here is your answer."
+        # `_process_chunk` dumps the model's fields as-is; the authoritative name is resolved
+        # later in `run_agent` (see test_structured_response_is_emitted_and_persisted).
         assert event.data.structured_response["data_sources"] == [
             {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
         ]
@@ -543,16 +545,18 @@ class TestRunAgent:
 
     async def test_structured_response_is_emitted_and_persisted(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         mock_database: MagicMock,
         mock_user_message: Message,
         config: ConfigDict,
         thread_id: str,
     ):
-        """A structured final answer is streamed and persisted on the message row."""
+        """A structured final answer is streamed and persisted on the message row,
+        with each data source's display name resolved from its table UUID."""
         structured = StructuredResponse(
             response="Final answer",
             data_sources=[
-                DataSource(dataset_id="ds1", table_id="tb1", name="Tabela 1")
+                DataSource(dataset_id="ds1", table_id="tb1", name="model fallback")
             ],
             temporal_coverage=TemporalCoverage(
                 period_start="2020",
@@ -561,6 +565,16 @@ class TestRunAgent:
             ),
             sql_queries=["SELECT 1"],
             follow_up_questions=["E em 2026?"],
+        )
+
+        async def fake_resolve(structured_response: dict[str, Any]):
+            for source in structured_response.get("data_sources") or []:
+                source["name"] = "Conjunto DS1 - Tabela TB1"
+
+        resolve_names = AsyncMock(side_effect=fake_resolve)
+
+        monkeypatch.setattr(
+            "app.api.streaming.agent_runner.resolve_data_source_names", resolve_names
         )
 
         agent = MagicMock()
@@ -595,8 +609,13 @@ class TestRunAgent:
 
         assert events[0].data.structured_response is not None
         assert events[0].data.structured_response["response"] == "Final answer"
+        resolve_names.assert_awaited_once()
         assert events[0].data.structured_response["data_sources"] == [
-            {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
+            {
+                "dataset_id": "ds1",
+                "table_id": "tb1",
+                "name": "Conjunto DS1 - Tabela TB1",
+            }
         ]
         assert events[0].data.structured_response["temporal_coverage"] == {
             "period_start": "2020",
