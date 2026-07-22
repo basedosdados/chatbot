@@ -9,13 +9,13 @@ from pytest_mock import MockerFixture
 from app.exports import (
     EXPORT_FORMATS,
     SUPPORTED_EXPORT_FORMATS,
+    CollectedQueryHandle,
     ExportFormat,
     ResultTableExpired,
     ResultTooLarge,
     collect_query_handles,
-    derive_downloads,
     materialize_export,
-    sanitize_sql_query_refs,
+    query_result_download,
 )
 from app.settings import settings
 
@@ -31,91 +31,43 @@ def test_export_formats_match_the_advertised_literal():
     assert set(get_args(ExportFormat.__value__)) == set(EXPORT_FORMATS)
 
 
-def test_collect_query_handles_maps_only_query_result_artifacts():
-    """query_result artifacts become {query_ref: destination_table}; the rest are ignored."""
-    artifacts = [
-        {"type": "query_result", "query_ref": "qr_1", "destination_table": DESTINATION},
-        None,  # a tool with no artifact
-        {"type": "file", "id": "x"},  # some other artifact kind
-        {
-            "type": "query_result",
-            "query_ref": "qr_2",
-        },  # no destination_table -> skipped
-    ]
-
-    assert collect_query_handles(artifacts) == {"qr_1": DESTINATION}
+def test_query_result_download_shape():
+    """An executed query becomes one download, with every supported format."""
+    assert query_result_download("qr_1", "vendas_por_ano") == {
+        "type": "query_result",
+        "query_ref": "qr_1",
+        "slug": "vendas_por_ano",
+        "formats": SUPPORTED_EXPORT_FORMATS,
+    }
 
 
-class TestSanitizeSqlQueryRefs:
-    """Only refs that actually executed this run may survive as download handles."""
-
-    def test_keeps_executed_refs_and_nulls_the_rest(self):
-        structured = {
-            "sql_queries": [
-                {"sql": "a", "query_ref": "qr_1"},
-                {"sql": "b", "query_ref": "qr_hallucinated"},
-            ]
-        }
-
-        cleaned = sanitize_sql_query_refs(structured, {"qr_1"})
-
-        # Pure: the input is left untouched ...
-        assert structured["sql_queries"][1]["query_ref"] == "qr_hallucinated"
-        # ... and the cleaned copy nulls the ref that did not execute.
-        assert cleaned["sql_queries"][0]["query_ref"] == "qr_1"
-        assert cleaned["sql_queries"][1]["query_ref"] is None
-
-    def test_none_passes_through(self):
-        assert sanitize_sql_query_refs(None, {"qr_1"}) is None
-
-    def test_nothing_to_clean_returns_input_unchanged(self):
-        no_queries = {"response": "x"}
-        empty = {"sql_queries": []}
-
-        assert sanitize_sql_query_refs(no_queries, set()) is no_queries
-        assert sanitize_sql_query_refs(empty, set()) is empty
-
-
-class TestDeriveDownloads:
-    """The download affordance is one item per backing query with a real ref."""
-
-    @staticmethod
-    def _query_result(query_ref: str) -> dict:
-        return {
-            "type": "query_result",
-            "query_ref": query_ref,
-            "formats": SUPPORTED_EXPORT_FORMATS,
-        }
-
-    def test_one_download_per_backing_query(self):
-        structured = {
-            "sql_queries": [
-                {"sql": "a", "query_ref": "qr_1"},
-                {"sql": "b", "query_ref": "qr_2"},
-            ]
-        }
-
-        assert derive_downloads(structured) == [
-            self._query_result("qr_1"),
-            self._query_result("qr_2"),
+class TestCollectQueryHandles:
+    def test_collect_query_handles_appends_only_query_result_artifacts(self):
+        """query_result artifacts are appended as handles; other artifacts are ignored."""
+        artifacts = [
+            {
+                "type": "query_result",
+                "query_ref": "qr_1",
+                "slug": "vendas",
+                "destination_table": DESTINATION,
+            },
+            None,  # a tool with no artifact
+            {"type": "file", "id": "x"},  # some other artifact kind
         ]
 
-    def test_ignores_null_refs(self):
-        structured = {
-            "sql_queries": [
-                {"sql": "a", "query_ref": "qr_1"},
-                {"sql": "b", "query_ref": None},
-            ]
-        }
+        collected: list[CollectedQueryHandle] = []
+        collect_query_handles(artifacts, collected)
 
-        assert derive_downloads(structured) == [self._query_result("qr_1")]
+        assert collected == [
+            CollectedQueryHandle(
+                query_ref="qr_1", slug="vendas", destination_table=DESTINATION
+            )
+        ]
 
-    def test_empty_when_nothing_downloadable(self):
-        assert derive_downloads({"sql_queries": []}) == []
-        assert (
-            derive_downloads({"sql_queries": [{"sql": "a", "query_ref": None}]}) == []
-        )
-        assert derive_downloads(None) == []
+    def test_collect_query_handles_raises_on_malformed_query_result(self):
+        """A query_result artifact missing a field is a producer bug — fail loud, don't skip."""
+        with pytest.raises(KeyError):
+            collect_query_handles([{"type": "query_result", "query_ref": "qr_1"}], [])
 
 
 class TestMaterializeExport:

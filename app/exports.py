@@ -13,19 +13,34 @@ from app.storage import get_object_size
 type ExportFormat = Literal["AVRO", "CSV", "JSONL", "PARQUET"]
 
 
+@dataclass(frozen=True)
+class CollectedQueryHandle:
+    """An executed query's handle, gathered from a tool-output artifact."""
+
+    query_ref: str
+    slug: str
+    destination_table: dict[str, Any]
+
+
 class QueryResultDownload(TypedDict):
-    """A downloadable query result: its handle and the formats it can be exported in."""
+    """A downloadable query result: its handle, slug, and export formats."""
 
     type: Literal["query_result"]
     query_ref: str
+    slug: str
     formats: list[ExportFormat]
 
 
-# One download offered on a message. Other kinds join here, discriminated by `type`.
-type Download = QueryResultDownload
+class ResultTableExpired(Exception):
+    """The BigQuery result table backing a query_ref no longer exists (~24h TTL).
+    A typed signal for the endpoint to map to a 410.
+    """
 
-# A BigQuery result table as `TableReference.to_api_repr()`
-type DestinationTable = dict[str, Any]
+
+class ResultTooLarge(Exception):
+    """The result set is too big to export to a single file.
+    A typed signal for the endpoint to map to a 400.
+    """
 
 
 @dataclass(frozen=True)
@@ -48,18 +63,6 @@ class ExportedFile:
     filename: str
     mime_type: str
     size_bytes: int
-
-
-class ResultTableExpired(Exception):
-    """The BigQuery result table backing a query_ref no longer exists (~24h TTL).
-    A typed signal for the endpoint to map to a 410.
-    """
-
-
-class ResultTooLarge(Exception):
-    """The result set is too big to export to a single file.
-    A typed signal for the endpoint to map to a 400.
-    """
 
 
 EXPORT_FORMATS = {
@@ -85,6 +88,7 @@ EXPORT_FORMATS = {
     ),
 }
 
+
 # Formats the download offers. Every one is materializable on demand,
 # so this is simply the set of supported export formats.
 SUPPORTED_EXPORT_FORMATS: list[ExportFormat] = list(EXPORT_FORMATS)
@@ -99,7 +103,7 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 
 
 def _extract_table_to_gcs(
-    destination_table: DestinationTable,
+    destination_table: dict[str, Any],
     *,
     object_key: str,
     file_format: ExportFormat,
@@ -109,7 +113,7 @@ def _extract_table_to_gcs(
     Byte-identical to the referenced table — no query is re-run.
 
     Args:
-        destination_table (DestinationTable): `TableReference.to_api_repr()` of the result table.
+        destination_table (dict[str, Any]): `TableReference.to_api_repr()` of the result table.
         object_key (str): Destination object key within the export bucket.
         file_format (ExportFormat): The output format.
 
@@ -155,7 +159,7 @@ def _extract_table_to_gcs(
 def materialize_export(
     *,
     query_ref: str,
-    destination_table: DestinationTable,
+    destination_table: dict[str, Any],
     file_format: ExportFormat,
     filename: str,
     message_id: str,
@@ -169,7 +173,7 @@ def materialize_export(
 
     Args:
         query_ref (str): The handle whose result table is exported.
-        destination_table (DestinationTable): `TableReference.to_api_repr()` of that table.
+        destination_table (dict[str, Any]): `TableReference.to_api_repr()` of that table.
         file_format (ExportFormat): The output format.
         filename (str): Base name for the file (the extension is appended).
         message_id (str): The owning message/run, used for the deterministic object key.
@@ -206,84 +210,41 @@ def materialize_export(
 
 def collect_query_handles(
     artifacts: Iterable[JsonValue | None],
-) -> dict[str, DestinationTable]:
-    """Map `query_ref` -> `destination_table` from a run's tool-output artifacts.
+    collected_handles: list[CollectedQueryHandle],
+) -> None:
+    """Append the `query_result` handles found in a run's tool-output artifacts.
 
-    Picks out the `query_result` handles minted by `execute_bigquery_sql` tool.
-    The `query_ref`s that *actually executed* this run are used both to sanitise the
-    refs the model reported and to persist the handle a later download materializes from.
+    Picks out the handles minted by the `execute_bigquery_sql` tool and appends each
+    (its `query_ref`, display `slug`, and result table) to `collected_handles` in place.
 
     Args:
         artifacts (Iterable[JsonValue | None]): The run's tool-output artifacts.
-
-    Returns:
-        dict[str, DestinationTable]: Each executed `query_ref` mapped to its result table.
+        collected_handles (list[CollectedQueryHandle]): The run's accumulator, appended to in place.
     """
-    handles: dict[str, DestinationTable] = {}
     for artifact in artifacts:
-        if (
-            isinstance(artifact, dict)
-            and artifact.get("type") == "query_result"
-            and artifact.get("query_ref") is not None
-            and artifact.get("destination_table") is not None
-        ):
-            handles[artifact["query_ref"]] = artifact["destination_table"]
-    return handles
+        if isinstance(artifact, dict) and artifact.get("type") == "query_result":
+            collected_handles.append(
+                CollectedQueryHandle(
+                    query_ref=artifact["query_ref"],
+                    slug=artifact["slug"],
+                    destination_table=artifact["destination_table"],
+                )
+            )
 
 
-def sanitize_sql_query_refs(
-    structured_response: dict[str, Any] | None, executed_refs: set[str]
-) -> dict[str, Any] | None:
-    """Return a copy of `structured_response` with unexecuted `sql_queries[].query_ref`s nulled.
+def query_result_download(query_ref: str, slug: str) -> QueryResultDownload:
+    """Build the download offered for one executed query.
 
     Args:
-        structured_response (dict[str, Any] | None): The answer's structured response.
-        executed_refs (set[str]): The `query_ref`s that actually executed this run.
+        query_ref (str): The query's handle.
+        slug (str): The query's slug.
 
     Returns:
-        dict[str, Any] | None: A sanitized copy of `structured_response` with unexecuted refs nulled,
-            or the input unchanged when it has no `sql_queries` to clean.
+        QueryResultDownload: The download descriptor.
     """
-    if not isinstance(structured_response, dict):
-        return structured_response
-
-    sql_queries = structured_response.get("sql_queries")
-    if not sql_queries:
-        return structured_response
-
-    sanitized = [
-        {**query, "query_ref": None}
-        if isinstance(query, dict) and query.get("query_ref") not in executed_refs
-        else query
-        for query in sql_queries
-    ]
-
-    return {**structured_response, "sql_queries": sanitized}
-
-
-def derive_downloads(
-    structured_response: dict[str, Any] | None,
-) -> list[Download]:
-    """Derive the downloads offered for an answer — one per backing query.
-
-    Each backing query carrying a sanitized `query_ref` becomes a `query_result`
-    download in every supported format.
-
-    Args:
-        structured_response (dict[str, Any] | None): The answer's structured response.
-
-    Returns:
-        list[Download]: One download per backing query; empty when none is downloadable.
-    """
-    if not isinstance(structured_response, dict):
-        return []
-
-    return [
-        {
-            "type": "query_result",
-            "query_ref": query["query_ref"],
-            "formats": SUPPORTED_EXPORT_FORMATS,
-        }
-        for query in structured_response.get("sql_queries") or []
-        if isinstance(query, dict) and query.get("query_ref")
-    ]
+    return {
+        "type": "query_result",
+        "query_ref": query_ref,
+        "slug": slug,
+        "formats": SUPPORTED_EXPORT_FORMATS,
+    }

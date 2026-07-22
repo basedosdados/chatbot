@@ -23,6 +23,7 @@ def upgrade() -> None:
         "query_handles",
         sa.Column("message_id", sa.Uuid(), nullable=False),
         sa.Column("query_ref", sa.String(), nullable=False),
+        sa.Column("slug", sa.String(), nullable=False),
         sa.Column("destination_table", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(

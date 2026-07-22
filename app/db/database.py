@@ -3,13 +3,13 @@ from typing import TypeVar
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import selectinload
 from sqlmodel import SQLModel, select
 
 from app.db.models import (
@@ -203,7 +203,13 @@ class AsyncDatabase:
         Returns:
             list[Message]: A list of Message objects.
         """
-        query = select(Message).where(Message.thread_id == thread_id)
+        # Eager-load the query handles so `MessagePublic.downloads` can
+        # derive the download affordance without a lazy load per message.
+        query = (
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .options(selectinload(Message.query_handles))
+        )
         query = self._apply_order_by(query, Message, order_by)
 
         results = await self.session.execute(query)
@@ -213,11 +219,7 @@ class AsyncDatabase:
 
     # ================================== QueryHandle ===================================
     async def create_query_handles(self, query_handles: list[QueryHandle]) -> None:
-        """Bulk-insert query handles, skipping any that already exist.
-
-        One round-trip with ON CONFLICT DO NOTHING keyed by (`message_id`, `query_ref`),
-        so a `query_ref` the answer lists more than once keeps its first handle rather
-        than erroring on the duplicate.
+        """Bulk-insert query handles.
 
         Args:
             query_handles (list[QueryHandle]): The handles to persist.
@@ -225,13 +227,7 @@ class AsyncDatabase:
         if not query_handles:
             return
 
-        stmt = (
-            pg_insert(QueryHandle)
-            .values([handle.model_dump() for handle in query_handles])
-            .on_conflict_do_nothing(index_elements=["message_id", "query_ref"])
-        )
-
-        await self.session.execute(stmt)
+        self.session.add_all(query_handles)
         await self.session.commit()
 
     async def get_query_handle(

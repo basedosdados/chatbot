@@ -56,19 +56,6 @@ class DataSource(BaseModel):
     name: str = Field(description="Human-readable name of the table.")
 
 
-class SqlQuery(BaseModel):
-    """A SQL query whose result backs the answer, with its execution handle."""
-
-    sql: str = Field(description="The SQL query, with inline comments.")
-    query_ref: str | None = Field(
-        default=None,
-        description=(
-            "The `query_ref` returned by `execute_bigquery_sql` for this exact query. "
-            "Leave empty (None) if this query was not executed via `execute_bigquery_sql`."
-        ),
-    )
-
-
 class StructuredResponse(BaseModel):
     """The agent's structured response for the user interface."""
 
@@ -91,14 +78,6 @@ class StructuredResponse(BaseModel):
         description=(
             "The interval your SQL query actually filtered. Leave empty (None) when no query "
             "was run (e.g. a clarification turn) or the answer has no temporal dimension."
-        ),
-    )
-    sql_queries: list[SqlQuery] | None = Field(
-        default=None,
-        description=(
-            "The quer(y|ies) whose results the answer is based on, excluding exploratory "
-            "or failed-then-corrected ones, each with its `query_ref`. Prefer a single query "
-            "(see the SQL Query Protocol). Leave empty (None) when no query was executed."
         ),
     )
     follow_up_questions: list[str] | None = Field(

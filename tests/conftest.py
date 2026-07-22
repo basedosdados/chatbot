@@ -153,6 +153,7 @@ async def query_handle(
     handle = QueryHandle(
         query_ref="qr_test",
         message_id=assistant_message.id,
+        slug="resultado",
         destination_table={"projectId": "p", "datasetId": "d", "tableId": "t"},
     )
     await database.create_query_handles([handle])

@@ -76,43 +76,51 @@ class Message(MessageCreate, table=True):
 
     thread: Thread = Relationship(back_populates="messages")
     feedback: "Feedback" = Relationship(back_populates="message")
+    query_handles: list["QueryHandle"] = Relationship(back_populates="message")
 
 
 class MessagePublic(MessageCreate):
     created_at: datetime
+    # Eager-loaded to derive `downloads`; excluded from serialization because each
+    # handle carries the internal `destination_table`, which must not reach the client.
+    query_handles: list["QueryHandle"] = Field(default_factory=list, exclude=True)
 
     @computed_field
     @property
     def downloads(self) -> list[dict[str, Any]]:
-        """The downloads offered for this message — one per backing query, else empty."""
-        from app.exports import derive_downloads
+        """The downloads offered for this message."""
+        from app.exports import query_result_download
 
-        return derive_downloads(self.structured_response)
+        return [
+            query_result_download(handle.query_ref, handle.slug)
+            for handle in self.query_handles
+        ]
 
 
 # ==============================================================================
 # ==                           Query Handle Models                            ==
 # ==============================================================================
 class QueryHandle(SQLModel, table=True):
-    """The durable handle to an executed query, used to materialize downloads.
-
-    Keyed by (`message_id`, `query_ref`): the `query_ref` is a short token the model
-    echoes into its answer and is only unique within the run that produced it, so it is
-    scoped to that run's message. Persisted when a backing `query_ref` is committed to download.
-    """
-
     __tablename__ = "query_handles"
 
     # Field order defines the composite PK column order (message_id, query_ref) — keep
     # message_id first to match the migration; reordering these fields changes the PK.
     message_id: uuid.UUID = Field(foreign_key="message.id", primary_key=True)
+
+    # The `str` column leaves room to shorten it to a model-reproducible
+    # token should exports ever key off the answer again.
     query_ref: str = Field(primary_key=True)
+
+    # The model-generated slug for the query.
+    slug: str
     destination_table: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_type=TIMESTAMP(timezone=True),
         index=True,
     )
+
+    message: Message = Relationship(back_populates="query_handles")
 
 
 # ===============================================================================

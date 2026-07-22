@@ -1,4 +1,5 @@
 import asyncio
+import re
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
@@ -24,7 +25,6 @@ from app.exports import (
     ExportFormat,
     ResultTableExpired,
     ResultTooLarge,
-    derive_downloads,
     materialize_export,
 )
 from app.settings import settings
@@ -82,10 +82,10 @@ async def delete_thread_and_checkpoints(
         await agent.checkpointer.adelete_thread(thread_id)
 
 
-@router.get("/threads/{thread_id}/messages")
+@router.get("/threads/{thread_id}/messages", response_model=list[MessagePublic])
 async def list_messages(
     thread_id: str, database: AsyncDB, user_id: UserID, order_by: str | None = None
-) -> list[MessagePublic]:
+):
     if order_by and order_by not in {"created_at", "-created_at"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -175,26 +175,21 @@ RESULTS_TOO_LARGE_DETAIL = (
     "Estes resultados são grandes demais para baixar em um único arquivo."
 )
 
-# Base name for the downloaded file (materialization appends the extension).
+# Fallback base name when a query's slug yields nothing filesystem-safe.
 DEFAULT_EXPORT_FILENAME = "resultados"
 
 
-def _download_filename(query_ref: str, query_refs: list[str]) -> str:
-    """Build the base name for a download (the extension is appended on materialization).
-
-    Suffixed with the query's 1-based position only when the answer backs more than one
-    query, so a lone result stays `resultados`.
+def _sanitize_filename(slug: str) -> str:
+    """Sanitize a query's slug into a safe base filename.
 
     Args:
-        query_ref (str): The `query_ref` being downloaded.
-        query_refs (list[str]): The answer's downloadable `query_ref`s, in order.
+        slug (str): The query's slug.
 
     Returns:
-        str: The base filename, without extension.
+        str: A filesystem-safe base filename, without extension.
     """
-    if len(query_refs) <= 1:
-        return DEFAULT_EXPORT_FILENAME
-    return f"{DEFAULT_EXPORT_FILENAME}_{query_refs.index(query_ref) + 1}"
+    filename = re.sub(r"[^\w-]+", "_", slug).strip("_")
+    return filename or DEFAULT_EXPORT_FILENAME
 
 
 @router.post("/messages/{message_id}/exports")
@@ -223,16 +218,6 @@ async def export_message_results(
             detail=f"Message {message_id} not found",
         )
 
-    query_refs = [
-        item["query_ref"] for item in derive_downloads(message.structured_response)
-    ]
-
-    if query_ref not in query_refs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No downloadable results for query_ref '{query_ref}'",
-        )
-
     query_handle = await database.get_query_handle(message.id, query_ref)
 
     if query_handle is None:
@@ -244,10 +229,10 @@ async def export_message_results(
     try:
         exported = await asyncio.to_thread(
             materialize_export,
-            query_ref=query_ref,
+            query_ref=query_handle.query_ref,
             destination_table=query_handle.destination_table,
             file_format=file_format,
-            filename=_download_filename(query_ref, query_refs),
+            filename=_sanitize_filename(query_handle.slug),
             message_id=str(message.id),
         )
     except ResultTableExpired as e:

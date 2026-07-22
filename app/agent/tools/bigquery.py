@@ -26,7 +26,7 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 @tool(response_format="content_and_artifact")
 @handle_tool_errors(response_format="content_and_artifact")
 def execute_bigquery_sql(
-    sql_query: str, config: RunnableConfig
+    sql_query: str, slug: str, config: RunnableConfig
 ) -> tuple[str, dict[str, Any] | None]:
     """Execute a SQL query against BigQuery tables from the Base dos Dados database.
 
@@ -40,6 +40,7 @@ def execute_bigquery_sql(
 
     Args:
         sql_query (str): Standard GoogleSQL query. Must reference tables using their full `gcp_id` from `get_dataset_details()`.
+        slug (str): A short filename-safe slug for this query's result, in the user's language, lowercase with underscores (e.g. "populacao_por_ano").
 
     Rules:
         - Use fully qualified names: `project.dataset.table`.
@@ -52,9 +53,8 @@ def execute_bigquery_sql(
 
     Returns:
         str: A JSON object with:
-                - `query_ref`: an opaque handle for the exact rows this query produced, so the application can offer the user a download of them.
-                - `row_count`: the row count.
-                - `results`: the rows as a JSON array.
+                - `row_count`: the number of rows returned.
+                - `rows`: the rows as a JSON array.
             If the query returns no rows, a short message string is returned instead.
     """
     client = _bq_client()
@@ -97,20 +97,18 @@ def execute_bigquery_sql(
         )
         return json.dumps(message, ensure_ascii=False), None
 
-    # Reference the anonymous result table BigQuery already materialized (~24h TTL)
-    # so a later export can hand back exactly these rows without re-running;
-    # kept short (unlike a full uuid) so the model reproduces it reliably.
-    query_ref = f"qr_{uuid.uuid4().hex[:8]}"
+    # Server-minted handle for the anonymous result table BigQuery already materialized
+    # (~24h TTL), so a later export hands back exactly these rows without re-running.
+    query_ref = f"qr_{uuid.uuid4().hex}"
 
     content = json.dumps(
-        {"query_ref": query_ref, "row_count": len(rows), "results": rows},
-        ensure_ascii=False,
-        default=str,
+        {"row_count": len(rows), "rows": rows}, ensure_ascii=False, default=str
     )
 
     artifact = {
         "type": "query_result",
         "query_ref": query_ref,
+        "slug": slug,
         "destination_table": job.destination.to_api_repr(),
     }
 

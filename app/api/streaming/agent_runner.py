@@ -20,11 +20,10 @@ from app.db.models import (
     QueryHandle,
 )
 from app.exports import (
-    DestinationTable,
-    Download,
+    CollectedQueryHandle,
+    QueryResultDownload,
     collect_query_handles,
-    derive_downloads,
-    sanitize_sql_query_refs,
+    query_result_download,
 )
 
 
@@ -209,28 +208,23 @@ async def _persist_query_handles(
     database: AsyncDatabase,
     *,
     message_id: str,
-    query_refs: list[str],
-    query_handles: dict[str, DestinationTable],
+    collected_handles: list[CollectedQueryHandle],
 ):
-    """Persist the handle for each backing query so its download can be materialized.
-
-    Handles are scoped to the answer's message, since a `query_ref` is only unique
-    within its run. `query_refs` are the answer's backing refs (already sanitized
-    to the ones that actually executed), so each is present in `query_handles`.
+    """Persist query handles for a message.
 
     Args:
         database (AsyncDatabase): The repository to persist through.
-        query_refs (list[str]): The answer's backing `query_ref`s.
-        query_handles (dict[str, DestinationTable]): Executed (query_ref -> result table) mapping.
         message_id (str): The owning message/run the handles are scoped to.
+        collected_handles: list[CollectedQueryHandle]: Collected query handles.
     """
     handles = [
         QueryHandle(
-            query_ref=query_ref,
+            query_ref=handle.query_ref,
             message_id=message_id,
-            destination_table=query_handles[query_ref],
+            slug=handle.slug,
+            destination_table=handle.destination_table,
         )
-        for query_ref in query_refs
+        for handle in collected_handles
     ]
     await database.create_query_handles(handles)
 
@@ -260,9 +254,9 @@ async def run_agent(
     """
     events = []
     assistant_message = ""
-    query_handles: dict[str, DestinationTable] = {}
     structured_response: dict[str, Any] | None = None
-    downloads: list[Download] = []
+    collected_handles: list[CollectedQueryHandle] = []
+    downloads: list[QueryResultDownload] = []
     status: MessageStatus | None = None
 
     try:
@@ -280,26 +274,26 @@ async def run_agent(
                 continue
 
             if event.type == "tool_output":
-                # Collect execute_bigquery_sql handles (query_ref -> destination_table)
-                # from the tool outputs' artifacts, for lazy on-click downloads.
-                query_handles |= collect_query_handles(
-                    output.artifact for output in event.data.tool_outputs
+                # Collect every query handle from the execute_bigquery_sql
+                # tool artifacts, for lazy on-click downloads.
+                collect_query_handles(
+                    (output.artifact for output in event.data.tool_outputs),
+                    collected_handles,
                 )
             elif event.type == "final_answer":
-                assistant_message = event.data.content
+                # Resolve data source names to {dataset_name}—{table_name}
                 if event.data.structured_response is not None:
                     await resolve_data_source_names(event.data.structured_response)
                 structured_response = event.data.structured_response
-                status = MessageStatus.SUCCESS
-                # Sanitise the model's reported query_refs against those
-                # that actually executed this run
-                structured_response = sanitize_sql_query_refs(
-                    event.data.structured_response, set(query_handles)
-                )
-                event.data.structured_response = structured_response
-                # Derive the downloads offered for this answer
-                downloads = derive_downloads(structured_response)
+                # Resolve query result downloads
+                downloads = [
+                    query_result_download(handle.query_ref, handle.slug)
+                    for handle in collected_handles
+                ]
                 event.data.downloads = downloads
+                # Set the assistant message
+                assistant_message = event.data.content
+                status = MessageStatus.SUCCESS
             elif event.type == "model_call_limit":
                 assistant_message = event.data.content
                 status = MessageStatus.MODEL_CALL_LIMIT
@@ -349,8 +343,7 @@ async def run_agent(
                         await _persist_query_handles(
                             database,
                             message_id=message_id,
-                            query_refs=[item["query_ref"] for item in downloads],
-                            query_handles=query_handles,
+                            collected_handles=collected_handles,
                         )
                     except Exception:
                         logger.exception(

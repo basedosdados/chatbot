@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage
 from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
+from app.api.routers.chatbot import DEFAULT_EXPORT_FILENAME, _sanitize_filename
 from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
@@ -310,25 +311,36 @@ class TestListMessagesEndpoint:
         assert isinstance(messages, list)
         assert len(messages) == 2
 
-    async def test_list_messages_derives_download_from_sql_queries(
+    async def test_list_messages_derives_downloads_from_query_handles(
         self,
         client: TestClient,
         access_token: str,
         database: AsyncDatabase,
         thread: Thread,
     ):
-        """The download affordance is derived from the answer's sql_queries on read."""
-        await database.create_message(
+        """The download affordance is derived from the message's query handles on read."""
+        message = await database.create_message(
             MessageCreate(
                 thread_id=thread.id,
                 model_uri="mock-model",
                 role=MessageRole.ASSISTANT,
                 content="Answer",
                 status=MessageStatus.SUCCESS,
-                structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_test"}]
-                },
             )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="qr_test",
+                    message_id=message.id,
+                    slug="vendas_por_ano",
+                    destination_table={
+                        "projectId": "p",
+                        "datasetId": "d",
+                        "tableId": "t",
+                    },
+                )
+            ]
         )
 
         response = client.get(
@@ -337,11 +349,14 @@ class TestListMessagesEndpoint:
         )
 
         assert response.status_code == status.HTTP_200_OK
-        [message] = response.json()
-        [download] = message["downloads"]
+        [message_json] = response.json()
+        [download] = message_json["downloads"]
         assert download["type"] == "query_result"
         assert download["query_ref"] == "qr_test"
+        assert download["slug"] == "vendas_por_ano"
         assert "CSV" in download["formats"]
+        # The internal handles (and their destination tables) never reach the client.
+        assert "query_handles" not in message_json
 
     def test_list_messages_empty(
         self, client: TestClient, access_token: str, thread: Thread
@@ -611,9 +626,6 @@ class TestExportMessageResultsEndpoint:
                 role=MessageRole.ASSISTANT,
                 content="Answer",
                 status=MessageStatus.SUCCESS,
-                structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_test"}]
-                },
             )
         )
         await database.create_query_handles(
@@ -621,6 +633,7 @@ class TestExportMessageResultsEndpoint:
                 QueryHandle(
                     query_ref="qr_test",
                     message_id=message.id,
+                    slug="resultado_final",
                     destination_table=self.DESTINATION,
                 )
             ]
@@ -663,6 +676,7 @@ class TestExportMessageResultsEndpoint:
         assert response.json() == {"url": "https://signed"}
         assert materialize.call_args.kwargs["query_ref"] == "qr_test"
         assert materialize.call_args.kwargs["file_format"] == "CSV"
+        assert materialize.call_args.kwargs["filename"] == "resultado_final"
 
     def test_query_ref_not_backing_the_answer_404(
         self, client: TestClient, access_token: str, downloadable_message: Message
@@ -710,7 +724,7 @@ class TestExportMessageResultsEndpoint:
         database: AsyncDatabase,
         thread: Thread,
     ):
-        """A backing ref whose handle was never persisted returns 404 (not expiry)."""
+        """A query_ref with no persisted handle returns 404 (not expiry)."""
         message = await database.create_message(
             MessageCreate(
                 thread_id=thread.id,
@@ -718,9 +732,6 @@ class TestExportMessageResultsEndpoint:
                 role=MessageRole.ASSISTANT,
                 content="Answer",
                 status=MessageStatus.SUCCESS,
-                structured_response={
-                    "sql_queries": [{"sql": "SELECT 1", "query_ref": "qr_no_handle"}]
-                },
             )
         )
 
@@ -794,3 +805,38 @@ class TestExportMessageResultsEndpoint:
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestSanitizeFilename:
+    """Tests for _sanitize_filename — the download filename guard."""
+
+    @pytest.mark.parametrize(
+        ("slug", "expected"),
+        [
+            # A clean slug (what the model is asked to produce) passes through unchanged.
+            ("vendas_por_ano", "vendas_por_ano"),
+            # Hyphens and digits are allowed.
+            ("ideb-2021", "ideb-2021"),
+            # Spaces and punctuation collapse to a single underscore.
+            ("Vendas por ano", "Vendas_por_ano"),
+            ("a   b", "a_b"),
+            ("café & leite!", "café_leite"),
+            # Leading/trailing separators are stripped, not left dangling.
+            ("_vendas_", "vendas"),
+            ("  vendas  ", "vendas"),
+            # Path separators and traversal are neutralized (no slashes or dots survive).
+            ("../../etc/passwd", "etc_passwd"),
+            ("relatorio/2021", "relatorio_2021"),
+            # File extensions are neutralized.
+            ("vendas_por_ano.csv", "vendas_por_ano_csv"),
+            # Accented word characters are preserved (\\w is unicode).
+            ("população", "população"),
+        ],
+    )
+    def test_sanitizes_slug(self, slug: str, expected: str):
+        assert _sanitize_filename(slug) == expected
+
+    @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
+    def test_falls_back_when_nothing_usable_remains(self, slug: str):
+        """A slug that sanitizes to empty falls back to the default, never ''."""
+        assert _sanitize_filename(slug) == DEFAULT_EXPORT_FILENAME

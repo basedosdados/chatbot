@@ -225,7 +225,6 @@ class TestAsyncDatabaseQueryHandle:
     """Tests for QueryHandle operations."""
 
     DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
-    OTHER = {"projectId": "other", "datasetId": "d", "tableId": "t"}
 
     def _handle(
         self, message: Message, query_ref: str, destination: dict
@@ -233,6 +232,7 @@ class TestAsyncDatabaseQueryHandle:
         return QueryHandle(
             query_ref=query_ref,
             message_id=message.id,
+            slug="resultado",
             destination_table=destination,
         )
 
@@ -252,41 +252,6 @@ class TestAsyncDatabaseQueryHandle:
 
         assert first is not None and first.destination_table == self.DESTINATION
         assert second is not None and second.message_id == assistant_message.id
-
-    async def test_create_query_handles_skips_existing_ref(
-        self, database: AsyncDatabase, assistant_message: Message
-    ):
-        """A reused (message, query_ref) keeps its original handle (ON CONFLICT DO NOTHING)."""
-        await database.create_query_handles(
-            [self._handle(assistant_message, "qr_dup", self.DESTINATION)]
-        )
-        await database.create_query_handles(
-            [self._handle(assistant_message, "qr_dup", self.OTHER)]
-        )
-
-        handle = await database.get_query_handle(assistant_message.id, "qr_dup")
-
-        # The original handle is preserved, not overwritten.
-        assert handle.destination_table == self.DESTINATION
-
-    async def test_create_query_handles_tolerates_duplicate_refs_in_one_batch(
-        self, database: AsyncDatabase, assistant_message: Message
-    ):
-        """A ref repeated within a single batch is inserted once, not an error.
-
-        Reachable when an answer lists the same query twice in sql_queries.
-        """
-        await database.create_query_handles(
-            [
-                self._handle(assistant_message, "qr_same", self.DESTINATION),
-                self._handle(assistant_message, "qr_same", self.OTHER),
-            ]
-        )
-
-        handle = await database.get_query_handle(assistant_message.id, "qr_same")
-
-        assert handle is not None
-        assert handle.destination_table == self.DESTINATION
 
     async def test_create_query_handles_empty_is_noop(self, database: AsyncDatabase):
         """An empty list persists nothing and does not error."""

@@ -61,15 +61,15 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "SELECT * FROM project.dataset.table"},
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
         output = json.loads(message.content)
 
-        assert output["results"] == [{"col1": "value1"}, {"col1": "value2"}]
+        assert output["rows"] == [{"col1": "value1"}, {"col1": "value2"}]
         assert output["row_count"] == 2
-        assert re.fullmatch(r"qr_[0-9a-f]{8}", output["query_ref"])
+        assert re.fullmatch(r"qr_[0-9a-f]{32}", message.artifact["query_ref"])
 
     def test_successful_query_exposes_destination_table_on_artifact(
         self, mocker: MockerFixture, mock_config: dict
@@ -98,14 +98,13 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "SELECT * FROM project.dataset.table"},
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
-        content_query_ref = json.loads(message.content)["query_ref"]
-
         assert message.artifact["type"] == "query_result"
-        assert message.artifact["query_ref"] == content_query_ref
+        assert re.fullmatch(r"qr_[0-9a-f]{32}", message.artifact["query_ref"])
+        assert message.artifact["slug"] == "resultado"
         assert message.artifact["destination_table"] == {
             "projectId": "p",
             "datasetId": "d",
@@ -134,7 +133,7 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "SELECT * FROM project.dataset.table"},
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
@@ -158,7 +157,7 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "DELETE FROM project.dataset.table"},
+            {"sql_query": "DELETE FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
@@ -190,7 +189,7 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "SELECT * FROM project.dataset.table"},
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
@@ -221,7 +220,7 @@ class TestExecuteBigQuerySQL:
 
         message = _invoke_tool(
             execute_bigquery_sql,
-            {"sql_query": "SELECT * FROM project.dataset.table"},
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
             config=mock_config,
         )
 
