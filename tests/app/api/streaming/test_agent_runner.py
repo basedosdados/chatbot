@@ -813,7 +813,7 @@ class TestRunAgent:
                 "type": "query_result",
                 "query_ref": "q_run",
                 "slug": "vendas",
-                "formats": ["AVRO", "CSV", "JSONL", "PARQUET"],
+                "formats": ["CSV"],
             }
         ]
         # ... and the handle (slug + destination table) is stored, with no eager file export.

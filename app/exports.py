@@ -89,9 +89,9 @@ EXPORT_FORMATS = {
 }
 
 
-# Formats the download offers. Every one is materializable on demand,
-# so this is simply the set of supported export formats.
-SUPPORTED_EXPORT_FORMATS: list[ExportFormat] = list(EXPORT_FORMATS)
+# Formats offered to the frontend. Every format in EXPORT_FORMATS
+# is materializable on demand, but only CSV is offered for now.
+OFFERED_EXPORT_FORMATS: list[ExportFormat] = ["CSV"]
 
 
 @cache
@@ -246,5 +246,5 @@ def query_result_download(query_ref: str, slug: str) -> QueryResultDownload:
         "type": "query_result",
         "query_ref": query_ref,
         "slug": slug,
-        "formats": SUPPORTED_EXPORT_FORMATS,
+        "formats": OFFERED_EXPORT_FORMATS,
     }

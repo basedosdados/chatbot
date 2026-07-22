@@ -354,7 +354,7 @@ class TestListMessagesEndpoint:
         assert download["type"] == "query_result"
         assert download["query_ref"] == "qr_test"
         assert download["slug"] == "vendas_por_ano"
-        assert "CSV" in download["formats"]
+        assert download["formats"] == ["CSV"]
         # The internal handles (and their destination tables) never reach the client.
         assert "query_handles" not in message_json
 
@@ -657,7 +657,35 @@ class TestExportMessageResultsEndpoint:
         downloadable_message: Message,
         mocker: MockerFixture,
     ):
-        """A click materializes the requested query+format and returns a signed URL."""
+        """A click materializes the query as CSV and returns a signed URL."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.generate_signed_url", return_value="https://signed"
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {"url": "https://signed"}
+        assert materialize.call_args.kwargs["query_ref"] == "qr_test"
+        assert materialize.call_args.kwargs["file_format"] == "CSV"
+        assert materialize.call_args.kwargs["filename"] == "resultado_final"
+
+    def test_offered_format_is_accepted(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """An explicit `format=CSV` (what the frontend sends) is accepted."""
         materialize = mocker.patch(
             "app.api.routers.chatbot.materialize_export",
             return_value=self._exported(),
@@ -673,10 +701,30 @@ class TestExportMessageResultsEndpoint:
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"url": "https://signed"}
-        assert materialize.call_args.kwargs["query_ref"] == "qr_test"
         assert materialize.call_args.kwargs["file_format"] == "CSV"
-        assert materialize.call_args.kwargs["filename"] == "resultado_final"
+
+    def test_unsupported_format_is_rejected(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A not-offered format (valid for BigQuery, but not offered) is rejected, not downgraded."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test&format=PARQUET",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        # The request is rejected outright — no CSV is silently produced.
+        materialize.assert_not_called()
 
     def test_query_ref_not_backing_the_answer_404(
         self, client: TestClient, access_token: str, downloadable_message: Message
@@ -684,7 +732,7 @@ class TestExportMessageResultsEndpoint:
         """A query_ref not among the message's backing queries is rejected."""
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_other&format=CSV",
+            "?query_ref=qr_other",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -692,8 +740,7 @@ class TestExportMessageResultsEndpoint:
 
     def test_message_not_found(self, client: TestClient, access_token: str):
         response = client.post(
-            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/exports"
-            "?query_ref=qr_test&format=CSV",
+            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/exports?query_ref=qr_test",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -711,7 +758,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=CSV",
+            "?query_ref=qr_test",
             headers={"Authorization": f"Bearer {other_token}"},
         )
 
@@ -736,8 +783,7 @@ class TestExportMessageResultsEndpoint:
         )
 
         response = client.post(
-            url=f"/api/v1/chatbot/messages/{message.id}/exports"
-            "?query_ref=qr_no_handle&format=CSV",
+            url=f"/api/v1/chatbot/messages/{message.id}/exports?query_ref=qr_no_handle",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -758,7 +804,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=CSV",
+            "?query_ref=qr_test",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -779,7 +825,7 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=CSV",
+            "?query_ref=qr_test",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -790,7 +836,7 @@ class TestExportMessageResultsEndpoint:
     ):
         """`query_ref` is a required query parameter."""
         response = client.post(
-            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports?format=CSV",
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -801,7 +847,7 @@ class TestExportMessageResultsEndpoint:
     ):
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=CSV"
+            "?query_ref=qr_test"
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

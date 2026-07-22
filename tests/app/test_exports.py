@@ -8,7 +8,6 @@ from pytest_mock import MockerFixture
 
 from app.exports import (
     EXPORT_FORMATS,
-    SUPPORTED_EXPORT_FORMATS,
     CollectedQueryHandle,
     ExportFormat,
     ResultTableExpired,
@@ -32,12 +31,12 @@ def test_export_formats_match_the_advertised_literal():
 
 
 def test_query_result_download_shape():
-    """An executed query becomes one download, with every supported format."""
+    """An executed query becomes one download; only CSV is offered for now."""
     assert query_result_download("qr_1", "vendas_por_ano") == {
         "type": "query_result",
         "query_ref": "qr_1",
         "slug": "vendas_por_ano",
-        "formats": SUPPORTED_EXPORT_FORMATS,
+        "formats": ["CSV"],
     }
 
 

@@ -22,6 +22,7 @@ from app.db.models import (
     ThreadPayload,
 )
 from app.exports import (
+    OFFERED_EXPORT_FORMATS,
     ExportFormat,
     ResultTableExpired,
     ResultTooLarge,
@@ -200,6 +201,15 @@ async def export_message_results(
     query_ref: str,
     file_format: ExportFormat = Query("CSV", alias="format"),
 ):
+    if file_format not in OFFERED_EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported format '{file_format}'. "
+                f"Available: {', '.join(OFFERED_EXPORT_FORMATS)}."
+            ),
+        )
+
     message = await database.get_message(message_id)
 
     if message is None:
