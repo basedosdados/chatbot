@@ -6,7 +6,7 @@ currently checked-out branch + given settings. Scores five deterministic
 dimensions per turn from the agent's structured response fields (the purpose
 of this eval is to check those fields are filled with the expected values):
 
-  action: query-vs-clarify, from whether the agent filled the sql_queries field
+  action: query-vs-clarify, from the tool trace (did it run execute_bigquery_sql this turn)
   source: data_sources (its table UUIDs resolved to gcp_ids) match the gold
   period: temporal_coverage matches the gold rule (any/latest/range/match_previous/exact)
   format_ok: the prose carries no Markdown ATX headers (the one hard-forbidden format rule)
@@ -140,6 +140,7 @@ def build_agent(
         thinking_level=settings.THINKING_LEVEL,
         include_thoughts=True,
     )
+
     middleware = [
         SummarizationMiddleware(
             model=model,
@@ -151,6 +152,7 @@ def build_agent(
             exit_behavior="end",
         ),
     ]
+
     # No response_format on the free-text baseline (--no-structured); the agent answers
     # in the final message instead of a StructuredResponse.
     response_format = {"response_format": StructuredResponse} if structured else {}
@@ -392,8 +394,8 @@ def extract_turn(result: dict, structured_mode: bool = True) -> dict:
     )
     return {
         "status": "ok",
-        # query vs clarify, from whether the agent filled the sql_queries field.
-        "is_query": bool(structured.sql_queries),
+        # query vs clarify, from the tool trace (did it run execute_bigquery_sql this turn).
+        "is_query": bool(_executed_queries(messages)),
         "tables": data_source_tables,
         "table_period_ends": table_period_ends,
         "structured": structured.model_dump(mode="json"),
@@ -998,7 +1000,7 @@ async def main() -> None:
     ls_project, tracing = configure_tracing(args)
 
     print(
-        f"\nbranch={branch!r}  model={settings.MODEL_URI!r}  structured_output={structured_mode}\n"
+        f"\nbranch={branch!r}  model={settings.MODEL_URI!r}  reasoning={settings.THINKING_LEVEL}  structured_output={structured_mode}\n"
         f"temperature={temperature}  repeats={args.repeats}  threads={[thread['id'] for thread in threads]}\n"
         f"langsmith: {f'project={ls_project!r}' if tracing else 'disabled'}\n"
     )
@@ -1050,6 +1052,7 @@ async def main() -> None:
         "structured_output": structured_mode,
         "langsmith_project": ls_project if tracing else None,
         "model": settings.MODEL_URI,
+        "reasoning": settings.THINKING_LEVEL,
         "temperature": temperature,
         "recursion_limit": args.recursion_limit,
         "repeats": args.repeats,
