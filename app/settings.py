@@ -92,6 +92,16 @@ class Settings(BaseSettings):
         default=15 * 60,
         description="Lifetime of signed URLs generated for downloading exported query results.",
     )
+    MAX_EXPORT_BYTES: int = Field(
+        default=100 * 1024 * 1024,
+        gt=0,
+        le=256 * 1024 * 1024,
+        description=(
+            "Largest result table, in bytes, accepted for a query result export. "
+            "Measured in BigQuery logical bytes, which only approximates the exported "
+            "file size. Must stay under BigQuery's 1 GB single-file extract limit."
+        ),
+    )
 
     @computed_field
     @cached_property

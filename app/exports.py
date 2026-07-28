@@ -38,7 +38,8 @@ class ResultTableExpired(Exception):
 
 
 class ResultTooLarge(Exception):
-    """The result set is too big to export to a single file.
+    """The result set is too big to export, either over our own
+    `MAX_EXPORT_BYTES` budget or over BigQuery's single-file limit.
     A typed signal for the endpoint to map to a 400.
     """
 
@@ -122,16 +123,27 @@ def _extract_table_to_gcs(
 
     Raises:
         ResultTableExpired: If the result table no longer exists (~24h TTL).
-        ResultTooLarge: If the result set is too big for a single file.
+        ResultTooLarge: If the result set is over `MAX_EXPORT_BYTES`, or too big
+            for a single file despite passing that check.
         RuntimeError: If the extract reports success but no object was written.
     """
     bucket = settings.GOOGLE_GCS_BUCKET
     gcs_uri = f"gs://{bucket}/{object_key}"
+    table_ref = bq.TableReference.from_api_repr(destination_table)
+    bytes_limit = settings.MAX_EXPORT_BYTES
 
     # Extract straight from the table BigQuery already materialized.
     try:
+        # num_bytes is BigQuery's logical size and only approximates the exported file
+        num_bytes = _bq_client().get_table(table_ref).num_bytes
+
+        if num_bytes is not None and num_bytes > bytes_limit:
+            raise ResultTooLarge(
+                f"Result table is {num_bytes} bytes, over the {bytes_limit} bytes export limit."
+            )
+
         _bq_client().extract_table(
-            bq.TableReference.from_api_repr(destination_table),
+            table_ref,
             destination_uris=[gcs_uri],
             job_config=bq.ExtractJobConfig(
                 destination_format=EXPORT_FORMATS[file_format].dest,
@@ -167,7 +179,7 @@ def materialize_export(
     """Materialize a query handle as a downloadable GCS object.
 
     Extracts the result table (see `_extract_table_to_gcs`) to a deterministic,
-    message-scoped key (`exports/{message_id}/{query_ref}.{ext}`; `query_ref` is
+    message-scoped key (`query_results/{message_id}/{query_ref}.{ext}`; `query_ref` is
     only unique within its run). The determinism makes downloads idempotent: a repeat
     reuses the existing object, and a lifecycle-deleted one is re-extracted in place.
 
@@ -187,7 +199,7 @@ def materialize_export(
     """
     bucket = settings.GOOGLE_GCS_BUCKET
     extension = EXPORT_FORMATS[file_format].extension
-    object_key = f"exports/{message_id}/{query_ref}.{extension}"
+    object_key = f"query_results/{message_id}/{query_ref}.{extension}"
 
     # Reuse a previously extracted object; (re-)extract only when it is absent.
     size_bytes = get_object_size(bucket, object_key)

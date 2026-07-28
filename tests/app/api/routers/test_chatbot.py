@@ -644,7 +644,7 @@ class TestExportMessageResultsEndpoint:
     def _exported() -> ExportedFile:
         return ExportedFile(
             bucket="test-bucket",
-            object_key="exports/m1/qr_test.csv",
+            object_key="query_results/m1/qr_test.csv",
             filename="resultados.csv",
             mime_type="text/csv",
             size_bytes=10,

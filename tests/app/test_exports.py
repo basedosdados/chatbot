@@ -79,6 +79,13 @@ class TestMaterializeExport:
             errors=[{"reason": "notFound", "message": "Not found: Table p:d.t"}],
         )
 
+    @staticmethod
+    def _client(num_bytes: int = 1024) -> MagicMock:
+        """A BigQuery client whose result table reports `num_bytes`."""
+        client = MagicMock(spec=bq.Client)
+        client.get_table.return_value.num_bytes = num_bytes
+        return client
+
     def _materialize(self, **overrides):
         return materialize_export(
             **{
@@ -93,7 +100,7 @@ class TestMaterializeExport:
 
     def test_extracts_to_deterministic_key(self, mocker: MockerFixture):
         """First download extracts the exact table to a deterministic per-query key."""
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         client.extract_table.return_value = MagicMock()
         mocker.patch("app.exports._bq_client", return_value=client)
         # Object absent on the reuse check, then sized once the extract has written it.
@@ -102,7 +109,7 @@ class TestMaterializeExport:
         exported = self._materialize()
 
         assert exported.bucket == settings.GOOGLE_GCS_BUCKET
-        assert exported.object_key == "exports/m1/qr_1.csv"
+        assert exported.object_key == "query_results/m1/qr_1.csv"
         assert exported.filename == "resultados.csv"
         assert exported.mime_type == "text/csv"
         assert exported.size_bytes == 1024
@@ -116,20 +123,20 @@ class TestMaterializeExport:
 
     def test_reuses_existing_object(self, mocker: MockerFixture):
         """A repeat download of the same query+format reuses the object, no extract."""
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         mocker.patch("app.exports._bq_client", return_value=client)
         mocker.patch("app.exports.get_object_size", return_value=512)
 
         exported = self._materialize(file_format="PARQUET")
 
-        assert exported.object_key == "exports/m1/qr_1.parquet"
+        assert exported.object_key == "query_results/m1/qr_1.parquet"
         assert exported.mime_type == "application/vnd.apache.parquet"
         assert exported.size_bytes == 512
         client.extract_table.assert_not_called()
 
     def test_expired_table_raises_result_table_expired(self, mocker: MockerFixture):
         """An expired result table surfaces as ResultTableExpired (endpoint -> 410)."""
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         client.extract_table.return_value.result.side_effect = self._not_found()
         mocker.patch("app.exports._bq_client", return_value=client)
         mocker.patch("app.exports.get_object_size", return_value=None)
@@ -138,6 +145,31 @@ class TestMaterializeExport:
             self._materialize()
 
         assert client.query.call_count == 0
+
+    def test_oversized_table_is_rejected_before_extracting(self, mocker: MockerFixture):
+        """A table over MAX_EXPORT_BYTES is refused upfront, without an extract job."""
+        client = self._client(num_bytes=settings.MAX_EXPORT_BYTES + 1)
+        mocker.patch("app.exports._bq_client", return_value=client)
+        mocker.patch("app.exports.get_object_size", return_value=None)
+
+        with pytest.raises(ResultTooLarge):
+            self._materialize()
+
+        client.extract_table.assert_not_called()
+
+    def test_expired_table_on_the_size_check_raises_result_table_expired(
+        self, mocker: MockerFixture
+    ):
+        """The size lookup touches the expired table first — still a 410, not a 500."""
+        client = self._client()
+        client.get_table.side_effect = self._not_found()
+        mocker.patch("app.exports._bq_client", return_value=client)
+        mocker.patch("app.exports.get_object_size", return_value=None)
+
+        with pytest.raises(ResultTableExpired):
+            self._materialize()
+
+        client.extract_table.assert_not_called()
 
     def test_too_large_raises_result_too_large(self, mocker: MockerFixture):
         """A too-large result set surfaces as ResultTooLarge (endpoint -> 400)."""
@@ -150,7 +182,7 @@ class TestMaterializeExport:
                 }
             ],
         )
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         client.extract_table.return_value.result.side_effect = error
         mocker.patch("app.exports._bq_client", return_value=client)
         mocker.patch("app.exports.get_object_size", return_value=None)
@@ -164,7 +196,7 @@ class TestMaterializeExport:
             "Some other error",
             errors=[{"reason": "otherReason", "message": "Some other error"}],
         )
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         client.extract_table.return_value.result.side_effect = error
         mocker.patch("app.exports._bq_client", return_value=client)
         mocker.patch("app.exports.get_object_size", return_value=None)
@@ -176,7 +208,7 @@ class TestMaterializeExport:
         self, mocker: MockerFixture
     ):
         """An extract that reports success but writes nothing is a RuntimeError."""
-        client = MagicMock(spec=bq.Client)
+        client = self._client()
         client.extract_table.return_value = MagicMock()
         mocker.patch("app.exports._bq_client", return_value=client)
         # Absent before the extract and still absent after (nothing written).
