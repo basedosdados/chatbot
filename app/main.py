@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.schemas import StructuredResponse
 from app.agent.tools import BDToolkit
 from app.api.main import api_router
 from app.db.database import engine, init_database
@@ -87,6 +88,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
                     current_date=date.today().isoformat()
                 ),
                 middleware=[summ_middleware, limit_middleware],
+                response_format=StructuredResponse,
                 checkpointer=checkpointer,
             )
 

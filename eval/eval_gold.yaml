@@ -1,0 +1,340 @@
+# Gold set for the agent eval. Each item is a multi-turn THREAD: eval_output.py replays a
+# thread's `user` turns in order on one conversation (shared thread_id, so follow-ups see
+# prior context), then the scorer scripts grade the run against the expectations below.
+#
+# Per-turn fields:
+#   user: the user message for this turn.
+#   action: expected behavior — `query` (must run SQL) or `clarify`
+#           (must NOT run SQL; should ask the user for more detail).
+#   tables: gcp_ids the executed SQL is expected to reference (FROM/JOIN), e.g.
+#           "basedosdados.br_me_rais.microdados_vinculos". [] for clarify. Scored by overlap
+#           with the tables the agent actually used: 1.0 exact / 0.5 partial / 0.0 none.
+#   temporal: rule for the period the SQL filtered on. One of:
+#               none           -> no temporal dimension expected (clarify turns)
+#               any            -> don't score the period this turn
+#               latest         -> the single most-recent period; must equal the table's
+#                                 period_end at its own granularity (YYYY / YYYY-MM / YYYY-MM-DD).
+#                                 CAUTION for monthly tables: `latest` means the latest MONTH,
+#                                 which may not be the period you want a reference_sql to cover.
+#               range          -> a multi-year span (evolução / temporal analysis)
+#               match_previous -> within the previous query turn's period ("nesse período");
+#                                 a justified narrowing is OK, only drifting outside fails
+#               {exact: {start: 2015, end: 2020}} -> explicit span in the question
+#   reference_sql: OPTIONAL, query turns only. A trusted SQL whose LIVE result is the gold for
+#               the judge's `correct` check — re-run at eval time, so its VALUES track the
+#               current data instead of a frozen number. NOTE: a hardcoded period filter
+#               (e.g. `ano = 2025`) still drifts as coverage advances — keep it current, or on
+#               `latest` turns use `ano = (SELECT MAX(ano) FROM <table>)` so it self-updates.
+#               Provide it on turns whose answer has a well-defined, stable value worth
+#               verifying; OMIT it on open-ended/analytical turns (the judge then sets
+#               correct=null and scores only `grounded` + `answers_question`). Fill with a `|` block.
+#   notes: what this turn is meant to test (human-facing).
+#
+# Which eval reads each field:
+#   eval_output       deterministic, from the agent's STRUCTURED fields:
+#                     action / source / period / completed / format_ok
+#   eval_queries      deterministic, from the agent's EXECUTED SQL (year-level):
+#                     source / period — also runs on the free-text baseline (main)
+#   eval_quality      LLM judge: grounded + answers_question, plus `correct` only when the
+#                     turn carries a reference_sql
+#   eval_faithfulness gold-free — does NOT read this file.
+
+# NOTE(maintenance): some reference_sql filters hardcode a period and must be bumped as BD
+# coverage advances — the query is re-run live, but the hardcoded filter is not. `latest`
+# turns should track the table's period_end (update by hand, or switch to
+# `ano = (SELECT MAX(ano) FROM <table>)` so they self-update):
+#     rais t0            ano = 2025
+#     ibge-populacao t0  ano = 2025            (t1 match_previous reuses this year)
+#     comex-stat t0      ano = 2026            (grain caveat — see the TODO on that thread)
+#     cnes-farmacias t0  ano = 2026 AND mes = 5
+# Range / explicit-span turns are softer: futebol t1's `... BETWEEN 2012 AND 2024` caps at the
+# last season and the judge tolerates a valid wider span; mapbiomas' 2015-2020 comes from the
+# question, so it is stable.
+
+- id: futebol
+  turns:
+    - user: "Futebol"
+      action: clarify
+      tables: []
+      temporal: none
+      notes: "Uma só palavra, ambíguo -> deve pedir esclarecimento sobre o que de futebol, não consultar."
+
+    - user: "Como evoluiu a média de público nos estádios brasileiros nos últimos anos?"
+      action: query
+      tables:
+        - basedosdados.mundo_transfermarkt_competicoes.brasileirao_serie_a
+      temporal: range
+      reference_sql: |
+        SELECT
+          ano_campeonato,
+          CAST(AVG(publico) AS INT64) AS media_publico
+        FROM `basedosdados.mundo_transfermarkt_competicoes.brasileirao_serie_a`
+        WHERE ano_campeonato BETWEEN 2012 and 2024
+        GROUP BY 1
+        ORDER BY 1
+      notes: "Evolução -> intervalo de vários anos."
+
+    - user: "Faça uma análise por clube, no mesmo período"
+      action: query
+      tables:
+        - basedosdados.mundo_transfermarkt_competicoes.brasileirao_serie_a
+      temporal: match_previous
+      # No reference_sql: "análise por clube" is open-ended (média por clube OU por
+      # clube-e-ano são leituras válidas). Julgado por grounded + answers_question;
+      # o período (match_previous) e as tabelas ainda são checados deterministicamente.
+      notes: "O período DEVE ser igual ao do turno anterior; agrupar por clube (granularidade a critério do agente)."
+
+- id: ideb
+  turns:
+    - user: "Como evoluiu a nota do IDEB no meu município?"
+      action: clarify
+      tables: []
+      temporal: none
+      notes: "Nenhum município informado -> deve perguntar qual."
+
+    - user: "Sou de Piracicaba - SP e estou interessado nos anos finais da rede pública"
+      action: query
+      tables:
+        - basedosdados.br_inep_ideb.municipio
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      temporal: range
+      reference_sql: |
+        SELECT
+          t1.ano,
+          t2.nome as municipio,
+          t2.sigla_uf, t1.ideb
+        FROM `basedosdados.br_inep_ideb.municipio` as t1
+        JOIN `basedosdados.br_bd_diretorios_brasil.municipio` as t2
+          ON t1.id_municipio = t2.id_municipio
+        WHERE t2.id_municipio = "3538709"
+          AND t1.anos_escolares = "finais (6-9)"
+          AND t1.rede = "publica"
+        ORDER BY 1
+      notes: "Evolução -> intervalo de vários anos. Filtros: município=Piracicaba/SP, anos finais, rede pública."
+
+    - user: "Faça uma comparação com as metas nesse período"
+      action: query
+      tables:
+        - basedosdados.br_inep_ideb.municipio
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      temporal: match_previous
+      reference_sql: |
+        SELECT
+          t1.ano,
+          t2.nome as municipio,
+          t2.sigla_uf, t1.ideb,
+          t1.projecao
+        FROM `basedosdados.br_inep_ideb.municipio` as t1
+        JOIN `basedosdados.br_bd_diretorios_brasil.municipio` as t2
+          ON t1.id_municipio = t2.id_municipio
+        WHERE t2.id_municipio = "3538709"
+          AND t1.anos_escolares = "finais (6-9)"
+          AND t1.rede = "publica"
+        ORDER BY 1
+      notes: "Deve trazer a meta do IDEB; mesmo município/período."
+
+# TODO(eval): comex-stat uses `temporal: latest`, but ncm_exportacao/ncm_importacao are
+# MONTHLY tables (period_end e.g. 2026-06). So the deterministic `latest` check expects the
+# latest MONTH, while the reference_sql below aggregates the whole YEAR (`ano = 2026`, a
+# partial year) — the two can't both be satisfied by one answer. Decide the intended period
+# policy for monthly-but-annually-answered datasets: options are (a) `temporal: any` (stop
+# scoring the period here), (b) drop the reference_sql and treat it as open-ended, or (c) add
+# a "latest complete year" rule + reference `ano = 2025`. Parked — revisit with the eval.
+- id: comex-stat
+  turns:
+    - user: "Quais os principais produtos exportados pelo Brasil?"
+      action: query
+      tables:
+        - basedosdados.br_me_comex_stat.ncm_exportacao
+        - basedosdados.br_bd_diretorios_mundo.nomenclatura_comum_mercosul
+      temporal: latest
+      reference_sql: |
+        SELECT
+            t2.nome_ncm_portugues AS produto,
+            SUM(t1.valor_fob_dolar) AS total_valor_usd
+        FROM `basedosdados.br_me_comex_stat.ncm_exportacao` AS t1
+        JOIN `basedosdados.br_bd_diretorios_mundo.nomenclatura_comum_mercosul` AS t2
+          ON t1.id_ncm = t2.id_ncm
+        WHERE t1.ano = 2026
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 10
+      notes: "Ranking por valor; sem período informado -> mais recente."
+
+    - user: "Quais os principais destinos desses produtos?"
+      action: query
+      tables:
+        - basedosdados.br_me_comex_stat.ncm_exportacao
+        - basedosdados.br_bd_diretorios_mundo.pais
+      temporal: latest
+      # No reference_sql: "principais destinos desses produtos" admite leituras válidas
+      # (destinos no geral OU o cruzamento produto x destino) — o cruzamento é uma
+      # decomposição muito específica p/ ser a única gold. Julgado por grounded +
+      # answers_question; as tabelas e o período ainda são checados deterministicamente.
+      notes: "Agrupar por país de destino (decomposição a critério do agente)."
+
+    - user: "Faça essa mesma análise, mas para as importações agora"
+      action: query
+      tables:
+        - basedosdados.br_me_comex_stat.ncm_importacao
+        - basedosdados.br_bd_diretorios_mundo.pais
+        - basedosdados.br_bd_diretorios_mundo.nomenclatura_comum_mercosul
+      temporal: latest
+      # No reference_sql: mesma decomposição aberta do turno anterior, agora p/ importações.
+      # O reescopo export->import e as tabelas certas ainda são checados deterministicamente
+      # (source); a resposta é julgada por grounded + answers_question.
+      notes: "Troca de direção exportações->importações; testa o reescopo correto (decomposição a critério do agente)."
+
+- id: rais
+  turns:
+    - user: "Qual a porcentagem de mulheres com emprego formal?"
+      action: query
+      tables:
+        - basedosdados.br_me_rais.microdados_vinculos
+      temporal: latest
+      reference_sql: |
+        SELECT
+          CASE
+            WHEN sexo = '1' THEN 'Masculino'
+            WHEN sexo = '2' THEN 'Feminino'
+          END AS sexo,
+          COUNT(*) AS quantidade,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS percentual
+        FROM `basedosdados.br_me_rais.microdados_vinculos`
+        WHERE vinculo_ativo_3112 = '1'
+          AND ano = 2025
+        GROUP BY 1
+        ORDER BY 1
+      notes: "Teste da política de period_end - deve usar period_end, não um ano 'completo' anterior."
+
+- id: mapbiomas-uso-solo
+  turns:
+    - user: "Preciso entender a trajetória na mudança do uso do solo no Pará, entre 2015 e 2020"
+      action: query
+      tables:
+        - basedosdados.br_mapbiomas_estatisticas.cobertura_uf_classe
+        - basedosdados.br_mapbiomas_estatisticas.classe
+      temporal: {exact: {start: 2015, end: 2020}}
+      reference_sql: |
+        SELECT
+          t1.ano,
+          t2.valor_pt as classe,
+          t1.area
+        FROM `basedosdados.br_mapbiomas_estatisticas.cobertura_uf_classe` AS t1
+        JOIN `basedosdados.br_mapbiomas_estatisticas.classe` AS t2
+          ON t1.id_classe = t2.chave
+        WHERE t1.ano BETWEEN 2015 AND 2020
+          AND t1.sigla_uf = "PA"
+        ORDER BY 1, 3 DESC
+      notes: "Período explícito -> exatamente 2015-2020; filtrar Pará."
+
+    - user: "Quero as 5 maiores transições para cada ano desse mesmo período"
+      action: query
+      tables:
+        - basedosdados.br_mapbiomas_estatisticas.transicao_uf_de_para_anual
+        - basedosdados.br_mapbiomas_estatisticas.classe
+      temporal: match_previous
+      reference_sql: |
+        WITH ranked_transitions AS (
+          SELECT
+              t.ano,
+              c1.valor_pt AS classe_origem,
+              c2.valor_pt AS classe_destino,
+              t.area,
+              ROW_NUMBER() OVER (PARTITION BY t.ano ORDER BY t.area DESC) as rank
+          FROM `basedosdados.br_mapbiomas_estatisticas.transicao_uf_de_para_anual` AS t
+          JOIN `basedosdados.br_mapbiomas_estatisticas.classe` AS c1
+            ON t.id_classe_de = c1.chave
+          JOIN `basedosdados.br_mapbiomas_estatisticas.classe` AS c2
+            ON t.id_classe_para = c2.chave
+          WHERE t.sigla_uf = "PA"
+            AND t.ano BETWEEN 2015 AND 2020
+            AND t.id_classe_de != t.id_classe_para
+        )
+        SELECT
+            ano,
+            classe_origem,
+            classe_destino,
+            area
+        FROM ranked_transitions
+        WHERE rank <= 5
+        ORDER BY 1, 4 DESC
+      notes: "5 maiores transições por ano; mesmo período."
+
+# TODO(eval): cnes-farmacias t0 lists br_bd_diretorios_brasil.municipio in `tables`, but the
+# reference_sql hardcodes id_municipio = '3509502' (Campinas) instead of JOINing the directory.
+# Intentional IF the agent is expected to resolve "Campinas" via the directory (then source
+# scores 1.0 only when it joins); if a hardcoded code is acceptable, drop the directory from
+# `tables`. Decide when returning to eval.
+- id: cnes-farmacias
+  turns:
+    - user: "Quantas farmácias existem no município de Campinas?"
+      action: query
+      tables:
+        - basedosdados.br_ms_cnes.estabelecimento
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      temporal: latest
+      reference_sql: |
+        SELECT
+            COUNT(DISTINCT id_estabelecimento_cnes) as total_farmacias
+        FROM `basedosdados.br_ms_cnes.estabelecimento`
+        WHERE id_municipio = '3509502' -- ID de Campinas/SP
+          AND tipo_unidade = '43' -- Código para 'farmacia'
+          AND ano = 2026
+          AND mes = 5
+      notes: "Tabela mensal com period_end '2026-05' e SEM guia de uso. Testa se o agente usa o período mais recente (period_end) em vez de assumir um ano anterior do seu conhecimento prévio."
+
+- id: capacidades
+  turns:
+    - user: "O que é a Base dos Dados e como você pode me ajudar nas minhas análises?"
+      action: clarify
+      tables: []
+      temporal: none
+      notes: "Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente (o que é a BD; que pode buscar datasets, explorar tabelas e executar SQL) SEM executar consulta de dados e SEM inventar datasets/números específicos. É um dos casos em que responder sem tools é permitido."
+
+- id: dado-inexistente
+  turns:
+    - user: "Quantos assinantes a Netflix tem no Brasil atualmente?"
+      action: clarify
+      tables: []
+      temporal: none
+      notes: "Dado que a BD não possui (base de assinantes de uma empresa de streaming). Deve BUSCAR (search_datasets) para confirmar a ausência e então informar que não encontrou esse dado na plataforma — SEM inventar tabela/valor e SEM responder pelo conhecimento próprio. Pode sugerir temas relacionados que existem. Testa a regra de grounding / não-fabricação."
+
+- id: periodo-fora-do-intervalo
+  turns:
+    - user: "Quais foram os principais produtos exportados pelo Brasil em 1980?"
+      action: clarify
+      tables: []
+      temporal: none
+      notes: "1980 é anterior ao início da cobertura da série de comércio exterior (começa no fim dos anos 1990). Deve consultar get_table_details, constatar que 1980 está fora de [period_start, period_end], informar o período disponível e perguntar como prosseguir — SEM consultar silenciosamente outro ano. Testa a regra de período fora do intervalo."
+
+- id: ibge-populacao
+  turns:
+    - user: "Qual é a população total do Brasil?"
+      action: query
+      tables:
+        - basedosdados.br_ibge_populacao.brasil
+      temporal: latest
+      reference_sql: |
+        SELECT ano, populacao
+        FROM `basedosdados.br_ibge_populacao.brasil`
+        WHERE ano = 2025 -- period_end (cobertura anual 1991-2025); atualizar quando avançar
+      notes: "Fonte IBGE (cobre a lacuna de órgão no gold). Sem período informado -> mais recente (period_end anual, granularidade ano). Tabela de uma linha por ano — consulta de uma tabela só."
+
+    - user: "E como ela se distribui entre os estados nesse ano?"
+      action: query
+      tables:
+        - basedosdados.br_ibge_populacao.uf
+        - basedosdados.br_bd_diretorios_brasil.uf
+      temporal: match_previous
+      reference_sql: |
+        SELECT
+          t2.nome AS estado,
+          t1.sigla_uf,
+          t1.populacao
+        FROM `basedosdados.br_ibge_populacao.uf` AS t1
+        JOIN `basedosdados.br_bd_diretorios_brasil.uf` AS t2
+          ON t1.sigla_uf = t2.sigla -- diretório usa `sigla` (não `sigla_uf`)
+        WHERE t1.ano = 2025
+        ORDER BY t1.populacao DESC
+      notes: "Mesmo ano do turno anterior (match_previous). sigla_uf é codificada (reference_table_id -> diretório de UF): deve fazer JOIN para exibir o nome do estado. Testa reescopo Brasil->UF e tradução de coluna codificada."

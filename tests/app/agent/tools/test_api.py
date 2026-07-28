@@ -421,6 +421,7 @@ class TestGetTableDetails:
                                         },
                                     ]
                                 },
+                                "dataset": {"id": "DatasetNode:dataset-1"},
                             }
                         }
                     ]
@@ -439,6 +440,7 @@ class TestGetTableDetails:
         table = json.loads(result)
 
         assert table["id"] == "table-1"
+        assert table["dataset_id"] == "dataset-1"
         assert table["gcp_id"] == "basedosdados.test_dataset.test_table"
         assert table["name"] == "Test Table"
         assert table["description"] == "Table description"

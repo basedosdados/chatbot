@@ -16,6 +16,7 @@ class TableOverview(BaseModel):
     """Basic table information without column details."""
 
     id: str
+    dataset_id: str
     gcp_id: str | None
     name: str
     description: str | None
