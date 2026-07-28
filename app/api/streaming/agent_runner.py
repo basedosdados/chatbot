@@ -19,12 +19,7 @@ from app.db.models import (
     MessageStatus,
     QueryHandle,
 )
-from app.exports import (
-    CollectedQueryHandle,
-    QueryResultDownload,
-    collect_query_handles,
-    query_result_download,
-)
+from app.exports import CollectedQueryHandle, collect_query_handles
 
 
 class ErrorMessage:
@@ -256,7 +251,6 @@ async def run_agent(
     assistant_message = ""
     structured_response: dict[str, Any] | None = None
     collected_handles: list[CollectedQueryHandle] = []
-    downloads: list[QueryResultDownload] = []
     status: MessageStatus | None = None
 
     try:
@@ -285,12 +279,6 @@ async def run_agent(
                 if event.data.structured_response is not None:
                     await resolve_data_source_names(event.data.structured_response)
                 structured_response = event.data.structured_response
-                # Resolve query result downloads
-                downloads = [
-                    query_result_download(handle.query_ref, handle.slug)
-                    for handle in collected_handles
-                ]
-                event.data.downloads = downloads
                 # Set the assistant message
                 assistant_message = event.data.content
                 status = MessageStatus.SUCCESS
@@ -338,7 +326,7 @@ async def run_agent(
                 error_details = None
                 # Query handles are a best-effort download convenience, persisted after
                 # the message (its own commit) so a handle failure never loses the message.
-                if downloads:
+                if collected_handles:
                     try:
                         await _persist_query_handles(
                             database,

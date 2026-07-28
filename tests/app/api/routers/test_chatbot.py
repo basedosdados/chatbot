@@ -333,7 +333,7 @@ class TestListMessagesEndpoint:
                 QueryHandle(
                     query_ref="qr_test",
                     message_id=message.id,
-                    slug="vendas_por_ano",
+                    slug="slug",
                     destination_table={
                         "projectId": "p",
                         "datasetId": "d",
@@ -353,7 +353,7 @@ class TestListMessagesEndpoint:
         [download] = message_json["downloads"]
         assert download["type"] == "query_result"
         assert download["query_ref"] == "qr_test"
-        assert download["slug"] == "vendas_por_ano"
+        assert download["slug"] == "slug"
         assert download["formats"] == ["CSV"]
         # The internal handles (and their destination tables) never reach the client.
         assert "query_handles" not in message_json

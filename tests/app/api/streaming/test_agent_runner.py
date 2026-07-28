@@ -23,6 +23,7 @@ from app.api.streaming.agent_runner import (
 )
 from app.api.streaming.schemas import StreamEvent
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
+from app.exports import OFFERED_EXPORT_FORMATS
 
 MODEL_URI = "mock-model"
 
@@ -388,10 +389,10 @@ class TestProcessChunk:
         assert tool_output.artifact is None
         assert tool_output.metadata is None
 
-    def test_tools_chunk_redacts_query_result_artifact_on_serialization(self):
+    def test_tools_chunk_projects_query_result_artifact_on_serialization(self):
         """The internal query_result handle stays in memory (so the server can capture
-        it) but is redacted from every serialization — the SSE stream and the persisted
-        events that list_messages returns."""
+        it) but every serialization — the SSE stream and the persisted events that
+        list_messages returns — sees only its download descriptor."""
         chunk = {
             "tools": {
                 "messages": [
@@ -403,6 +404,7 @@ class TestProcessChunk:
                         artifact={
                             "type": "query_result",
                             "query_ref": "q_abc",
+                            "slug": "slug",
                             "destination_table": {"projectId": "p"},
                         },
                     )
@@ -415,8 +417,13 @@ class TestProcessChunk:
 
         # In memory the handle is present (run_agent reads destination_table off it) ...
         assert output.artifact["destination_table"] == {"projectId": "p"}
-        # ... but it never reaches the client.
-        assert output.model_dump()["artifact"] is None
+        # ... but the client sees only what it needs to render a download.
+        assert output.model_dump()["artifact"] == {
+            "type": "query_result",
+            "query_ref": "q_abc",
+            "slug": "slug",
+            "formats": OFFERED_EXPORT_FORMATS,
+        }
         assert "destination_table" not in event.to_sse()
 
     def test_tools_chunk_surfaces_non_query_result_artifact_on_serialization(self):
@@ -630,7 +637,7 @@ class TestRunAgent:
                                 artifact={
                                     "type": "query_result",
                                     "query_ref": "q_run",
-                                    "slug": "vendas",
+                                    "slug": "slug",
                                     "destination_table": destination,
                                 },
                             )
@@ -758,11 +765,11 @@ class TestRunAgent:
         config: ConfigDict,
         thread_id: str,
     ):
-        """An executed query streams a derived download and persists its handle.
+        """An executed query streams its download descriptor and persists its handle.
 
-        Lazy model: no file is exported at answer time. The download affordance is
-        derived from the run's collected handles (streamed live), and each handle is
-        stored so the file can be materialized on the first download click.
+        Lazy model: no file is exported at answer time. The affordance rides on the
+        tool output that produced the query, and the handle is stored so the file can
+        be materialized on the first download click.
         """
         destination = {"projectId": "p", "datasetId": "d", "tableId": "t"}
         structured = StructuredResponse(response="Answer")
@@ -783,7 +790,7 @@ class TestRunAgent:
                                 artifact={
                                     "type": "query_result",
                                     "query_ref": "q_run",
-                                    "slug": "vendas",
+                                    "slug": "slug",
                                     "destination_table": destination,
                                 },
                             )
@@ -805,40 +812,63 @@ class TestRunAgent:
             queue=queue,
         )
         events = await self._drain(queue)
-        final = next(e for e in events if e.type == "final_answer")
+        tool_output = next(e for e in events if e.type == "tool_output")
 
-        # The affordance is derived and streamed live on the final answer ...
-        assert final.data.downloads == [
-            {
-                "type": "query_result",
-                "query_ref": "q_run",
-                "slug": "vendas",
-                "formats": ["CSV"],
-            }
-        ]
+        # The affordance rides on the tool output, so the client can offer the download
+        # inline with the query that produced it ...
+        assert tool_output.data.tool_outputs[0].model_dump()["artifact"] == {
+            "type": "query_result",
+            "query_ref": "q_run",
+            "slug": "slug",
+            "formats": OFFERED_EXPORT_FORMATS,
+        }
         # ... and the handle (slug + destination table) is stored, with no eager file export.
         mock_database.create_query_handles.assert_awaited_once()
         [handle] = mock_database.create_query_handles.call_args.args[0]
         assert handle.query_ref == "q_run"
-        assert handle.slug == "vendas"
+        assert handle.slug == "slug"
         assert handle.destination_table == destination
         assert events[-1].data.error_details is None
 
-    async def test_no_executed_query_offers_no_download(
+    async def test_failed_run_still_persists_the_handles_it_streamed(
         self,
         mock_database: MagicMock,
         mock_user_message: Message,
         config: ConfigDict,
         thread_id: str,
     ):
-        """Downloads derive from executed queries; a turn that ran none offers none."""
-        structured = StructuredResponse(response="Answer")
+        """A run that executes a query and then fails still persists its handle.
+
+        The client offers a download for every streamed query, so persistence follows
+        the handles, not the run's outcome — otherwise those buttons 404 on click.
+        """
+        destination = {"projectId": "p", "datasetId": "d", "tableId": "t"}
 
         agent = MagicMock()
 
         async def astream(*args, **kwargs):
-            # No execute_bigquery_sql ran this turn, so no handle is captured.
-            yield ("updates", {"model": {"structured_response": structured}})
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"row_count": 1, "rows": [{"col1": "value1"}]}',
+                                tool_call_id="1",
+                                name="execute_bigquery_sql",
+                                status="success",
+                                artifact={
+                                    "type": "query_result",
+                                    "query_ref": "q_run",
+                                    "slug": "slug",
+                                    "destination_table": destination,
+                                },
+                            )
+                        ]
+                    }
+                },
+            )
+            raise RuntimeError("error")
 
         agent.astream = astream
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
@@ -851,12 +881,15 @@ class TestRunAgent:
             model_uri=MODEL_URI,
             queue=queue,
         )
-        events = await self._drain(queue)
-        final = next(e for e in events if e.type == "final_answer")
 
-        # No query executed, so no download is offered and no handle is stored.
-        assert final.data.downloads == []
-        mock_database.create_query_handles.assert_not_awaited()
+        events = await self._drain(queue)
+        assert [e.type for e in events] == ["tool_output", "error", "complete"]
+
+        # No final answer, but the streamed query is still downloadable.
+        mock_database.create_query_handles.assert_awaited_once()
+        [handle] = mock_database.create_query_handles.call_args.args[0]
+        assert handle.query_ref == "q_run"
+        assert handle.destination_table == destination
 
     async def test_unexpected_exception_persists_error_row(
         self,

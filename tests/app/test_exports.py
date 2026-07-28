@@ -32,10 +32,10 @@ def test_export_formats_match_the_advertised_literal():
 
 def test_query_result_download_shape():
     """An executed query becomes one download; only CSV is offered for now."""
-    assert query_result_download("qr_1", "vendas_por_ano") == {
+    assert query_result_download("qr_1", "slug") == {
         "type": "query_result",
         "query_ref": "qr_1",
-        "slug": "vendas_por_ano",
+        "slug": "slug",
         "formats": ["CSV"],
     }
 
@@ -47,7 +47,7 @@ class TestCollectQueryHandles:
             {
                 "type": "query_result",
                 "query_ref": "qr_1",
-                "slug": "vendas",
+                "slug": "slug",
                 "destination_table": DESTINATION,
             },
             None,  # a tool with no artifact
@@ -59,7 +59,7 @@ class TestCollectQueryHandles:
 
         assert collected == [
             CollectedQueryHandle(
-                query_ref="qr_1", slug="vendas", destination_table=DESTINATION
+                query_ref="qr_1", slug="slug", destination_table=DESTINATION
             )
         ]
 

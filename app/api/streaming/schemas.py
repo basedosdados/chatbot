@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, JsonValue, field_serializer
 
+from app.exports import query_result_download
+
 
 class ToolCall(BaseModel):
     id: str
@@ -21,19 +23,18 @@ class ToolOutput(BaseModel):
     def _redact_internal_artifact(self, value: Any) -> Any | None:
         """Surface client-facing artifacts and redact internal handles.
 
-        `query_result` carries `destination_table`, which must never reach the client.
-        It's kept in memory (so the server can capture the handle off the tool output)
-        but dropped from every serialization: the SSE stream and the persisted `events`
-        that `list_messages` returns.
+        A `query_result` handle is projected onto its download descriptor. The original handle
+        stays in memory, where the server reads it off the tool output; it is dropped from
+        every serialization, both the SSE stream and the persisted `events` list.
 
         Args:
             value (Any): The artifact being serialized.
 
         Returns:
-            Any | None: The artifact, or None if it is an internal handle.
+            Any | None: The artifact, or the download descriptor for an internal handle.
         """
         if isinstance(value, dict) and value.get("type") == "query_result":
-            return None
+            return query_result_download(value["query_ref"], value["slug"])
         return value
 
 
@@ -53,7 +54,6 @@ class EventData(BaseModel):
     tool_calls: list[ToolCall] | None = None
     tool_outputs: list[ToolOutput] | None = None
     structured_response: dict[str, Any] | None = None
-    downloads: list[dict[str, Any]] | None = None
     error_details: dict[str, Any] | None = None
 
 
