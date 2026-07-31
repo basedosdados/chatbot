@@ -18,7 +18,7 @@ MAX_BYTES_BILLED = 10 * 10**9
 @cache
 def _bq_client() -> bq.Client:  # pragma: no cover
     return bq.Client(
-        project=settings.GOOGLE_BIGQUERY_PROJECT,
+        project=settings.GOOGLE_BILLING_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,
     )
 

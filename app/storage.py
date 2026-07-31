@@ -8,10 +8,9 @@ from app.settings import settings
 
 @cache
 def _gcs_client() -> storage.Client:  # pragma: no cover
-    return storage.Client(
-        project=settings.GOOGLE_BIGQUERY_PROJECT,
-        credentials=settings.GOOGLE_CREDENTIALS,
-    )
+    # No project: every call here is scoped to an object by bucket name, and
+    # signing needs nothing but the service account key.
+    return storage.Client(project=None, credentials=settings.GOOGLE_CREDENTIALS)
 
 
 def gcs_object_exists(bucket: str, object_key: str) -> bool:

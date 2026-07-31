@@ -79,8 +79,12 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                 Google Cloud settings                  ==
     # ============================================================
-    GOOGLE_BIGQUERY_PROJECT: NonEmptyStr = Field(
-        description="Google BigQuery project ID."
+    GOOGLE_BILLING_PROJECT: NonEmptyStr = Field(
+        description=(
+            "Project where BigQuery jobs run and are billed. Not the project holding "
+            "the data: queries reference tables by their full `gcp_id`, which comes "
+            "from the backend metadata."
+        ),
     )
     GOOGLE_SERVICE_ACCOUNT: NonEmptyStr = Field(
         description="Path to a google service account with required permissions."
@@ -89,11 +93,11 @@ class Settings(BaseSettings):
         description="GCS bucket where exported query results are stored."
     )
     SIGNED_URL_TTL_SECONDS: int = Field(
-        default=15 * 60,
+        default=10 * 60,
         description="Lifetime of signed URLs generated for downloading exported query results.",
     )
     MAX_EXPORT_BYTES: int = Field(
-        default=100 * 1024 * 1024,
+        default=10 * 1024 * 1024,
         gt=0,
         le=256 * 1024 * 1024,
         description=(
