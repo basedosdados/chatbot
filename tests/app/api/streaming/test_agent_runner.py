@@ -23,6 +23,7 @@ from app.api.streaming.agent_runner import (
 )
 from app.api.streaming.schemas import StreamEvent
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
+from app.exports import OFFERED_EXPORT_FORMATS
 
 MODEL_URI = "mock-model"
 
@@ -72,6 +73,7 @@ def mock_database(
             status=MessageStatus.SUCCESS,
         )
     )
+    db.create_query_handles = AsyncMock(return_value=None)
 
     @asynccontextmanager
     async def mock_sessionmaker():
@@ -291,7 +293,6 @@ class TestProcessChunk:
                 period_end="2025",
                 granularity=TemporalGranularity.YEAR,
             ),
-            sql_queries=["SELECT 1 -- comment"],
             follow_up_questions=["E em 2026?", "Por estado?", "Por região?"],
         )
 
@@ -333,7 +334,6 @@ class TestProcessChunk:
             "period_end": "2025",
             "granularity": "year",
         }
-        assert event.data.structured_response["sql_queries"] == ["SELECT 1 -- comment"]
         assert event.data.structured_response["follow_up_questions"] == [
             "E em 2026?",
             "Por estado?",
@@ -366,9 +366,8 @@ class TestProcessChunk:
                     ToolMessage(
                         content='{"result": "found"}',
                         tool_call_id="call_123",
-                        name="search",
+                        name="search_datasets",
                         status="success",
-                        artifact={"url": "http://example.com"},
                     )
                 ]
             }
@@ -384,10 +383,74 @@ class TestProcessChunk:
 
         assert tool_output.status == "success"
         assert tool_output.tool_call_id == "call_123"
-        assert tool_output.tool_name == "search"
+        assert tool_output.tool_name == "search_datasets"
         assert tool_output.content == '{\n  "result": "found"\n}'
-        assert tool_output.artifact == {"url": "http://example.com"}
+        # search_datasets carries no artifact, so the output has none.
+        assert tool_output.artifact is None
         assert tool_output.metadata is None
+
+    def test_tools_chunk_projects_query_result_artifact_on_serialization(self):
+        """The internal query_result handle stays in memory (so the server can capture
+        it) but every serialization — the SSE stream and the persisted events that
+        list_messages returns — sees only its download descriptor."""
+        chunk = {
+            "tools": {
+                "messages": [
+                    ToolMessage(
+                        content='{"row_count": 1, "rows": [{"col1": "value1"}]}',
+                        tool_call_id="call_123",
+                        name="execute_bigquery_sql",
+                        status="success",
+                        artifact={
+                            "type": "query_result",
+                            "query_ref": "q_abc",
+                            "slug": "slug",
+                            "destination_table": {"projectId": "p"},
+                        },
+                    )
+                ]
+            }
+        }
+
+        event = _process_chunk(chunk)
+        output = event.data.tool_outputs[0]
+
+        # In memory the handle is present (run_agent reads destination_table off it) ...
+        assert output.artifact["destination_table"] == {"projectId": "p"}
+        # ... but the client sees only what it needs to render a download.
+        assert output.model_dump()["artifact"] == {
+            "type": "query_result",
+            "query_ref": "q_abc",
+            "slug": "slug",
+            "formats": OFFERED_EXPORT_FORMATS,
+        }
+        assert "destination_table" not in event.to_sse()
+
+    def test_tools_chunk_surfaces_non_query_result_artifact_on_serialization(self):
+        """Only `query_result` handles are redacted; any other artifact is surfaced as-is."""
+        artifact = {"type": "chart", "id": "c1"}
+        chunk = {
+            "tools": {
+                "messages": [
+                    ToolMessage(
+                        content='{"ok": true}',
+                        tool_call_id="call_123",
+                        name="some_tool",
+                        status="success",
+                        artifact=artifact,
+                    )
+                ]
+            }
+        }
+
+        event = _process_chunk(chunk)
+        output = event.data.tool_outputs[0]
+
+        # A client-facing artifact passes through redaction untouched, in memory ...
+        assert output.artifact == artifact
+        # ... and on every serialization (SSE stream + persisted events).
+        assert output.model_dump()["artifact"] == artifact
+        assert "chart" in event.to_sse()
 
     def test_tools_chunk_multiple_parallel_tools(self):
         """Test tools chunk with multiple parallel tool outputs (list format)."""
@@ -543,6 +606,69 @@ class TestRunAgent:
         assert message.status == MessageStatus.SUCCESS
         assert message.content == "Final answer"
 
+    async def test_handle_persist_failure_still_persists_message(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A failed query-handle write must not lose the message (handles are best-effort)."""
+        mock_database.create_query_handles = AsyncMock(
+            side_effect=RuntimeError("handle boom")
+        )
+
+        destination = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+        structured = StructuredResponse(response="Answer")
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"row_count": 1, "rows": [{"col1": "value1"}]}',
+                                tool_call_id="1",
+                                name="execute_bigquery_sql",
+                                status="success",
+                                artifact={
+                                    "type": "query_result",
+                                    "query_ref": "q_run",
+                                    "slug": "slug",
+                                    "destination_table": destination,
+                                },
+                            )
+                        ]
+                    }
+                },
+            )
+            yield ("updates", {"model": {"structured_response": structured}})
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            queue=queue,
+        )
+
+        complete = (await self._drain(queue))[-1]
+
+        # The handle write was attempted and failed, but the message still persisted
+        # and the run completes without a persistence error.
+        mock_database.create_message.assert_called_once()
+        mock_database.create_query_handles.assert_awaited_once()
+        assert complete.type == "complete"
+        assert complete.data.run_id == config["run_id"]
+        assert complete.data.error_details is None
+
     async def test_structured_response_is_emitted_and_persisted(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -563,7 +689,6 @@ class TestRunAgent:
                 period_end="2025",
                 granularity=TemporalGranularity.YEAR,
             ),
-            sql_queries=["SELECT 1"],
             follow_up_questions=["E em 2026?"],
         )
 
@@ -622,7 +747,6 @@ class TestRunAgent:
             "period_end": "2025",
             "granularity": "year",
         }
-        assert events[0].data.structured_response["sql_queries"] == ["SELECT 1"]
         assert events[0].data.structured_response["follow_up_questions"] == [
             "E em 2026?"
         ]
@@ -633,6 +757,139 @@ class TestRunAgent:
         assert message.status == MessageStatus.SUCCESS
         assert message.content == "Final answer"
         assert message.structured_response == events[0].data.structured_response
+
+    async def test_executed_query_derives_download_and_persists_handle(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """An executed query streams its download descriptor and persists its handle.
+
+        Lazy model: no file is exported at answer time. The affordance rides on the
+        tool output that produced the query, and the handle is stored so the file can
+        be materialized on the first download click.
+        """
+        destination = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+        structured = StructuredResponse(response="Answer")
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"row_count": 1, "rows": [{"col1": "value1"}]}',
+                                tool_call_id="1",
+                                name="execute_bigquery_sql",
+                                status="success",
+                                artifact={
+                                    "type": "query_result",
+                                    "query_ref": "q_run",
+                                    "slug": "slug",
+                                    "destination_table": destination,
+                                },
+                            )
+                        ]
+                    }
+                },
+            )
+            yield ("updates", {"model": {"structured_response": structured}})
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            queue=queue,
+        )
+        events = await self._drain(queue)
+        tool_output = next(e for e in events if e.type == "tool_output")
+
+        # The affordance rides on the tool output, so the client can offer the download
+        # inline with the query that produced it ...
+        assert tool_output.data.tool_outputs[0].model_dump()["artifact"] == {
+            "type": "query_result",
+            "query_ref": "q_run",
+            "slug": "slug",
+            "formats": OFFERED_EXPORT_FORMATS,
+        }
+        # ... and the handle (slug + destination table) is stored, with no eager file export.
+        mock_database.create_query_handles.assert_awaited_once()
+        [handle] = mock_database.create_query_handles.call_args.args[0]
+        assert handle.query_ref == "q_run"
+        assert handle.slug == "slug"
+        assert handle.destination_table == destination
+        assert events[-1].data.error_details is None
+
+    async def test_failed_run_still_persists_the_handles_it_streamed(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A run that executes a query and then fails still persists its handle.
+
+        The client offers a download for every streamed query, so persistence follows
+        the handles, not the run's outcome — otherwise those buttons 404 on click.
+        """
+        destination = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"row_count": 1, "rows": [{"col1": "value1"}]}',
+                                tool_call_id="1",
+                                name="execute_bigquery_sql",
+                                status="success",
+                                artifact={
+                                    "type": "query_result",
+                                    "query_ref": "q_run",
+                                    "slug": "slug",
+                                    "destination_table": destination,
+                                },
+                            )
+                        ]
+                    }
+                },
+            )
+            raise RuntimeError("error")
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            queue=queue,
+        )
+
+        events = await self._drain(queue)
+        assert [e.type for e in events] == ["tool_output", "error", "complete"]
+
+        # No final answer, but the streamed query is still downloadable.
+        mock_database.create_query_handles.assert_awaited_once()
+        [handle] = mock_database.create_query_handles.call_args.args[0]
+        assert handle.query_ref == "q_run"
+        assert handle.destination_table == destination
 
     async def test_unexpected_exception_persists_error_row(
         self,

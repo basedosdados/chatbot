@@ -57,7 +57,7 @@ from pydantic import BaseModel, Field
 # module (python -m eval.eval_quality) or directly (python eval/eval_quality.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.agent.tools.bigquery import MAX_BYTES_BILLED, _get_client  # noqa: E402
+from app.agent.tools.bigquery import MAX_BYTES_BILLED, _bq_client  # noqa: E402
 from app.settings import settings  # noqa: E402
 
 # This script's folder — gold input and result files default here, so the eval
@@ -160,7 +160,7 @@ def run_reference_sql(sql: str, cache: dict[str, list]) -> list[dict]:
         list[dict]: The query result rows (each row as a dict).
     """
     if sql not in cache:
-        job = _get_client().query(
+        job = _bq_client().query(
             sql, job_config=bq.QueryJobConfig(maximum_bytes_billed=MAX_BYTES_BILLED)
         )
         cache[sql] = [dict(row) for row in job.result()]
@@ -258,7 +258,6 @@ def render_turn(task: dict) -> str:
 # Structured fields the assistant reported
 - data_sources: {data_source_names}
 - temporal_coverage: {structured.get("temporal_coverage")}
-- sql_queries: {structured.get("sql_queries")}
 - follow_up_questions: {structured.get("follow_up_questions")}
 
 # ASSISTANT'S RETRIEVED DATA (its OWN queries + results, this turn AND earlier turns of the conversation — anchor for `grounded`)

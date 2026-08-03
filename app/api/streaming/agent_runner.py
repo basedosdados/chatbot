@@ -12,7 +12,14 @@ from app.api.streaming.data_sources import resolve_data_source_names
 from app.api.streaming.schemas import EventData, StreamEvent, ToolCall, ToolOutput
 from app.api.streaming.security import sanitize_markdown_links
 from app.db.database import AsyncDatabase, sessionmaker
-from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
+from app.db.models import (
+    Message,
+    MessageCreate,
+    MessageRole,
+    MessageStatus,
+    QueryHandle,
+)
+from app.exports import CollectedQueryHandle, collect_query_handles
 
 
 class ErrorMessage:
@@ -87,17 +94,17 @@ def _truncate_json(
 
 
 def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
-    """Process a streaming chunk from a react agent workflow into a standardized StreamEvent.
+    """Process a streaming chunk from a react agent workflow into a StreamEvent.
 
     Args:
-        chunk (dict[str, Any]): Raw chunk from agent workflow.
-            Only processes "agent" and "tools" nodes.
+        chunk (dict[str, Any]): A raw update chunk from the agent workflow.
 
     Returns:
         StreamEvent | None: Structured event or None if the chunk is ignored:
             - "tool_call" for agent messages with tool calls
             - "tool_output" for tool execution results
             - "final_answer" for agent messages without tool calls
+            - "model_call_limit" when the model call limit is reached
             - None for ignored chunks
     """
     if "model" in chunk:
@@ -170,7 +177,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
                 tool_call_id=message.tool_call_id,
                 tool_name=message.name,
                 content=_truncate_json(message.content),
-                artifact=message.artifact,
+                artifact=message.artifact,  # internal artifacts are redacted on serialization (see ToolOutput)
             )
             for message in tool_messages
         ]
@@ -190,6 +197,31 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
             )
             return StreamEvent(type="model_call_limit", data=event_data)
     return None
+
+
+async def _persist_query_handles(
+    database: AsyncDatabase,
+    *,
+    message_id: str,
+    collected_handles: list[CollectedQueryHandle],
+):
+    """Persist query handles for a message.
+
+    Args:
+        database (AsyncDatabase): The repository to persist through.
+        message_id (str): The owning message/run the handles are scoped to.
+        collected_handles: list[CollectedQueryHandle]: Collected query handles.
+    """
+    handles = [
+        QueryHandle(
+            query_ref=handle.query_ref,
+            message_id=message_id,
+            slug=handle.slug,
+            destination_table=handle.destination_table,
+        )
+        for handle in collected_handles
+    ]
+    await database.create_query_handles(handles)
 
 
 async def run_agent(
@@ -216,9 +248,9 @@ async def run_agent(
         queue (asyncio.Queue[StreamEvent]): Events queue.
     """
     events = []
-    artifacts = []
     assistant_message = ""
     structured_response: dict[str, Any] | None = None
+    collected_handles: list[CollectedQueryHandle] = []
     status: MessageStatus | None = None
 
     try:
@@ -236,14 +268,19 @@ async def run_agent(
                 continue
 
             if event.type == "tool_output":
-                for output in event.data.tool_outputs:
-                    if output.artifact:
-                        artifacts.append(output.artifact)
+                # Collect every query handle from the execute_bigquery_sql
+                # tool artifacts, for lazy on-click downloads.
+                collect_query_handles(
+                    (output.artifact for output in event.data.tool_outputs),
+                    collected_handles,
+                )
             elif event.type == "final_answer":
-                assistant_message = event.data.content
+                # Resolve data source names to {dataset_name}—{table_name}
                 if event.data.structured_response is not None:
                     await resolve_data_source_names(event.data.structured_response)
                 structured_response = event.data.structured_response
+                # Set the assistant message
+                assistant_message = event.data.content
                 status = MessageStatus.SUCCESS
             elif event.type == "model_call_limit":
                 assistant_message = event.data.content
@@ -277,7 +314,6 @@ async def run_agent(
             model_uri=model_uri,
             role=MessageRole.ASSISTANT,
             content=assistant_message,
-            artifacts=artifacts or None,
             events=events or None,
             structured_response=structured_response,
             status=status or MessageStatus.ERROR,
@@ -286,8 +322,21 @@ async def run_agent(
             async with sessionmaker() as session:
                 database = AsyncDatabase(session)
                 message = await database.create_message(message_create)
-            message_id = str(message.id)
-            error_details = None
+                message_id = str(message.id)
+                error_details = None
+                # Query handles are a best-effort download convenience, persisted after
+                # the message (its own commit) so a handle failure never loses the message.
+                if collected_handles:
+                    try:
+                        await _persist_query_handles(
+                            database,
+                            message_id=message_id,
+                            collected_handles=collected_handles,
+                        )
+                    except Exception:
+                        logger.exception(
+                            f"Failed to persist query handles for run {config['run_id']}:"
+                        )
         except Exception:
             logger.exception(
                 f"Failed to persist assistant message for run {config['run_id']}:"

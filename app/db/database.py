@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import selectinload
 from sqlmodel import SQLModel, select
 
 from app.db.models import (
@@ -17,6 +18,7 @@ from app.db.models import (
     FeedbackSyncStatus,
     Message,
     MessageCreate,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -100,7 +102,7 @@ class AsyncDatabase:
             thread_id (str | UUID): The thread unique identifier.
 
         Returns:
-            Thread | None: A Thread object if the thread was found. None otherwise.
+            Thread | None: A Thread object if found. None otherwise.
         """
         query = select(Thread).where(Thread.id == thread_id, Thread.deleted.is_(False))
         results = await self.session.execute(query)
@@ -173,6 +175,22 @@ class AsyncDatabase:
 
         return message
 
+    async def get_message(self, message_id: str | UUID) -> Message | None:
+        """Get a message from the messages table.
+
+        Args:
+            message_id (str | UUID): The message unique identifier.
+
+        Returns:
+            Message | None: A Message object if found, None otherwise.
+        """
+        message = await self.session.get(Message, message_id)
+
+        if message is None:
+            self.logger.warning(f"Message {message_id} not found")
+
+        return message
+
     async def get_messages(
         self, thread_id: str | UUID, order_by: str | None = None
     ) -> list[Message]:
@@ -185,12 +203,55 @@ class AsyncDatabase:
         Returns:
             list[Message]: A list of Message objects.
         """
-        query = select(Message).where(Message.thread_id == thread_id)
+        # Eager-load the query handles so `MessagePublic.downloads` can
+        # derive the download affordance without a lazy load per message.
+        query = (
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .options(selectinload(Message.query_handles))
+        )
         query = self._apply_order_by(query, Message, order_by)
+
         results = await self.session.execute(query)
         messages = results.scalars().all()
 
         return messages
+
+    # ================================== QueryHandle ===================================
+    async def create_query_handles(self, query_handles: list[QueryHandle]) -> None:
+        """Bulk-insert query handles.
+
+        Args:
+            query_handles (list[QueryHandle]): The handles to persist.
+        """
+        if not query_handles:
+            return
+
+        self.session.add_all(query_handles)
+        await self.session.commit()
+
+    async def get_query_handle(
+        self, message_id: str | UUID, query_ref: str
+    ) -> QueryHandle | None:
+        """Get a stored query handle by its (`message_id`, `query_ref`).
+
+        Args:
+            message_id (str | UUID): The message the handle is scoped to.
+            query_ref (str): The short handle minted by `execute_bigquery_sql`.
+
+        Returns:
+            QueryHandle | None: The handle if found, None otherwise.
+        """
+        query_handle = await self.session.get(
+            QueryHandle, {"message_id": message_id, "query_ref": query_ref}
+        )
+
+        if query_handle is None:
+            self.logger.warning(
+                f"Query handle {query_ref} for message {message_id} not found"
+            )
+
+        return query_handle
 
     # ==================================== Feedback ====================================
     async def upsert_feedback(

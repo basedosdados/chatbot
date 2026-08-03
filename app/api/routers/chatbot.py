@@ -1,7 +1,8 @@
 import asyncio
+import re
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -13,14 +14,22 @@ from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
     FeedbackPublic,
-    Message,
     MessageCreate,
+    MessagePublic,
     MessageRole,
     Thread,
     ThreadCreate,
     ThreadPayload,
 )
+from app.exports import (
+    OFFERED_EXPORT_FORMATS,
+    ExportFormat,
+    ResultTableExpired,
+    ResultTooLarge,
+    materialize_export,
+)
 from app.settings import settings
+from app.storage import generate_signed_url
 
 router = APIRouter(prefix="/chatbot")
 
@@ -74,10 +83,10 @@ async def delete_thread_and_checkpoints(
         await agent.checkpointer.adelete_thread(thread_id)
 
 
-@router.get("/threads/{thread_id}/messages")
+@router.get("/threads/{thread_id}/messages", response_model=list[MessagePublic])
 async def list_messages(
     thread_id: str, database: AsyncDB, user_id: UserID, order_by: str | None = None
-) -> list[Message]:
+):
     if order_by and order_by not in {"created_at", "-created_at"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -158,6 +167,102 @@ async def send_message(
         stream_events(queue),
         status_code=status.HTTP_201_CREATED,
     )
+
+
+# User-facing details the frontend surfaces to the end user when a download fails.
+RESULTS_EXPIRED_DETAIL = "Estes resultados não estão mais disponíveis para download."
+
+RESULTS_TOO_LARGE_DETAIL = (
+    "Estes resultados são grandes demais para baixar em um único arquivo."
+)
+
+# Fallback base name when a query's slug yields nothing filesystem-safe.
+DEFAULT_EXPORT_FILENAME = "resultados"
+
+
+def _sanitize_filename(slug: str) -> str:
+    """Sanitize a query's slug into a safe base filename.
+
+    Args:
+        slug (str): The query's slug.
+
+    Returns:
+        str: A filesystem-safe base filename, without extension.
+    """
+    filename = re.sub(r"[^\w-]+", "_", slug).strip("_")
+    return filename or DEFAULT_EXPORT_FILENAME
+
+
+@router.post("/messages/{message_id}/exports")
+async def export_message_results(
+    message_id: str,
+    database: AsyncDB,
+    user_id: UserID,
+    query_ref: str,
+    file_format: ExportFormat = Query("CSV", alias="format"),
+):
+    if file_format not in OFFERED_EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported format '{file_format}'. "
+                f"Available: {', '.join(OFFERED_EXPORT_FORMATS)}."
+            ),
+        )
+
+    message = await database.get_message(message_id)
+
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found",
+        )
+
+    thread = await database.get_thread(message.thread_id)
+
+    # Identical 404 whether the message is missing or the caller doesn't own its
+    # thread, so a non-owner can't tell the two apart (IDOR protection).
+    if thread is None or str(thread.user_id) != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found",
+        )
+
+    query_handle = await database.get_query_handle(message.id, query_ref)
+
+    if query_handle is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No downloadable results for query_ref '{query_ref}'",
+        )
+
+    try:
+        exported = await asyncio.to_thread(
+            materialize_export,
+            query_ref=query_handle.query_ref,
+            destination_table=query_handle.destination_table,
+            file_format=file_format,
+            filename=_sanitize_filename(query_handle.slug),
+            message_id=str(message.id),
+        )
+    except ResultTableExpired as e:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=RESULTS_EXPIRED_DETAIL,
+        ) from e
+    except ResultTooLarge as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=RESULTS_TOO_LARGE_DETAIL,
+        ) from e
+
+    signed_url = generate_signed_url(
+        bucket=exported.bucket,
+        object_key=exported.object_key,
+        download_filename=exported.filename,
+    )
+
+    return {"url": signed_url}
 
 
 @router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)

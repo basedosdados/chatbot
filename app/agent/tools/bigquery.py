@@ -1,8 +1,10 @@
 import inspect
 import json
+import uuid
 from functools import cache
+from typing import Any
 
-from google.api_core.exceptions import GoogleAPICallError
+from google.api_core.exceptions import GoogleAPICallError, NotFound
 from google.cloud import bigquery as bq
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -14,16 +16,18 @@ MAX_BYTES_BILLED = 10 * 10**9
 
 
 @cache
-def _get_client() -> bq.Client:  # pragma: no cover
+def _bq_client() -> bq.Client:  # pragma: no cover
     return bq.Client(
-        project=settings.GOOGLE_BIGQUERY_PROJECT,
+        project=settings.GOOGLE_BILLING_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,
     )
 
 
-@tool
-@handle_tool_errors
-def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
+@tool(response_format="content_and_artifact")
+@handle_tool_errors(response_format="content_and_artifact")
+def execute_bigquery_sql(
+    sql_query: str, slug: str, config: RunnableConfig
+) -> tuple[str, dict[str, Any] | None]:
     """Execute a SQL query against BigQuery tables from the Base dos Dados database.
 
     PRECONDITION — only call this when the question is already specific enough to
@@ -36,6 +40,7 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
 
     Args:
         sql_query (str): Standard GoogleSQL query. Must reference tables using their full `gcp_id` from `get_dataset_details()`.
+        slug (str): A short filename-safe slug for this query's result, in the user's language, lowercase with underscores (e.g. "populacao_por_ano").
 
     Rules:
         - Use fully qualified names: `project.dataset.table`.
@@ -47,9 +52,12 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
         - Only `SELECT` statements are allowed.
 
     Returns:
-        str: Query results as JSON array.
+        str: A JSON object with:
+                - `row_count`: the number of rows returned.
+                - `rows`: the rows as a JSON array.
+            If the query returns no rows, a short message string is returned instead.
     """
-    client = _get_client()
+    client = _bq_client()
 
     dry_run = client.query(
         sql_query, job_config=bq.QueryJobConfig(dry_run=True, use_query_cache=False)
@@ -70,14 +78,11 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
         job = client.query(
             sql_query,
             job_config=bq.QueryJobConfig(
-                maximum_bytes_billed=MAX_BYTES_BILLED, labels=labels
+                maximum_bytes_billed=MAX_BYTES_BILLED,
+                labels=labels,
             ),
         )
-        results = [dict(row) for row in job.result()]
-
-        if not results:
-            results = "Query returned 0 rows. Review the filters per the empty-result protocol."
-
+        rows = [dict(row) for row in job.result()]
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
         if reason == "bytesBilledLimitExceeded":
@@ -86,7 +91,28 @@ def execute_bigquery_sql(sql_query: str, config: RunnableConfig) -> str:
             ) from e
         raise
 
-    return json.dumps(results, ensure_ascii=False, default=str)
+    if not rows:
+        message = (
+            "Query returned 0 rows. Review the filters per the empty-result protocol."
+        )
+        return json.dumps(message, ensure_ascii=False), None
+
+    # Server-minted handle for the anonymous result table BigQuery already materialized
+    # (~24h TTL), so a later export hands back exactly these rows without re-running.
+    query_ref = f"qr_{uuid.uuid4().hex}"
+
+    content = json.dumps(
+        {"row_count": len(rows), "rows": rows}, ensure_ascii=False, default=str
+    )
+
+    artifact = {
+        "type": "query_result",
+        "query_ref": query_ref,
+        "slug": slug,
+        "destination_table": job.destination.to_api_repr(),
+    }
+
+    return content, artifact
 
 
 @tool
@@ -147,16 +173,13 @@ def decode_table_values(
     }
 
     try:
-        client = _get_client()
+        client = _bq_client()
         job = client.query(
             search_query,
             job_config=bq.QueryJobConfig(query_parameters=query_params, labels=labels),
         )
         results = [dict(row) for row in job.result()]
-    except GoogleAPICallError as e:
-        reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
-        if reason == "notFound":
-            raise ValueError("Dictionary table not found for this dataset.") from e
-        raise
+    except NotFound as e:
+        raise ValueError("Dictionary table not found for this dataset.") from e
 
-    return json.dumps(results, ensure_ascii=False, default=str)
+    return json.dumps(results, ensure_ascii=False, indent=2, default=str)

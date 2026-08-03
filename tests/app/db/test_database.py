@@ -10,7 +10,9 @@ from app.db.models import (
     FeedbackCreate,
     FeedbackRating,
     FeedbackSyncStatus,
+    Message,
     MessageCreate,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -27,6 +29,8 @@ async def test_init_database(async_engine: AsyncEngine):
     assert "thread" in tables
     assert "message" in tables
     assert "feedback" in tables
+    assert "query_handles" in tables
+    assert "artifact" not in tables
 
 
 class TestAsyncDatabaseThread:
@@ -53,7 +57,7 @@ class TestAsyncDatabaseThread:
         assert thread_from_db.title == thread.title
 
     async def test_get_thread_not_found(self, database: AsyncDatabase):
-        """Test getting a non-existent thread."""
+        """Test getting a non-existent thread returns None."""
         thread = await database.get_thread(uuid.uuid4())
 
         assert thread is None
@@ -108,7 +112,7 @@ class TestAsyncDatabaseThread:
         assert thread_deleted.deleted is True
 
     async def test_delete_thread_not_found(self, database: AsyncDatabase):
-        """Test deleting non-existent thread returns."""
+        """Test deleting non-existent thread returns None."""
         thread_deleted = await database.delete_thread(uuid.uuid4())
 
         assert thread_deleted is None
@@ -132,7 +136,6 @@ class TestAsyncDatabaseMessage:
         assert message.model_uri == user_message_create.model_uri
         assert message.role == user_message_create.role
         assert message.content == user_message_create.content
-        assert message.artifacts == user_message_create.artifacts
         assert message.events == user_message_create.events
         assert message.status == user_message_create.status
         assert isinstance(message.created_at, datetime)
@@ -150,10 +153,25 @@ class TestAsyncDatabaseMessage:
         assert message.model_uri == assistant_message_create.model_uri
         assert message.role == assistant_message_create.role
         assert message.content == assistant_message_create.content
-        assert message.artifacts == assistant_message_create.artifacts
         assert message.events == assistant_message_create.events
         assert message.status == assistant_message_create.status
         assert isinstance(message.created_at, datetime)
+
+    async def test_get_message_found(
+        self, database: AsyncDatabase, user_message: Message
+    ):
+        """Test getting an existing message."""
+        message = await database.get_message(user_message.id)
+
+        assert message is not None
+        assert message.id == user_message.id
+        assert message.thread_id == user_message.thread_id
+
+    async def test_get_message_not_found(self, database: AsyncDatabase):
+        """Test getting a non-existent message returns None."""
+        message = await database.get_message(uuid.uuid4())
+
+        assert message is None
 
     async def test_get_messages(
         self, database: AsyncDatabase, messages_factory: MessagesFactory
@@ -201,6 +219,58 @@ class TestAsyncDatabaseMessage:
         messages = await database.get_messages(thread.id)
         assert isinstance(messages, list)
         assert len(messages) == 0
+
+
+class TestAsyncDatabaseQueryHandle:
+    """Tests for QueryHandle operations."""
+
+    DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+
+    def _handle(
+        self, message: Message, query_ref: str, destination: dict
+    ) -> QueryHandle:
+        return QueryHandle(
+            query_ref=query_ref,
+            message_id=message.id,
+            slug="resultado",
+            destination_table=destination,
+        )
+
+    async def test_create_query_handles_persists(
+        self, database: AsyncDatabase, assistant_message: Message
+    ):
+        """create_query_handles bulk-inserts every handle."""
+        await database.create_query_handles(
+            [
+                self._handle(assistant_message, "qr_a", self.DESTINATION),
+                self._handle(assistant_message, "qr_b", self.DESTINATION),
+            ]
+        )
+
+        first = await database.get_query_handle(assistant_message.id, "qr_a")
+        second = await database.get_query_handle(assistant_message.id, "qr_b")
+
+        assert first is not None and first.destination_table == self.DESTINATION
+        assert second is not None and second.message_id == assistant_message.id
+
+    async def test_create_query_handles_empty_is_noop(self, database: AsyncDatabase):
+        """An empty list persists nothing and does not error."""
+        await database.create_query_handles([])
+
+    async def test_get_query_handle_found(
+        self, database: AsyncDatabase, query_handle: QueryHandle
+    ):
+        """An existing handle is returned by its (message_id, query_ref)."""
+        found = await database.get_query_handle(
+            query_handle.message_id, query_handle.query_ref
+        )
+
+        assert found is not None
+        assert found.query_ref == query_handle.query_ref
+
+    async def test_get_query_handle_not_found(self, database: AsyncDatabase):
+        """A missing (message_id, query_ref) returns None."""
+        assert await database.get_query_handle(uuid.uuid4(), "qr_missing") is None
 
 
 class TestAsyncDatabaseFeedback:

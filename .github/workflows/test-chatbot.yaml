@@ -42,8 +42,9 @@ jobs:
           JWT_SECRET_KEY: mock-jwt-secret-key
 
           # Mock Google BigQuery configuration
-          GOOGLE_BIGQUERY_PROJECT: mock-bigquery-project
+          GOOGLE_BILLING_PROJECT: mock-billing-project
           GOOGLE_SERVICE_ACCOUNT: /tmp/mock-service-account.json
+          GOOGLE_GCS_BUCKET: mock-bucket
 
           # Mock LLM configuration
           MODEL_URI: mock-model-uri

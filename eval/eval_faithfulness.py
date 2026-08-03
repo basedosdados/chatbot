@@ -4,11 +4,11 @@ Gold-free and judge-free. Reads a transcript produced by eval_output.py and, for
 answered turn, checks that the STRUCTURED fields are self-consistent and match what the
 agent actually did (the executed SQL persisted in each turn's `queries`). It answers a
 different question than the correctness evals: not "did the agent do the right thing?"
-but "do data_sources / temporal_coverage / sql_queries truthfully describe THIS run?"
+but "do data_sources / temporal_coverage truthfully describe THIS run?"
 
 Contract assumed (see app/agent/schemas.py): a no-query turn (clarification / platform
-explanation) has no sql_queries and no temporal_coverage, but MAY list the tables it
-explored in data_sources; a query turn fills all three from what it actually queried.
+explanation) has no temporal_coverage, but MAY list the tables it explored in
+data_sources; a query turn fills both from what it actually queried.
 
 Checks (each -> a pass-rate over the turns it applies to; `·`/None = not applicable):
 
@@ -35,7 +35,6 @@ Checks (each -> a pass-rate over the turns it applies to; `·`/None = not applic
 
   informational (reported, not counted as faithfulness bugs)
     sources_exact_match      reported tables == tables the SQL hit (flags omitted joins)
-    sql_reported_ran         every reported query textually matches an executed one
     followups_3              follow_up_questions is 3 non-empty items
 
 SQL-derived checks use the thread's executed queries: this turn's own when it ran any,
@@ -74,9 +73,7 @@ CORE_CHECKS = (
     "response_nonempty",
     "prose_no_leak",
 )
-# sql_reported_ran is informational: exact query text can't cleanly separate a legitimate
-# reformat/reuse from a fabrication, so a miss is a "worth eyeballing" flag, not a bug.
-INFO_CHECKS = ("sources_exact_match", "sql_reported_ran", "followups_3")
+INFO_CHECKS = ("sources_exact_match", "followups_3")
 ALL_CHECKS = CORE_CHECKS + INFO_CHECKS
 
 # A period value split into its granularity and its original text (e.g. "2026-05" -> month).
@@ -210,19 +207,6 @@ def _years_evidenced_by_query(query: dict) -> set[int]:
     return years
 
 
-def _normalize_sql(sql: str) -> str:
-    """Normalize a SQL string for textual comparison (strip comments, collapse whitespace,
-    lowercase, drop backticks).
-
-    Args:
-        sql (str): The SQL text.
-
-    Returns:
-        str: A canonical form suitable for equality/substring comparison.
-    """
-    return re.sub(r"\s+", " ", _strip_comments(sql)).strip().lower().replace("`", "")
-
-
 def _leading_year(value) -> int | None:
     """The leading 4-digit year of a period value ('2015', '2015-03-01', '2026-05').
 
@@ -321,13 +305,11 @@ def check_turn(turn: dict, executed_queries: list[dict]) -> dict:
     is_query = bool(turn.get("is_query"))
     data_sources = structured.get("data_sources") or []
     temporal_coverage = structured.get("temporal_coverage")
-    reported_sql = structured.get("sql_queries") or []
     follow_ups = structured.get("follow_up_questions")
     response = structured.get("response") or ""
     reported_tables = list(
         turn.get("tables") or []
     )  # data_sources resolved to gcp/uuid
-    executed_sql = [query.get("sql") or "" for query in executed_queries]
     queried_tables, queried_year_range = _tables_and_years(executed_queries)
 
     results: dict = {check: None for check in ALL_CHECKS}
@@ -391,18 +373,7 @@ def check_turn(turn: dict, executed_queries: list[dict]) -> dict:
                 end_year,
             ) == queried_year_range
 
-    # sql_queries / prose
-    if is_query and reported_sql:
-        executed_normalized = [_normalize_sql(sql) for sql in executed_sql]
-        reported_normalized = [_normalize_sql(sql) for sql in reported_sql]
-
-        results["sql_reported_ran"] = all(
-            any(
-                reported == executed or reported in executed or executed in reported
-                for executed in executed_normalized
-            )
-            for reported in reported_normalized
-        )
+    # prose
     results["response_nonempty"] = bool(response.strip())
     results["prose_no_leak"] = not (
         "```sql" in response.lower()
