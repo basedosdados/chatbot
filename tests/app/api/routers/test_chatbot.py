@@ -5,11 +5,14 @@ from unittest.mock import AsyncMock
 
 import jwt
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
+from app.api.routers.chatbot import DEFAULT_EXPORT_FILENAME, _sanitize_filename
 from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
@@ -18,8 +21,13 @@ from app.db.models import (
     FeedbackRating,
     FeedbackSyncStatus,
     Message,
+    MessageCreate,
+    MessageRole,
+    MessageStatus,
+    QueryHandle,
     Thread,
 )
+from app.exports import ExportedFile, ResultTableExpired, ResultTooLarge
 from app.main import app
 from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
@@ -75,9 +83,20 @@ def mock_is_user_authorized(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def access_token(user_id: str) -> str:
     """Generate a valid JWT access token for testing."""
-    payload = {"uuid": user_id}
     return jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+        {"uuid": user_id},
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+@pytest.fixture
+def other_access_token() -> str:
+    """A valid JWT for a different user — someone who owns none of the fixtures."""
+    return jwt.encode(
+        {"uuid": str(uuid.uuid4())},
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
     )
 
 
@@ -281,6 +300,23 @@ class TestDeleteThreadEndpoint:
         response = client.delete(url=f"/api/v1/chatbot/threads/{uuid.uuid4()}")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    async def test_non_owner_cannot_delete_thread(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        thread: Thread,
+        database: AsyncDatabase,
+    ):
+        """A user who does not own the thread gets 404 and the thread survives (IDOR)."""
+        response = client.delete(
+            url=f"/api/v1/chatbot/threads/{thread.id}",
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # The thread must not have been (soft-)deleted by the non-owner.
+        assert await database.get_thread(thread.id) is not None
+
 
 class TestListMessagesEndpoint:
     """Tests for GET /api/v1/chatbot/threads/{thread_id}/messages"""
@@ -302,6 +338,53 @@ class TestListMessagesEndpoint:
 
         assert isinstance(messages, list)
         assert len(messages) == 2
+
+    async def test_list_messages_derives_downloads_from_query_handles(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        thread: Thread,
+    ):
+        """The download affordance is derived from the message's query handles on read."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+            )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="qr_test",
+                    message_id=message.id,
+                    slug="slug",
+                    destination_table={
+                        "projectId": "p",
+                        "datasetId": "d",
+                        "tableId": "t",
+                    },
+                )
+            ]
+        )
+
+        response = client.get(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        [message_json] = response.json()
+        [download] = message_json["downloads"]
+        assert download["type"] == "query_result"
+        assert download["query_ref"] == "qr_test"
+        assert download["slug"] == "slug"
+        assert download["formats"] == ["CSV"]
+        # The internal handles (and their destination tables) never reach the client.
+        assert "query_handles" not in message_json
 
     def test_list_messages_empty(
         self, client: TestClient, access_token: str, thread: Thread
@@ -378,6 +461,22 @@ class TestListMessagesEndpoint:
         response = client.get(url=f"/api/v1/chatbot/threads/{thread.id}/messages")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    async def test_non_owner_cannot_list_messages(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        messages_factory: MessagesFactory,
+    ):
+        """A user who does not own the thread gets 404, not its messages (IDOR)."""
+        user_message, _ = await messages_factory()
+
+        response = client.get(
+            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages",
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
 
 class TestSendMessageEndpoint:
     """Tests for POST /api/v1/chatbot/threads/{thread_id}/messages"""
@@ -425,6 +524,24 @@ class TestSendMessageEndpoint:
             json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    async def test_non_owner_cannot_send_message(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        thread: Thread,
+        database: AsyncDatabase,
+    ):
+        """A user who does not own the thread gets 404 and no message is written (IDOR)."""
+        response = client.post(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            json={"content": "Hello, chatbot!"},
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # No message was injected into the victim's thread.
+        assert await database.get_messages(thread.id) == []
 
     def test_send_message_persists_when_client_disconnects(
         self, client: TestClient, access_token: str, thread: Thread
@@ -552,3 +669,297 @@ class TestUpsertFeedbackEndpoint:
             json={"rating": FeedbackRating.POSITIVE.value},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_non_owner_cannot_upsert_feedback(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        assistant_message: Message,
+    ):
+        """A user who does not own the message's thread gets 404 (IDOR)."""
+        response = client.put(
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
+            json={"rating": FeedbackRating.POSITIVE.value},
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestExportMessageResultsEndpoint:
+    """Tests for POST /api/v1/chatbot/messages/{message_id}/exports"""
+
+    DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
+
+    @pytest_asyncio.fixture
+    async def downloadable_message(
+        self, database: AsyncDatabase, thread: Thread
+    ) -> Message:
+        """An assistant message backed by qr_test, with its query handle persisted."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+            )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="qr_test",
+                    message_id=message.id,
+                    slug="resultado_final",
+                    destination_table=self.DESTINATION,
+                )
+            ]
+        )
+        return message
+
+    @staticmethod
+    def _exported() -> ExportedFile:
+        return ExportedFile(
+            bucket="test-bucket",
+            object_key="query_results/m1/qr_test.csv",
+            filename="resultados.csv",
+            mime_type="text/csv",
+            size_bytes=10,
+        )
+
+    def test_materialization_returns_signed_url(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A click materializes the query as CSV and returns a signed URL."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.generate_signed_url", return_value="https://signed"
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {"url": "https://signed"}
+        assert materialize.call_args.kwargs["query_ref"] == "qr_test"
+        assert materialize.call_args.kwargs["file_format"] == "CSV"
+        assert materialize.call_args.kwargs["filename"] == "resultado_final"
+
+    def test_offered_format_is_accepted(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """An explicit `format=CSV` (what the frontend sends) is accepted."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.generate_signed_url", return_value="https://signed"
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test&format=CSV",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert materialize.call_args.kwargs["file_format"] == "CSV"
+
+    def test_unsupported_format_is_rejected(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A not-offered format (valid for BigQuery, but not offered) is rejected, not downgraded."""
+        materialize = mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            return_value=self._exported(),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test&format=PARQUET",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        # The request is rejected outright — no CSV is silently produced.
+        materialize.assert_not_called()
+
+    def test_query_ref_not_backing_the_answer_404(
+        self, client: TestClient, access_token: str, downloadable_message: Message
+    ):
+        """A query_ref not among the message's backing queries is rejected."""
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_other",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_message_not_found(self, client: TestClient, access_token: str):
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{uuid.uuid4()}/exports?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_unauthorized_user_cannot_export(
+        self, client: TestClient, downloadable_message: Message
+    ):
+        """A user who does not own the thread gets 404 (IDOR protection)."""
+        other_token = jwt.encode(
+            {"uuid": str(uuid.uuid4())},
+            settings.JWT_SECRET_KEY,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    async def test_missing_handle_is_not_found(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        thread: Thread,
+    ):
+        """A query_ref with no persisted handle returns 404 (not expiry)."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+            )
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{message.id}/exports?query_ref=qr_no_handle",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_expired_table_is_gone(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """An expired result table surfaces as 410."""
+        mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            side_effect=ResultTableExpired("gone"),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_410_GONE
+
+    def test_result_too_large_is_bad_request(
+        self,
+        client: TestClient,
+        access_token: str,
+        downloadable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A too-large result set surfaces as 400."""
+        mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            side_effect=ResultTooLarge("too large"),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_missing_query_ref_param_is_unprocessable(
+        self, client: TestClient, access_token: str, downloadable_message: Message
+    ):
+        """`query_ref` is a required query parameter."""
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def test_export_unauthorized(
+        self, client: TestClient, downloadable_message: Message
+    ):
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
+            "?query_ref=qr_test"
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestSanitizeFilename:
+    """Tests for _sanitize_filename — the download filename guard."""
+
+    @pytest.mark.parametrize(
+        ("slug", "expected"),
+        [
+            # A clean slug (what the model is asked to produce) passes through unchanged.
+            ("vendas_por_ano", "vendas_por_ano"),
+            # Hyphens and digits are allowed.
+            ("ideb-2021", "ideb-2021"),
+            # Spaces and punctuation collapse to a single underscore.
+            ("Vendas por ano", "Vendas_por_ano"),
+            ("a   b", "a_b"),
+            ("café & leite!", "café_leite"),
+            # Leading/trailing separators are stripped, not left dangling.
+            ("_vendas_", "vendas"),
+            ("  vendas  ", "vendas"),
+            # Path separators and traversal are neutralized (no slashes or dots survive).
+            ("../../etc/passwd", "etc_passwd"),
+            ("relatorio/2021", "relatorio_2021"),
+            # File extensions are neutralized.
+            ("vendas_por_ano.csv", "vendas_por_ano_csv"),
+            # Accented word characters are preserved (\\w is unicode).
+            ("população", "população"),
+        ],
+    )
+    def test_sanitizes_slug(self, slug: str, expected: str):
+        assert _sanitize_filename(slug) == expected
+
+    @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
+    def test_falls_back_when_nothing_usable_remains(self, slug: str):
+        """A slug that sanitizes to empty falls back to the default, never ''."""
+        assert _sanitize_filename(slug) == DEFAULT_EXPORT_FILENAME

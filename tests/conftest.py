@@ -16,6 +16,7 @@ from app.db.models import (
     MessageCreate,
     MessageRole,
     MessageStatus,
+    QueryHandle,
     Thread,
     ThreadCreate,
 )
@@ -75,7 +76,7 @@ async def user_id() -> str:
 # Thread Fixtures
 # =============================================================
 @pytest.fixture
-def thread_create(user_id: int) -> ThreadCreate:
+def thread_create(user_id: str) -> ThreadCreate:
     """Mock ThreadCreate instance for testing."""
     return ThreadCreate(title="Mock Thread", user_id=user_id)
 
@@ -87,7 +88,7 @@ async def thread(database: AsyncDatabase, thread_create: ThreadCreate) -> Thread
 
 
 @pytest_asyncio.fixture
-async def thread_factory(database: AsyncDatabase, user_id: int) -> ThreadFactory:
+async def thread_factory(database: AsyncDatabase, user_id: str) -> ThreadFactory:
     """Factory to create multiple threads in a single test."""
 
     async def factory(title: str) -> Thread:
@@ -124,14 +125,14 @@ async def user_message(
 @pytest.fixture
 def assistant_message_create(user_message: Message) -> MessageCreate:
     """Mock MessageCreate instance for testing (assistant)."""
+
     return MessageCreate(
         thread_id=user_message.thread_id,
         user_message_id=user_message.id,
         model_uri="mock-model",
         role=MessageRole.ASSISTANT,
         content="Mock assistant message",
-        artifacts=[{"mock_artifact": "artifact"}],
-        events=[{"mock_event": "event"}],
+        events=[{"mock-event": "event"}],
         status=MessageStatus.SUCCESS,
     )
 
@@ -142,6 +143,21 @@ async def assistant_message(
 ) -> Message:
     """Mock Message instance for testing (assistant)."""
     return await database.create_message(assistant_message_create)
+
+
+@pytest_asyncio.fixture
+async def query_handle(
+    database: AsyncDatabase, assistant_message: Message
+) -> QueryHandle:
+    """Mock query handle scoped to an assistant message."""
+    handle = QueryHandle(
+        query_ref="qr_test",
+        message_id=assistant_message.id,
+        slug="resultado",
+        destination_table={"projectId": "p", "datasetId": "d", "tableId": "t"},
+    )
+    await database.create_query_handles([handle])
+    return handle
 
 
 @pytest_asyncio.fixture
@@ -165,8 +181,7 @@ async def messages_factory(database: AsyncDatabase, thread: Thread) -> MessagesF
             model_uri="mock-model",
             role=MessageRole.ASSISTANT,
             content="Mock assistant message",
-            artifacts=[{"mock_artifact": "artifact"}],
-            events=[{"mock_event": "event"}],
+            events=[{"mock-event": "event"}],
             status=MessageStatus.SUCCESS,
         )
 

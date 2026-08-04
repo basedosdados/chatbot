@@ -80,16 +80,6 @@ class StructuredResponse(BaseModel):
             "was run (e.g. a clarification turn) or the answer has no temporal dimension."
         ),
     )
-    sql_queries: list[str] | None = Field(
-        default=None,
-        description=(
-            "The SQL queries whose results the answer is based on, each with "
-            "inline comments, so the user can reproduce the result. Include every "
-            "query that contributed to the answer (e.g. one query per metric when the "
-            "answer combines several), but EXCLUDE exploratory or failed-then-corrected queries. "
-            "Leave empty (None) when no query was executed."
-        ),
-    )
     follow_up_questions: list[str] | None = Field(
         default=None,
         description=(
