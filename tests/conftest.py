@@ -76,7 +76,7 @@ async def user_id() -> str:
 # Thread Fixtures
 # =============================================================
 @pytest.fixture
-def thread_create(user_id: int) -> ThreadCreate:
+def thread_create(user_id: str) -> ThreadCreate:
     """Mock ThreadCreate instance for testing."""
     return ThreadCreate(title="Mock Thread", user_id=user_id)
 
@@ -88,7 +88,7 @@ async def thread(database: AsyncDatabase, thread_create: ThreadCreate) -> Thread
 
 
 @pytest_asyncio.fixture
-async def thread_factory(database: AsyncDatabase, user_id: int) -> ThreadFactory:
+async def thread_factory(database: AsyncDatabase, user_id: str) -> ThreadFactory:
     """Factory to create multiple threads in a single test."""
 
     async def factory(title: str) -> Thread:
