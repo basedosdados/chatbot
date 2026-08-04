@@ -20,19 +20,7 @@ from app.db.models import (
     QueryHandle,
 )
 from app.exports import CollectedQueryHandle, collect_query_handles
-
-
-class ErrorMessage:
-    INTERRUPTED = (
-        "A conexão com o servidor foi interrompida. Por favor, tente novamente."
-    )
-
-    MODEL_CALL_LIMIT_REACHED = (
-        "Essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
-        "Por favor, tente ser mais específico ou divida sua pergunta em partes menores."
-    )
-
-    UNEXPECTED = "Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos."
+from app.i18n import DEFAULT_LANGUAGE, language_directive, t
 
 
 def _truncate_json(
@@ -93,11 +81,14 @@ def _truncate_json(
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
+def _process_chunk(
+    chunk: dict[str, Any], language: str = DEFAULT_LANGUAGE
+) -> StreamEvent | None:
     """Process a streaming chunk from a react agent workflow into a StreamEvent.
 
     Args:
         chunk (dict[str, Any]): A raw update chunk from the agent workflow.
+        language (str): The thread's language, for localizing server-emitted content.
 
     Returns:
         StreamEvent | None: Structured event or None if the chunk is ignored:
@@ -192,7 +183,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         update = chunk["ModelCallLimitMiddleware.before_model"] or {}
         if update.get("jump_to") == "end":
             event_data = EventData(
-                content=ErrorMessage.MODEL_CALL_LIMIT_REACHED,
+                content=t("error_model_call_limit", language),
                 tool_calls=None,
             )
             return StreamEvent(type="model_call_limit", data=event_data)
@@ -231,6 +222,7 @@ async def run_agent(
     user_message: Message,
     model_uri: str,
     queue: asyncio.Queue[StreamEvent],
+    language: str = DEFAULT_LANGUAGE,
 ):
     """Run the agent to completion and push events onto the queue.
 
@@ -245,6 +237,8 @@ async def run_agent(
         thread_id (str): Thread unique identifier.
         user_message (Message): User message.
         model_uri (str): Model URI.
+        language (str): The thread's language; sets the response-language default and
+            localizes server-emitted error messages.
         queue (asyncio.Queue[StreamEvent]): Events queue.
     """
     events = []
@@ -253,16 +247,22 @@ async def run_agent(
     collected_handles: list[CollectedQueryHandle] = []
     status: MessageStatus | None = None
 
+    # Prepend the language directive to the model input only — the persisted user Message
+    # (created by the router) keeps the user's clean text. This sets the site's language as
+    # the default while letting the model honor a user who writes in another language.
+    # A dynamic-prompt middleware would keep it out of checkpoint history entirely; see PR notes.
+    model_input = f"{language_directive(language)}\n\n{user_message.content}"
+
     try:
         async for mode, chunk in agent.astream(  # pragma: no cover
-            input={"messages": [{"role": "user", "content": user_message.content}]},
+            input={"messages": [{"role": "user", "content": model_input}]},
             config=config,
             stream_mode=["updates", "values"],
         ):
             if mode == "values":
                 continue
 
-            event = _process_chunk(chunk)
+            event = _process_chunk(chunk, language)
 
             if event is None:
                 continue
@@ -290,12 +290,12 @@ async def run_agent(
             await queue.put(event)
     except asyncio.CancelledError:
         if status is None:
-            assistant_message = ErrorMessage.INTERRUPTED
+            assistant_message = t("error_interrupted", language)
             status = MessageStatus.INTERRUPTED
         raise
     except Exception:
         logger.exception(f"Unexpected error in run {config['run_id']}:")
-        assistant_message = ErrorMessage.UNEXPECTED
+        assistant_message = t("error_unexpected", language)
         status = MessageStatus.ERROR
         event = StreamEvent(
             type="error",

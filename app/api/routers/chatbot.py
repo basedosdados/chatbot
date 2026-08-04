@@ -28,6 +28,7 @@ from app.exports import (
     ResultTooLarge,
     materialize_export,
 )
+from app.i18n import t
 from app.settings import settings
 from app.storage import generate_signed_url
 
@@ -59,6 +60,7 @@ async def create_thread(
     thread_create = ThreadCreate(
         title=thread_payload.title,
         user_id=user_id,
+        language=thread_payload.language,
     )
 
     return await database.create_thread(thread_create)
@@ -120,11 +122,23 @@ async def send_message(
     running_runs: RunningRuns,
     user_id: UserID,
 ) -> StreamingResponse:
+    thread = await database.get_thread(thread_id)
+
+    if thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thread {thread_id} not found",
+        )
+
     run_id = str(uuid.uuid4())
 
     config = ConfigDict(
         run_id=run_id,
-        configurable={"thread_id": thread_id, "user_id": user_id},
+        configurable={
+            "thread_id": thread_id,
+            "user_id": user_id,
+            "language": thread.language,
+        },
     )
 
     message_create = MessageCreate(
@@ -145,6 +159,7 @@ async def send_message(
             thread_id=thread_id,
             user_message=message,
             model_uri=settings.MODEL_URI,
+            language=thread.language,
             queue=queue,
         ),
         name=f"run_agent:{run_id}",
@@ -169,28 +184,18 @@ async def send_message(
     )
 
 
-# User-facing details the frontend surfaces to the end user when a download fails.
-RESULTS_EXPIRED_DETAIL = "Estes resultados não estão mais disponíveis para download."
-
-RESULTS_TOO_LARGE_DETAIL = (
-    "Estes resultados são grandes demais para baixar em um único arquivo."
-)
-
-# Fallback base name when a query's slug yields nothing filesystem-safe.
-DEFAULT_EXPORT_FILENAME = "resultados"
-
-
-def _sanitize_filename(slug: str) -> str:
+def _sanitize_filename(slug: str, fallback: str) -> str:
     """Sanitize a query's slug into a safe base filename.
 
     Args:
         slug (str): The query's slug.
+        fallback (str): Base name to use when the slug yields nothing filesystem-safe.
 
     Returns:
         str: A filesystem-safe base filename, without extension.
     """
     filename = re.sub(r"[^\w-]+", "_", slug).strip("_")
-    return filename or DEFAULT_EXPORT_FILENAME
+    return filename or fallback
 
 
 @router.post("/messages/{message_id}/exports")
@@ -242,18 +247,20 @@ async def export_message_results(
             query_ref=query_handle.query_ref,
             destination_table=query_handle.destination_table,
             file_format=file_format,
-            filename=_sanitize_filename(query_handle.slug),
+            filename=_sanitize_filename(
+                query_handle.slug, t("default_export_filename", thread.language)
+            ),
             message_id=str(message.id),
         )
     except ResultTableExpired as e:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail=RESULTS_EXPIRED_DETAIL,
+            detail=t("results_expired", thread.language),
         ) from e
     except ResultTooLarge as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=RESULTS_TOO_LARGE_DETAIL,
+            detail=t("results_too_large", thread.language),
         ) from e
 
     signed_url = generate_signed_url(

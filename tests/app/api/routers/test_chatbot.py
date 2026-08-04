@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
-from app.api.routers.chatbot import DEFAULT_EXPORT_FILENAME, _sanitize_filename
+from app.api.routers.chatbot import _sanitize_filename
 from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
@@ -880,9 +880,9 @@ class TestSanitizeFilename:
         ],
     )
     def test_sanitizes_slug(self, slug: str, expected: str):
-        assert _sanitize_filename(slug) == expected
+        assert _sanitize_filename(slug, "resultados") == expected
 
     @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
     def test_falls_back_when_nothing_usable_remains(self, slug: str):
-        """A slug that sanitizes to empty falls back to the default, never ''."""
-        assert _sanitize_filename(slug) == DEFAULT_EXPORT_FILENAME
+        """A slug that sanitizes to empty falls back to the provided fallback, never ''."""
+        assert _sanitize_filename(slug, "resultados") == "resultados"
