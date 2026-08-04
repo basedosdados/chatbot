@@ -83,9 +83,20 @@ def mock_is_user_authorized(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def access_token(user_id: str) -> str:
     """Generate a valid JWT access token for testing."""
-    payload = {"uuid": user_id}
     return jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+        {"uuid": user_id},
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+@pytest.fixture
+def other_access_token() -> str:
+    """A valid JWT for a different user — someone who owns none of the fixtures."""
+    return jwt.encode(
+        {"uuid": str(uuid.uuid4())},
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
     )
 
 
@@ -289,6 +300,23 @@ class TestDeleteThreadEndpoint:
         response = client.delete(url=f"/api/v1/chatbot/threads/{uuid.uuid4()}")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    async def test_non_owner_cannot_delete_thread(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        thread: Thread,
+        database: AsyncDatabase,
+    ):
+        """A user who does not own the thread gets 404 and the thread survives (IDOR)."""
+        response = client.delete(
+            url=f"/api/v1/chatbot/threads/{thread.id}",
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # The thread must not have been (soft-)deleted by the non-owner.
+        assert await database.get_thread(thread.id) is not None
+
 
 class TestListMessagesEndpoint:
     """Tests for GET /api/v1/chatbot/threads/{thread_id}/messages"""
@@ -433,6 +461,22 @@ class TestListMessagesEndpoint:
         response = client.get(url=f"/api/v1/chatbot/threads/{thread.id}/messages")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    async def test_non_owner_cannot_list_messages(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        messages_factory: MessagesFactory,
+    ):
+        """A user who does not own the thread gets 404, not its messages (IDOR)."""
+        user_message, _ = await messages_factory()
+
+        response = client.get(
+            url=f"/api/v1/chatbot/threads/{user_message.thread_id}/messages",
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
 
 class TestSendMessageEndpoint:
     """Tests for POST /api/v1/chatbot/threads/{thread_id}/messages"""
@@ -480,6 +524,24 @@ class TestSendMessageEndpoint:
             json={"content": "Hello, chatbot!"},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    async def test_non_owner_cannot_send_message(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        thread: Thread,
+        database: AsyncDatabase,
+    ):
+        """A user who does not own the thread gets 404 and no message is written (IDOR)."""
+        response = client.post(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            json={"content": "Hello, chatbot!"},
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # No message was injected into the victim's thread.
+        assert await database.get_messages(thread.id) == []
 
     def test_send_message_persists_when_client_disconnects(
         self, client: TestClient, access_token: str, thread: Thread
@@ -607,6 +669,21 @@ class TestUpsertFeedbackEndpoint:
             json={"rating": FeedbackRating.POSITIVE.value},
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_non_owner_cannot_upsert_feedback(
+        self,
+        client: TestClient,
+        other_access_token: str,
+        assistant_message: Message,
+    ):
+        """A user who does not own the message's thread gets 404 (IDOR)."""
+        response = client.put(
+            url=f"/api/v1/chatbot/messages/{assistant_message.id}/feedback",
+            json={"rating": FeedbackRating.POSITIVE.value},
+            headers={"Authorization": f"Bearer {other_access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 class TestExportMessageResultsEndpoint:
