@@ -43,6 +43,7 @@ class MockLangSmithFeedbackSender:
 class MockAgent:
     def __init__(self, checkpointer=None):
         self.checkpointer = checkpointer
+        self.captured_config = None
 
     def invoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
@@ -56,6 +57,7 @@ class MockAgent:
         yield "values", chunk
 
     async def astream(self, input, config, stream_mode, context=None):
+        self.captured_config = config
         chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
@@ -520,6 +522,37 @@ class TestSendMessageEndpoint:
         assert any(event.type == "final_answer" for event in events)
         assert events[-1].type == "complete"
         assert events[-1].data.run_id is not None
+
+    async def test_send_message_sets_trace_metadata(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        user_id: str,
+    ):
+        """The run config carries thread_id/user_id/language as `metadata` — what
+        LangSmith surfaces as trace attributes (see app.api.schemas.ConfigDict)."""
+        thread = await database.create_thread(
+            ThreadCreate(title="ES thread", user_id=user_id, language="es")
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/threads/{thread.id}/messages",
+            json={"content": "hola"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        # Drain the stream so the background run_agent task dispatches to the agent.
+        for _ in response.iter_lines():
+            pass
+
+        assert app.state.agent.captured_config["metadata"] == {
+            "thread_id": str(thread.id),
+            "user_id": user_id,
+            "language": "es",
+        }
 
     def test_send_message_missing_content(
         self, client: TestClient, access_token: str, thread: Thread

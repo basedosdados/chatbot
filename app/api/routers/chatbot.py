@@ -177,14 +177,19 @@ async def send_message(
 
     run_id = str(uuid.uuid4())
 
-    # thread_id stays in `configurable` too because the
-    # langgraph checkpointer keys persistence on it;
+    # `configurable` carries only what the langgraph checkpointer needs (thread_id).
+    # `metadata` is what LangSmith surfaces as trace attributes, declared explicitly.
     config = ConfigDict(
         run_id=run_id,
         configurable={"thread_id": thread_id},
+        metadata={
+            "thread_id": thread_id,
+            "user_id": user_id,
+            "language": thread.language,
+        },
     )
 
-    # application data rides on the context.
+    # Application data the tools and middleware read at run time rides on the context.
     context = AgentContext(
         thread_id=thread_id,
         user_id=user_id,
