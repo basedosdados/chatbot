@@ -5,22 +5,24 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.i18n import DEFAULT_LANGUAGE, normalize_language
+from app.i18n import DEFAULT_LANGUAGE, localized_field, normalize_language
 from app.settings import settings
 
 # Minimal GraphQL query to resolve a table's name and its dataset's name from the
-# table UUID. The localized name fields (modeltranslation) are fetched alongside
-# the default pt `name` so the display name can match the thread's language.
+# table UUID. All three explicit modeltranslation columns are fetched so the
+# display name can match the thread's language; `namePt` is the pt fallback.
+# (The unqualified `name` accessor is deliberately avoided: it returns the
+# server's active-language value, which is ambiguous for a headless request.)
 TABLE_NAME_QUERY = """
 query getTableName($id: ID!) {
     allTable(id: $id, first: 1) {
         edges {
             node {
-                name
+                namePt
                 nameEn
                 nameEs
                 dataset {
-                    name
+                    namePt
                     nameEn
                     nameEs
                 }
@@ -38,21 +40,6 @@ _GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 # localized — the same table has a different display name per language.
 _http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, read=60.0))
 _TABLE_NAME_CACHE: dict[tuple[str, str], str] = {}
-
-
-def _pick_localized_name(node: dict, language: str) -> str | None:
-    """Pick a node's display name for `language`, falling back to the pt `name`.
-
-    Args:
-        node (dict): A GraphQL node exposing `name` (pt) plus `nameEn`/`nameEs`.
-        language (str): One of "pt", "en", "es".
-
-    Returns:
-        str | None: The localized name, the pt `name` when the localized field is
-            empty (coverage is partial), or None if the node has no name at all.
-    """
-    localized = {"en": node.get("nameEn"), "es": node.get("nameEs")}.get(language)
-    return localized or node.get("name")
 
 
 async def _resolve_table_name(table_id: str, language: str) -> str | None:
@@ -90,8 +77,8 @@ async def _resolve_table_name(table_id: str, language: str) -> str | None:
         return None
 
     node = edges[0]["node"]
-    table_name = _pick_localized_name(node, language)
-    dataset_name = _pick_localized_name(node.get("dataset") or {}, language)
+    table_name = localized_field(node, "name", language)
+    dataset_name = localized_field(node.get("dataset") or {}, "name", language)
 
     if not table_name or not dataset_name:
         return None
