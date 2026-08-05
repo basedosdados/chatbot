@@ -16,7 +16,6 @@ from app.agent.schemas import (
 )
 from app.api.schemas import ConfigDict
 from app.api.streaming.agent_runner import (
-    ErrorMessage,
     _process_chunk,
     _truncate_json,
     run_agent,
@@ -24,6 +23,7 @@ from app.api.streaming.agent_runner import (
 from app.api.streaming.schemas import StreamEvent
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
 from app.exports import OFFERED_EXPORT_FORMATS
+from app.i18n import t
 
 MODEL_URI = "mock-model"
 
@@ -531,7 +531,7 @@ class TestProcessChunk:
 
         assert event is not None
         assert event.type == "model_call_limit"
-        assert event.data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert event.data.content == t("error_model_call_limit", "pt")
 
     def test_model_call_limit_passthrough_chunk_returns_none(self):
         """Test before_model passthrough chunk (None payload) returns None."""
@@ -919,14 +919,14 @@ class TestRunAgent:
 
         events = await self._drain(queue)
         assert [e.type for e in events] == ["error", "complete"]
-        assert events[0].data.content == ErrorMessage.UNEXPECTED
+        assert events[0].data.content == t("error_unexpected", "pt")
         assert events[0].data.error_details == {"reason": "agent_failed"}
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.ERROR
-        assert message.content == ErrorMessage.UNEXPECTED
+        assert message.content == t("error_unexpected", "pt")
 
     async def test_model_call_limit_persists_with_dedicated_status(
         self,
@@ -958,14 +958,14 @@ class TestRunAgent:
 
         events = await self._drain(queue)
         assert [e.type for e in events] == ["model_call_limit", "complete"]
-        assert events[0].data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert events[0].data.content == t("error_model_call_limit", "pt")
         assert events[-1].data.run_id == config["run_id"]
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.MODEL_CALL_LIMIT
-        assert message.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert message.content == t("error_model_call_limit", "pt")
 
     async def test_complete_still_emitted_when_db_write_fails(
         self,
@@ -1112,7 +1112,7 @@ class TestRunAgent:
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.INTERRUPTED
-        assert message.content == ErrorMessage.INTERRUPTED
+        assert message.content == t("error_interrupted", "pt")
 
     async def test_cancellation_after_final_answer_preserves_success(
         self,
