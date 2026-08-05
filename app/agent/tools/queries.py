@@ -1,29 +1,45 @@
+# GraphQL queries fetch the explicit modeltranslation columns
+# (`namePt`/`nameEn`/`nameEs`, `descriptionPt`/...) rather than the unqualified
+# `name`/`description` accessors, so the caller can select the thread's language
+# with a pt fallback (see `app.i18n.localized_field`). Column *names* stay as the
+# real BigQuery identifiers and are never localized.
+
 DATASET_DETAILS_QUERY = """
 query getDatasetDetails($id: ID!) {
     allDataset(id: $id, first: 1) {
         edges {
             node {
                 id
-                name
-                description
+                namePt
+                nameEn
+                nameEs
+                descriptionPt
+                descriptionEn
+                descriptionEs
                 organizations {
                     edges {
                         node {
-                            name
+                            namePt
+                            nameEn
+                            nameEs
                         }
                     }
                 }
                 themes {
                     edges {
                         node {
-                            name
+                            namePt
+                            nameEn
+                            nameEs
                         }
                     }
                 }
                 tags {
                     edges {
                         node {
-                            name
+                            namePt
+                            nameEn
+                            nameEs
                         }
                     }
                 }
@@ -31,8 +47,12 @@ query getDatasetDetails($id: ID!) {
                     edges {
                         node {
                             id
-                            name
-                            description
+                            namePt
+                            nameEn
+                            nameEs
+                            descriptionPt
+                            descriptionEn
+                            descriptionEs
                             temporalCoverage
                             cloudTables {
                                 edges {
@@ -58,8 +78,12 @@ query getTableDetails($id: ID!) {
         edges {
             node {
                 id
-                name
-                description
+                namePt
+                nameEn
+                nameEs
+                descriptionPt
+                descriptionEn
+                descriptionEs
                 temporalCoverage
                 cloudTables {
                     edges {
@@ -75,7 +99,9 @@ query getTableDetails($id: ID!) {
                         node {
                             id
                             name
-                            description
+                            descriptionPt
+                            descriptionEn
+                            descriptionEs
                             measurementUnit
                             coveredByDictionary
                             isPartition

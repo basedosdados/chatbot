@@ -275,9 +275,10 @@ async def run_agent(
                     collected_handles,
                 )
             elif event.type == "final_answer":
-                # Resolve data source names to {dataset_name}—{table_name}
+                # Resolve data source names to {dataset_name}—{table_name},
+                # localized to the thread's language (falls back to pt).
                 if event.data.structured_response is not None:
-                    await resolve_data_source_names(event.data.structured_response)
+                    await resolve_data_source_names(event.data.structured_response, language)
                 structured_response = event.data.structured_response
                 # Set the assistant message
                 assistant_message = event.data.content

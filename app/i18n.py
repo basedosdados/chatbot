@@ -129,3 +129,29 @@ def t(key: str, language: str) -> str:
         str: The localized string.
     """
     return _MESSAGES[key][normalize_language(language)]
+
+
+# GraphQL modeltranslation columns are exposed as `{field}Pt`/`{field}En`/`{field}Es`.
+_LANG_FIELD_SUFFIX: dict[str, str] = {"pt": "Pt", "en": "En", "es": "Es"}
+
+
+def localized_field(node: dict, field: str, language: str) -> str | None:
+    """Pick a GraphQL node's localized `field` for `language`, pt as fallback.
+
+    modeltranslation exposes per-language columns as `{field}Pt`/`{field}En`/
+    `{field}Es` (e.g. `name` -> `namePt`/`nameEn`/`nameEs`, `description` ->
+    `descriptionPt`/...). The unqualified accessor (`name`) is deliberately not
+    used: it returns the server's active-language value, ambiguous for a
+    headless request.
+
+    Args:
+        node (dict): A GraphQL node exposing the modeltranslation columns.
+        field (str): The base field name, e.g. "name" or "description".
+        language (str): A language code; unsupported values fall back to default.
+
+    Returns:
+        str | None: The requested language's value, the pt value when it is empty
+            (coverage is partial), or None when neither is set.
+    """
+    suffix = _LANG_FIELD_SUFFIX[normalize_language(language)]
+    return node.get(f"{field}{suffix}") or node.get(f"{field}Pt")

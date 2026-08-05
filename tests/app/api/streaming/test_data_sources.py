@@ -24,7 +24,7 @@ class TestResolveTableName:
 
     @staticmethod
     def _node_response(dataset_name: str | None, table_name: str | None):
-        node = {"name": table_name, "dataset": {"name": dataset_name}}
+        node = {"namePt": table_name, "dataset": {"namePt": dataset_name}}
         return {"data": {"allTable": {"edges": [{"node": node}]}}}
 
     @respx.mock
@@ -36,7 +36,7 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") == "Diretórios Brasileiros — Município"
+        assert await _resolve_table_name("tb1", "pt") == "Diretórios Brasileiros — Município"
 
     @respx.mock
     async def test_caches_successful_resolution(self):
@@ -47,8 +47,8 @@ class TestResolveTableName:
             )
         )
 
-        first = await _resolve_table_name("tb1")
-        second = await _resolve_table_name("tb1")
+        first = await _resolve_table_name("tb1", "pt")
+        second = await _resolve_table_name("tb1", "pt")
 
         assert first == second == "Diretórios Brasileiros — Município"
         assert route.call_count == 1
@@ -60,8 +60,8 @@ class TestResolveTableName:
             return_value=httpx.Response(200, json={"data": {"allTable": {"edges": []}}})
         )
 
-        assert await _resolve_table_name("missing") is None
-        assert "missing" not in _TABLE_NAME_CACHE
+        assert await _resolve_table_name("missing", "pt") is None
+        assert ("pt", "missing") not in _TABLE_NAME_CACHE
 
     @respx.mock
     async def test_returns_none_on_missing_dataset_name(self):
@@ -72,7 +72,7 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_missing_table_name(self):
@@ -83,14 +83,14 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_http_error(self):
         """A backend error is swallowed and resolves to None."""
         respx.post(_GRAPHQL_URL).mock(return_value=httpx.Response(500))
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_json_decode_error(self):
@@ -101,7 +101,7 @@ class TestResolveTableName:
             return_value=httpx.Response(200, content=b"{'malformed': 'json'")
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
 
 class TestResolveDataSourceNames:
@@ -111,7 +111,7 @@ class TestResolveDataSourceNames:
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """A successful resolution overwrites the model-provided fallback name."""
-        resolve_name = AsyncMock(side_effect=lambda tid: f"Conjunto - {tid}")
+        resolve_name = AsyncMock(side_effect=lambda tid, language: f"Conjunto - {tid}")
 
         monkeypatch.setattr(
             "app.api.streaming.data_sources._resolve_table_name", resolve_name

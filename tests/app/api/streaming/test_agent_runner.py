@@ -692,7 +692,7 @@ class TestRunAgent:
             follow_up_questions=["E em 2026?"],
         )
 
-        async def fake_resolve(structured_response: dict[str, Any]):
+        async def fake_resolve(structured_response: dict[str, Any], language: str):
             for source in structured_response.get("data_sources") or []:
                 source["name"] = "Conjunto DS1 - Tabela TB1"
 

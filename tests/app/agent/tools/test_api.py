@@ -21,6 +21,9 @@ class TestSearchDatasets:
     @respx.mock
     async def test_search_datasets_returns_overviews(self):
         """Test successful dataset search."""
+        # The /search/ endpoint is locale-aware server-side, so the response
+        # already carries name/description/tags/themes/organizations in the
+        # requested locale — the tool reads them verbatim.
         mock_response = {
             "results": [
                 {
@@ -79,13 +82,13 @@ class TestGetDatasetDetails:
                         {
                             "node": {
                                 "id": "DatasetNode:dataset-1",
-                                "name": "Test Dataset",
-                                "description": "Dataset description",
-                                "tags": {"edges": [{"node": {"name": "tag1"}}]},
-                                "themes": {"edges": [{"node": {"name": "theme1"}}]},
+                                "namePt": "Test Dataset",
+                                "descriptionPt": "Dataset description",
+                                "tags": {"edges": [{"node": {"namePt": "tag1"}}]},
+                                "themes": {"edges": [{"node": {"namePt": "theme1"}}]},
                                 "organizations": {
                                     "edges": [
-                                        {"node": {"name": "org1", "slug": "org1_slug"}}
+                                        {"node": {"namePt": "org1", "slug": "org1_slug"}}
                                     ]
                                 },
                                 "tables": {
@@ -93,8 +96,8 @@ class TestGetDatasetDetails:
                                         {
                                             "node": {
                                                 "id": "TableNode:table-1",
-                                                "name": "Test Table",
-                                                "description": "Table description",
+                                                "namePt": "Test Table",
+                                                "descriptionPt": "Table description",
                                                 "temporalCoverage": {
                                                     "start": "2020",
                                                     "end": "2023",
@@ -180,8 +183,8 @@ class TestGetDatasetDetails:
                         {
                             "node": {
                                 "id": "dataset-1",
-                                "name": "Test Dataset",
-                                "description": "Dataset description",
+                                "namePt": "Test Dataset",
+                                "descriptionPt": "Dataset description",
                                 "tags": {"edges": [{"node": {}}]},
                                 "themes": {"edges": [{"node": {}}]},
                                 "organizations": {"edges": [{"node": {}}]},
@@ -190,8 +193,8 @@ class TestGetDatasetDetails:
                                         {
                                             "node": {
                                                 "id": "table-1",
-                                                "name": "Test Table",
-                                                "description": "Table description",
+                                                "namePt": "Test Table",
+                                                "descriptionPt": "Table description",
                                                 "temporalCoverage": {
                                                     "start": "2020",
                                                     "end": "2023",
@@ -243,14 +246,14 @@ class TestGetDatasetDetails:
                         {
                             "node": {
                                 "id": "dataset-1",
-                                "name": "Test Dataset",
+                                "namePt": "Test Dataset",
                                 "slug": "test_dataset",
-                                "description": "Dataset description",
-                                "tags": {"edges": [{"node": {"name": "tag1"}}]},
-                                "themes": {"edges": [{"node": {"name": "theme1"}}]},
+                                "descriptionPt": "Dataset description",
+                                "tags": {"edges": [{"node": {"namePt": "tag1"}}]},
+                                "themes": {"edges": [{"node": {"namePt": "theme1"}}]},
                                 "organizations": {
                                     "edges": [
-                                        {"node": {"name": "org1", "slug": "org1_slug"}}
+                                        {"node": {"namePt": "org1", "slug": "org1_slug"}}
                                     ]
                                 },
                                 "tables": {
@@ -258,9 +261,9 @@ class TestGetDatasetDetails:
                                         {
                                             "node": {
                                                 "id": "table-1",
-                                                "name": "Test Table",
+                                                "namePt": "Test Table",
                                                 "slug": "test_table",
-                                                "description": "Table description",
+                                                "descriptionPt": "Table description",
                                                 "temporalCoverage": {
                                                     "start": "2020",
                                                     "end": "2023",
@@ -320,8 +323,8 @@ class TestGetTableDetails:
                         {
                             "node": {
                                 "id": "TableNode:table-1",
-                                "name": "Test Table",
-                                "description": "Table description",
+                                "namePt": "Test Table",
+                                "descriptionPt": "Table description",
                                 "temporalCoverage": {
                                     "start": "2020",
                                     "end": "2023",
@@ -343,7 +346,7 @@ class TestGetTableDetails:
                                             "node": {
                                                 "id": "col-1",
                                                 "name": "peso_liquido",
-                                                "description": "Peso líquido",
+                                                "descriptionPt": "Peso líquido",
                                                 "measurementUnit": "kg",
                                                 "coveredByDictionary": False,
                                                 "isPartition": False,
@@ -355,7 +358,7 @@ class TestGetTableDetails:
                                             "node": {
                                                 "id": "col-2",
                                                 "name": "status",
-                                                "description": "Status",
+                                                "descriptionPt": "Status",
                                                 "measurementUnit": None,
                                                 "coveredByDictionary": True,
                                                 "isPartition": False,
@@ -367,7 +370,7 @@ class TestGetTableDetails:
                                             "node": {
                                                 "id": "col-3",
                                                 "name": "id_municipio",
-                                                "description": "ID do município",
+                                                "descriptionPt": "ID do município",
                                                 "measurementUnit": None,
                                                 "coveredByDictionary": False,
                                                 "isPartition": False,
@@ -393,7 +396,7 @@ class TestGetTableDetails:
                                             "node": {
                                                 "id": "col-4",
                                                 "name": "ano",
-                                                "description": "Ano",
+                                                "descriptionPt": "Ano",
                                                 "measurementUnit": None,
                                                 "coveredByDictionary": False,
                                                 "isPartition": True,
