@@ -26,8 +26,10 @@ from app.db.models import (
     MessageStatus,
     QueryHandle,
     Thread,
+    ThreadCreate,
 )
 from app.exports import ExportedFile, ResultTableExpired, ResultTooLarge
+from app.i18n import MessageKey, translate
 from app.main import app
 from app.settings import settings
 from tests.conftest import MessagesFactory, ThreadFactory
@@ -48,12 +50,12 @@ class MockAgent:
     async def ainvoke(self, input, config):
         return {"messages": [AIMessage("Mock response")]}
 
-    def stream(self, input, config, stream_mode):
+    def stream(self, input, config, stream_mode, context=None):
         chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
 
-    async def astream(self, input, config, stream_mode):
+    async def astream(self, input, config, stream_mode, context=None):
         chunk = {"model": {"messages": [AIMessage("Mock response")]}}
         yield "updates", chunk
         yield "values", chunk
@@ -240,6 +242,20 @@ class TestCreateThreadEndpoint:
         thread = Thread.model_validate(response.json())
 
         assert thread.title == "Mock Title"
+        assert thread.language == "pt"  # default when the client omits it
+
+    def test_create_thread_normalizes_and_persists_language(
+        self, client: TestClient, access_token: str
+    ):
+        """A locale from the request body is normalized and stored on the thread."""
+        response = client.post(
+            url="/api/v1/chatbot/threads",
+            json={"title": "Mock Title", "language": "EN"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Thread.model_validate(response.json()).language == "en"
 
     def test_create_thread_missing_title(self, client: TestClient, access_token: str):
         """Test thread creation without title field."""
@@ -907,6 +923,52 @@ class TestExportMessageResultsEndpoint:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    async def test_failure_detail_uses_thread_language(
+        self,
+        client: TestClient,
+        access_token: str,
+        database: AsyncDatabase,
+        user_id: str,
+        mocker: MockerFixture,
+    ):
+        """Download-failure details are localized to the owning thread's language."""
+        thread = await database.create_thread(
+            ThreadCreate(title="ES thread", user_id=user_id, language="es")
+        )
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Respuesta",
+                status=MessageStatus.SUCCESS,
+            )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="qr_test",
+                    message_id=message.id,
+                    slug="resultado",
+                    destination_table=self.DESTINATION,
+                )
+            ]
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.materialize_export",
+            side_effect=ResultTooLarge("too large"),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{message.id}/exports?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json()["detail"] == translate(
+            MessageKey.RESULTS_TOO_LARGE, "es"
+        )
 
     def test_missing_query_ref_param_is_unprocessable(
         self, client: TestClient, access_token: str, downloadable_message: Message

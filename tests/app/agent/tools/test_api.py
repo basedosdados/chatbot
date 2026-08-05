@@ -3,14 +3,45 @@ import json
 import httpx
 import pytest
 import respx
+from langchain.tools import ToolRuntime
 
+from app.agent.context import AgentContext
 from app.agent.tools.api import (
+    BASE_USAGE_GUIDE_URL,
     SKIP_DIRECTORY_DATASETS,
+    _fetch_usage_guide,
     get_dataset_details,
     get_table_details,
     search_datasets,
 )
 from app.settings import settings
+
+
+def _build_tool_runtime(context: AgentContext) -> ToolRuntime[AgentContext]:
+    """Build a ToolRuntime the way the agent's ToolNode injects it into a tool.
+
+    Only `context` varies between tests; the other slots are inert stand-ins for
+    graph plumbing the tools under test never read.
+    """
+    return ToolRuntime(
+        state={},
+        context=context,
+        config={},
+        stream_writer=None,
+        tool_call_id="test-tool-call",
+        store=None,
+    )
+
+
+def _runtime(language: str = "pt") -> ToolRuntime[AgentContext]:
+    """A ToolRuntime for the given language (thread/user ids are irrelevant here)."""
+    return _build_tool_runtime(
+        AgentContext(
+            thread_id="test-thread",
+            user_id="test-user",
+            language=language,
+        )
+    )
 
 
 class TestSearchDatasets:
@@ -41,7 +72,7 @@ class TestSearchDatasets:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = await search_datasets.ainvoke({"query": "test"})
+        result = await search_datasets.ainvoke({"query": "test", "runtime": _runtime()})
         output = json.loads(result)
 
         assert len(output) == 1
@@ -62,10 +93,23 @@ class TestSearchDatasets:
             return_value=httpx.Response(200, json={"results": []})
         )
 
-        result = await search_datasets.ainvoke({"query": "nonexistent"})
+        result = await search_datasets.ainvoke(
+            {"query": "nonexistent", "runtime": _runtime()}
+        )
         output = json.loads(result)
 
         assert output == []
+
+    @respx.mock
+    async def test_forwards_context_language_as_locale(self):
+        """The thread's language is sent as the `locale` so the API returns localized text."""
+        route = respx.get(self.SEARCH_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"results": []})
+        )
+
+        await search_datasets.ainvoke({"query": "x", "runtime": _runtime("es")})
+
+        assert route.calls.last.request.url.params["locale"] == "es"
 
 
 class TestGetDatasetDetails:
@@ -88,7 +132,12 @@ class TestGetDatasetDetails:
                                 "themes": {"edges": [{"node": {"namePt": "theme1"}}]},
                                 "organizations": {
                                     "edges": [
-                                        {"node": {"namePt": "org1", "slug": "org1_slug"}}
+                                        {
+                                            "node": {
+                                                "namePt": "org1",
+                                                "slug": "org1_slug",
+                                            }
+                                        }
                                     ]
                                 },
                                 "tables": {
@@ -137,7 +186,9 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(404)
         )
 
-        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "dataset-1", "runtime": _runtime()}
+        )
         dataset = json.loads(result)
 
         assert dataset["id"] == "dataset-1"
@@ -168,7 +219,9 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200, text="# This is a usage guide.")
         )
 
-        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "dataset-1", "runtime": _runtime()}
+        )
         dataset = json.loads(result)
 
         assert dataset["usage_guide"] == "# This is a usage guide."
@@ -229,7 +282,9 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200)
         )
 
-        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "dataset-1", "runtime": _runtime()}
+        )
         dataset = json.loads(result)
 
         assert dataset["tags"] == []
@@ -253,7 +308,12 @@ class TestGetDatasetDetails:
                                 "themes": {"edges": [{"node": {"namePt": "theme1"}}]},
                                 "organizations": {
                                     "edges": [
-                                        {"node": {"namePt": "org1", "slug": "org1_slug"}}
+                                        {
+                                            "node": {
+                                                "namePt": "org1",
+                                                "slug": "org1_slug",
+                                            }
+                                        }
                                     ]
                                 },
                                 "tables": {
@@ -284,7 +344,9 @@ class TestGetDatasetDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = await get_dataset_details.ainvoke({"dataset_id": "dataset-1"})
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "dataset-1", "runtime": _runtime()}
+        )
         dataset = json.loads(result)
 
         assert dataset["tables"][0]["gcp_id"] is None
@@ -299,7 +361,9 @@ class TestGetDatasetDetails:
             )
         )
 
-        result = await get_dataset_details.ainvoke({"dataset_id": "nonexistent"})
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "nonexistent", "runtime": _runtime()}
+        )
         output = json.loads(result)
 
         assert output["status"] == "error"
@@ -307,6 +371,68 @@ class TestGetDatasetDetails:
             output["message"]
             == "Dataset 'nonexistent' not found. Verify the dataset ID from search_datasets results."
         )
+
+    @respx.mock
+    async def test_localizes_metadata_to_context_language(self):
+        """Each field is picked in the thread's language, falling back to pt per field."""
+        mock_response = {
+            "data": {
+                "allDataset": {
+                    "edges": [
+                        {
+                            "node": {
+                                "id": "DatasetNode:dataset-1",
+                                "namePt": "Conjunto",
+                                "nameEn": "Dataset",
+                                # description has no English value -> must fall back to pt
+                                "descriptionPt": "Descrição",
+                                "descriptionEn": "",
+                                "tags": {
+                                    "edges": [
+                                        {
+                                            "node": {
+                                                "namePt": "saúde",
+                                                "nameEn": "health",
+                                            }
+                                        }
+                                    ]
+                                },
+                                "themes": {"edges": []},
+                                "organizations": {"edges": []},
+                                "tables": {
+                                    "edges": [
+                                        {
+                                            "node": {
+                                                "id": "TableNode:table-1",
+                                                "namePt": "Tabela",
+                                                "nameEn": "Table",
+                                                "descriptionPt": "Desc",
+                                                "descriptionEn": "Desc EN",
+                                                "cloudTables": {"edges": []},
+                                            }
+                                        }
+                                    ]
+                                },
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        respx.post(self.GRAPHQL_URL).mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        result = await get_dataset_details.ainvoke(
+            {"dataset_id": "dataset-1", "runtime": _runtime("en")}
+        )
+        dataset = json.loads(result)
+
+        assert dataset["name"] == "Dataset"  # English picked
+        assert dataset["description"] == "Descrição"  # English empty -> pt fallback
+        assert dataset["tags"] == ["health"]  # English picked
+        assert dataset["tables"][0]["name"] == "Table"  # English picked
 
 
 class TestGetTableDetails:
@@ -439,7 +565,9 @@ class TestGetTableDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = await get_table_details.ainvoke({"table_id": "table-1"})
+        result = await get_table_details.ainvoke(
+            {"table_id": "table-1", "runtime": _runtime()}
+        )
         table = json.loads(result)
 
         assert table["id"] == "table-1"
@@ -490,7 +618,9 @@ class TestGetTableDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = await get_table_details.ainvoke({"table_id": "table-1"})
+        result = await get_table_details.ainvoke(
+            {"table_id": "table-1", "runtime": _runtime()}
+        )
         table = json.loads(result)
 
         assert table["period_start"] is None
@@ -507,7 +637,9 @@ class TestGetTableDetails:
             return_value=httpx.Response(200, json=mock_response)
         )
 
-        result = await get_table_details.ainvoke({"table_id": "table-1"})
+        result = await get_table_details.ainvoke(
+            {"table_id": "table-1", "runtime": _runtime()}
+        )
         table = json.loads(result)
 
         assert table["gcp_id"] is None
@@ -519,7 +651,9 @@ class TestGetTableDetails:
             return_value=httpx.Response(200, json={"data": {"allTable": {"edges": []}}})
         )
 
-        result = await get_table_details.ainvoke({"table_id": "nonexistent"})
+        result = await get_table_details.ainvoke(
+            {"table_id": "nonexistent", "runtime": _runtime()}
+        )
         output = json.loads(result)
 
         assert output["status"] == "error"
@@ -527,3 +661,109 @@ class TestGetTableDetails:
             output["message"]
             == "Table 'nonexistent' not found. Verify the table ID from get_dataset_details results."
         )
+
+    @respx.mock
+    async def test_localizes_metadata_to_context_language(self):
+        """Table/column metadata is picked in the thread's language, pt as per-field fallback."""
+        mock_response = {
+            "data": {
+                "allTable": {
+                    "edges": [
+                        {
+                            "node": {
+                                "id": "TableNode:table-1",
+                                "namePt": "Tabela",
+                                "nameEn": "Table",
+                                # no English description -> must fall back to pt
+                                "descriptionPt": "Descrição",
+                                "descriptionEn": "",
+                                "temporalCoverage": None,
+                                "cloudTables": {"edges": []},
+                                "columns": {
+                                    "edges": [
+                                        {
+                                            "node": {
+                                                "id": "col-1",
+                                                "name": "status",
+                                                "descriptionPt": "Situação",
+                                                "descriptionEn": "Status",
+                                                "measurementUnit": None,
+                                                "coveredByDictionary": False,
+                                                "isPartition": False,
+                                                "bigqueryType": {"name": "STRING"},
+                                                "directoryPrimaryKey": None,
+                                            }
+                                        }
+                                    ]
+                                },
+                                "dataset": {"id": "DatasetNode:dataset-1"},
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        respx.post(self.GRAPHQL_URL).mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        result = await get_table_details.ainvoke(
+            {"table_id": "table-1", "runtime": _runtime("en")}
+        )
+        table = json.loads(result)
+
+        assert table["name"] == "Table"  # English picked
+        assert table["description"] == "Descrição"  # English empty -> pt fallback
+        assert table["columns"][0]["description"] == "Status"  # English picked
+
+
+class TestFetchUsageGuide:
+    """The localized usage-guide fetch: requested language, then the default, deduped."""
+
+    GCP_DATASET_ID = "test_dataset"
+    FILENAME = "test-dataset"  # underscores become dashes in the guide filename
+
+    def _url(self, locale: str) -> str:
+        return f"{BASE_USAGE_GUIDE_URL}/{locale}/{self.FILENAME}.md"
+
+    @respx.mock
+    async def test_returns_requested_language_guide(self):
+        respx.get(self._url("en")).mock(
+            return_value=httpx.Response(200, text="# EN guide")
+        )
+
+        assert await _fetch_usage_guide(self.GCP_DATASET_ID, "en") == "# EN guide"
+
+    @respx.mock
+    async def test_falls_back_to_default_when_localized_missing(self):
+        respx.get(self._url("en")).mock(return_value=httpx.Response(404))
+        pt = respx.get(self._url("pt")).mock(
+            return_value=httpx.Response(200, text="# PT guide")
+        )
+
+        assert await _fetch_usage_guide(self.GCP_DATASET_ID, "en") == "# PT guide"
+        assert pt.called
+
+    @respx.mock
+    async def test_default_language_fetches_once(self):
+        pt = respx.get(self._url("pt")).mock(
+            return_value=httpx.Response(200, text="# PT guide")
+        )
+        en = respx.get(self._url("en")).mock(
+            return_value=httpx.Response(200, text="# EN guide")
+        )
+
+        assert await _fetch_usage_guide(self.GCP_DATASET_ID, "pt") == "# PT guide"
+        assert pt.call_count == 1
+        assert (
+            not en.called
+        )  # dedupe: no second fetch when language is already the default
+
+    @respx.mock
+    async def test_returns_none_when_no_guide_exists(self):
+        respx.get(url__startswith=BASE_USAGE_GUIDE_URL).mock(
+            return_value=httpx.Response(404)
+        )
+
+        assert await _fetch_usage_guide(self.GCP_DATASET_ID, "en") is None
