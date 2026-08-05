@@ -19,8 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # server_default backfills existing threads with the Portuguese default; new rows get
-    # their value from the application (ThreadPayload.language).
+    # server_default backfills existing threads with the Portuguese default;
+    # new rows get their value from the application (ThreadPayload.language).
     op.add_column(
         "thread",
         sa.Column("language", sa.String(), nullable=False, server_default="pt"),

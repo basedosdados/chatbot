@@ -1,9 +1,10 @@
 import json
 
 import httpx
-from langchain_core.runnables import RunnableConfig
+from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
+from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
 from app.agent.tools.models import (
     Column,
@@ -13,7 +14,7 @@ from app.agent.tools.models import (
     TableOverview,
 )
 from app.agent.tools.queries import DATASET_DETAILS_QUERY, TABLE_DETAILS_QUERY
-from app.i18n import localized_field, normalize_language
+from app.i18n import DEFAULT_LANGUAGE, LanguageCode, localized_field
 from app.settings import settings
 
 # httpx default timeout
@@ -41,42 +42,36 @@ BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/r
 _client = httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT))
 
 
-def _config_language(config: RunnableConfig) -> str:
-    """Read the thread's language from the injected run config (pt default).
+async def _fetch_usage_guide(gcp_dataset_id: str, language: LanguageCode) -> str | None:
+    """Fetch a dataset's usage-guide markdown for `language`, falling back to the default.
 
-    The language is set on `config["configurable"]["language"]` when the agent
-    run is dispatched (see the chatbot router). LangChain injects the run config
-    into any tool that declares a `RunnableConfig` parameter, without exposing it
-    to the model, so the tools can localize the metadata they return.
-    """
-    return normalize_language((config.get("configurable") or {}).get("language"))
-
-
-async def _fetch_usage_guide(gcp_dataset_id: str, language: str) -> str | None:
-    """Fetch a dataset's usage-guide markdown for `language`, falling back to pt.
-
-    Localized guides may not exist yet (only pt is populated today), so a missing
-    localized file falls back to the pt guide.
+    Localized guides may not exist yet (only the default language is populated today), so
+    a missing localized file falls back to the default-language guide.
 
     Args:
-        gcp_dataset_id (str): The BigQuery dataset id (its dashes form the filename).
-        language (str): The thread's language ("pt", "en", "es").
+        gcp_dataset_id (str): The BigQuery dataset id.
+        language (LanguageCode): The thread's language.
 
     Returns:
         str | None: The guide markdown, or None if no guide exists in any language.
     """
     filename = gcp_dataset_id.replace("_", "-")
-    locales = ["pt"] if language == "pt" else [language, "pt"]
+
+    # Try the requested language, then the default; `fromkeys` preserves order
+    # and drops the duplicate when `language` is already the default.
+    locales = dict.fromkeys((language, DEFAULT_LANGUAGE))
+
     for locale in locales:
         response = await _client.get(f"{BASE_USAGE_GUIDE_URL}/{locale}/{filename}.md")
         if response.status_code == httpx.codes.OK:
             return response.text.strip()
+
     return None
 
 
 @tool
 @handle_tool_errors
-async def search_datasets(query: str, config: RunnableConfig) -> str:
+async def search_datasets(query: str, runtime: ToolRuntime[AgentContext]) -> str:
     """Search for datasets in Base dos Dados using keywords.
 
     CRITICAL: Use individual KEYWORDS only, not full sentences. The search engine uses Elasticsearch.
@@ -97,18 +92,13 @@ async def search_datasets(query: str, config: RunnableConfig) -> str:
 
     Next step: Use `get_dataset_details()` with returned dataset IDs.
     """
-    # The /search/ endpoint is locale-aware: it matches the localized text field
-    # and returns name/description/themes/tags/organizations in `locale`, each
-    # falling back to pt server-side.
-    language = _config_language(config)
-
     response = await _client.get(
         url=SEARCH_URL,
         params={
             "contains": "tables",
             "q": query,
             "page_size": PAGE_SIZE,
-            "locale": language,
+            "locale": runtime.context.language,
         },
     )
 
@@ -135,7 +125,9 @@ async def search_datasets(query: str, config: RunnableConfig) -> str:
 
 @tool
 @handle_tool_errors
-async def get_dataset_details(dataset_id: str, config: RunnableConfig) -> str:
+async def get_dataset_details(
+    dataset_id: str, runtime: ToolRuntime[AgentContext]
+) -> str:
     """Get comprehensive details about a specific dataset including all its tables.
 
     Use AFTER `search_datasets()` to understand data structure before writing queries.
@@ -175,7 +167,7 @@ async def get_dataset_details(dataset_id: str, config: RunnableConfig) -> str:
 
     dataset = dataset_edges[0]["node"]
 
-    language = _config_language(config)
+    language = runtime.context.language
 
     dataset_id = dataset["id"].split("DatasetNode:")[-1]
     dataset_name = localized_field(dataset, "name", language)
@@ -255,7 +247,7 @@ async def get_dataset_details(dataset_id: str, config: RunnableConfig) -> str:
 
 @tool
 @handle_tool_errors
-async def get_table_details(table_id: str, config: RunnableConfig) -> str:
+async def get_table_details(table_id: str, runtime: ToolRuntime[AgentContext]) -> str:
     """Get comprehensive details about a specific table including all its columns.
 
     Use AFTER `get_dataset_details()` to understand table structure before writing queries.
@@ -296,7 +288,7 @@ async def get_table_details(table_id: str, config: RunnableConfig) -> str:
 
     table = table_edges[0]["node"]
 
-    language = _config_language(config)
+    language = runtime.context.language
 
     table_id = table["id"].split("TableNode:")[-1]
     table_name = localized_field(table, "name", language)

@@ -6,9 +6,10 @@ from typing import Any
 
 from google.api_core.exceptions import GoogleAPICallError, NotFound
 from google.cloud import bigquery as bq
-from langchain_core.runnables import RunnableConfig
+from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
+from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
 from app.settings import settings
 
@@ -26,7 +27,7 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 @tool(response_format="content_and_artifact")
 @handle_tool_errors(response_format="content_and_artifact")
 def execute_bigquery_sql(
-    sql_query: str, slug: str, config: RunnableConfig
+    sql_query: str, slug: str, runtime: ToolRuntime[AgentContext]
 ) -> tuple[str, dict[str, Any] | None]:
     """Execute a SQL query against BigQuery tables from the Base dos Dados database.
 
@@ -69,8 +70,8 @@ def execute_bigquery_sql(
         )
 
     labels = {
-        "thread_id": config.get("configurable", {}).get("thread_id", "unknown"),
-        "user_id": config.get("configurable", {}).get("user_id", "unknown"),
+        "thread_id": runtime.context.thread_id,
+        "user_id": runtime.context.user_id,
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 
@@ -118,7 +119,9 @@ def execute_bigquery_sql(
 @tool
 @handle_tool_errors
 def decode_table_values(
-    table_gcp_id: str, config: RunnableConfig, column_name: str | None = None
+    table_gcp_id: str,
+    runtime: ToolRuntime[AgentContext],
+    column_name: str | None = None,
 ) -> str:
     """Fetch the dictionary mapping (code -> human-readable value) for a coded column.
 
@@ -167,8 +170,8 @@ def decode_table_values(
     search_query += "ORDER BY nome_coluna, chave"
 
     labels = {
-        "thread_id": config.get("configurable", {}).get("thread_id", "unknown"),
-        "user_id": config.get("configurable", {}).get("user_id", "unknown"),
+        "thread_id": runtime.context.thread_id,
+        "user_id": runtime.context.user_id,
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 

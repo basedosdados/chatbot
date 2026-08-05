@@ -5,9 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 from google.api_core.exceptions import BadRequest, NotFound
 from google.cloud import bigquery as bq
+from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from pytest_mock import MockerFixture
 
+from app.agent.context import AgentContext
 from app.agent.tools.bigquery import (
     MAX_BYTES_BILLED,
     decode_table_values,
@@ -16,27 +18,52 @@ from app.agent.tools.bigquery import (
 
 
 @pytest.fixture
-def mock_config() -> dict:
-    return {"configurable": {"thread_id": "test-thread", "user_id": "test-user"}}
+def mock_context() -> AgentContext:
+    """The run context the agent injects into a tool
+    (its `thread_id`/`user_id` become the BigQuery job labels)."""
+    return AgentContext(thread_id="test-thread", user_id="test-user", language="pt")
 
 
-def _invoke_tool(tool, args: dict, config: dict | None = None) -> ToolMessage:
+def _build_tool_runtime(context: AgentContext) -> ToolRuntime[AgentContext]:
+    """Build a ToolRuntime the way the agent's ToolNode injects it into a tool.
+
+    Only `context` varies between tests; the other slots are inert stand-ins for
+    graph plumbing the tools under test never read.
+    """
+    return ToolRuntime(
+        state={},
+        context=context,
+        config={},
+        stream_writer=None,
+        tool_call_id="test-tool-call",
+        store=None,
+    )
+
+
+def _invoke_tool(tool, args: dict, context: AgentContext) -> ToolMessage:
     """Invoke a tool the way the agent's ToolNode does, returning the ToolMessage.
 
     The tool-call form (rather than a plain args dict) exercises the real
     content+artifact packaging, so the ToolMessage exposes both `.content` and,
-    for content_and_artifact tools, `.artifact`.
+    for content_and_artifact tools, `.artifact`. `context` is injected as the tool
+    runtime — the same AgentContext the agent provides at run time.
     """
+    runtime = _build_tool_runtime(context)
+
     return tool.invoke(
-        {"type": "tool_call", "id": "1", "name": tool.name, "args": args},
-        config=config,
+        {
+            "type": "tool_call",
+            "id": "1",
+            "name": tool.name,
+            "args": {**args, "runtime": runtime},
+        }
     )
 
 
 class TestExecuteBigQuerySQL:
     """Tests for execute_bigquery_sql tool."""
 
-    def test_successful_query(self, mocker: MockerFixture, mock_config: dict):
+    def test_successful_query(self, mocker: MockerFixture, mock_context: AgentContext):
         """Test successful SELECT query returns rows plus a query_ref handle."""
         mock_dry_run_query_job = MagicMock()
         mock_dry_run_query_job.statement_type = "SELECT"
@@ -62,7 +89,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -72,7 +99,7 @@ class TestExecuteBigQuerySQL:
         assert re.fullmatch(r"qr_[0-9a-f]{32}", message.artifact["query_ref"])
 
     def test_successful_query_exposes_destination_table_on_artifact(
-        self, mocker: MockerFixture, mock_config: dict
+        self, mocker: MockerFixture, mock_context: AgentContext
     ):
         """The result table reference is carried on the artifact, not the content."""
         mock_dry_run_query_job = MagicMock()
@@ -99,7 +126,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         assert message.artifact["type"] == "query_result"
@@ -112,7 +139,7 @@ class TestExecuteBigQuerySQL:
         }
 
     def test_successful_query_empty_result(
-        self, mocker: MockerFixture, mock_config: dict
+        self, mocker: MockerFixture, mock_context: AgentContext
     ):
         """A query with no rows returns a message and no downloadable handle."""
         mock_dry_run_query_job = MagicMock()
@@ -134,7 +161,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         assert (
@@ -143,7 +170,9 @@ class TestExecuteBigQuerySQL:
         )
         assert message.artifact is None
 
-    def test_forbidden_statement_type(self, mocker: MockerFixture, mock_config: dict):
+    def test_forbidden_statement_type(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test error when statement is not SELECT."""
         mock_dry_run_query_job = MagicMock()
         mock_dry_run_query_job.statement_type = "DELETE"
@@ -158,7 +187,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "DELETE FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -167,7 +196,7 @@ class TestExecuteBigQuerySQL:
         assert output["message"] == "Only SELECT statements are allowed, got DELETE."
 
     def test_bytes_billed_limit_exceeded(
-        self, mocker: MockerFixture, mock_config: dict
+        self, mocker: MockerFixture, mock_context: AgentContext
     ):
         """Test error when query exceeds bytes billed limit."""
         mock_dry_run_query_job = MagicMock()
@@ -190,7 +219,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -201,7 +230,9 @@ class TestExecuteBigQuerySQL:
             "Filter by partitioned columns."
         )
 
-    def test_google_api_error_reraise(self, mocker: MockerFixture, mock_config: dict):
+    def test_google_api_error_reraise(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test that non-bytesBilledLimitExceeded GoogleAPICallError is re-raised."""
         mock_dry_run_query_job = MagicMock()
         mock_dry_run_query_job.statement_type = "SELECT"
@@ -221,7 +252,7 @@ class TestExecuteBigQuerySQL:
         message = _invoke_tool(
             execute_bigquery_sql,
             {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -233,7 +264,9 @@ class TestExecuteBigQuerySQL:
 class TestDecodeTableValues:
     """Tests for decode_table_values tool."""
 
-    def test_decode_all_columns(self, mocker: MockerFixture, mock_config: dict):
+    def test_decode_all_columns(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test decoding all columns from a table."""
         mock_query_job = MagicMock()
         mock_query_job.result.return_value = [
@@ -251,7 +284,7 @@ class TestDecodeTableValues:
         message = _invoke_tool(
             decode_table_values,
             {"table_gcp_id": "project.dataset.table"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -268,7 +301,7 @@ class TestDecodeTableValues:
         assert "nome_coluna = " not in param_names
 
     def test_decode_all_columns_with_backticks(
-        self, mocker: MockerFixture, mock_config: dict
+        self, mocker: MockerFixture, mock_context: AgentContext
     ):
         """Test decoding all columns from a table with backticks in its name."""
         mock_query_job = MagicMock()
@@ -287,7 +320,7 @@ class TestDecodeTableValues:
         message = _invoke_tool(
             decode_table_values,
             {"table_gcp_id": "`project.dataset.table`"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -303,7 +336,9 @@ class TestDecodeTableValues:
         assert "table_name" in param_names
         assert "nome_coluna = " not in param_names
 
-    def test_decode_specific_column(self, mocker: MockerFixture, mock_config: dict):
+    def test_decode_specific_column(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test decoding a specific column."""
         mock_query_job = MagicMock()
         mock_query_job.result.return_value = [
@@ -321,7 +356,7 @@ class TestDecodeTableValues:
         message = _invoke_tool(
             decode_table_values,
             {"table_gcp_id": "project.dataset.table", "column_name": "col1"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -337,7 +372,9 @@ class TestDecodeTableValues:
         assert "table_name" in param_names
         assert "column_name" in param_names
 
-    def test_dictionary_not_found(self, mocker: MockerFixture, mock_config: dict):
+    def test_dictionary_not_found(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test error when dictionary table doesn't exist."""
         error = NotFound(
             message="Table not found",
@@ -354,7 +391,7 @@ class TestDecodeTableValues:
         message = _invoke_tool(
             decode_table_values,
             {"table_gcp_id": "project.dataset.table"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)
@@ -362,10 +399,10 @@ class TestDecodeTableValues:
         assert output["status"] == "error"
         assert output["message"] == "Dictionary table not found for this dataset."
 
-    def test_invalid_table_reference(self, mock_config: dict):
+    def test_invalid_table_reference(self, mock_context: AgentContext):
         """Test error when table reference format is invalid."""
         message = _invoke_tool(
-            decode_table_values, {"table_gcp_id": "table"}, config=mock_config
+            decode_table_values, {"table_gcp_id": "table"}, context=mock_context
         )
 
         output = json.loads(message.content)
@@ -376,7 +413,9 @@ class TestDecodeTableValues:
             == "Invalid table reference: 'table'. Expected format: project.dataset.table"
         )
 
-    def test_google_api_error_reraise(self, mocker: MockerFixture, mock_config: dict):
+    def test_google_api_error_reraise(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
         """Test that non-notFound GoogleAPICallError is re-raised."""
         error = BadRequest(
             message="Syntax error",
@@ -393,7 +432,7 @@ class TestDecodeTableValues:
         message = _invoke_tool(
             decode_table_values,
             {"table_gcp_id": "project.dataset.table"},
-            config=mock_config,
+            context=mock_context,
         )
 
         output = json.loads(message.content)

@@ -1,12 +1,15 @@
+from typing import get_args
+
 import pytest
 
 from app.i18n import (
     DEFAULT_LANGUAGE,
-    LANGUAGES,
-    _MESSAGES,
+    LanguageCode,
+    MessageKey,
     language_directive,
+    localized_field,
     normalize_language,
-    t,
+    translate,
 )
 
 
@@ -25,17 +28,24 @@ class TestNormalizeLanguage:
 
 
 class TestTranslate:
-    def test_every_key_covers_every_language(self):
-        for key, translations in _MESSAGES.items():
-            assert set(translations) == set(LANGUAGES), f"'{key}' is missing a language"
-            assert all(v.strip() for v in translations.values()), f"'{key}' has empty text"
+    def test_every_key_resolves_in_every_language(self):
+        # Guards against a key that's missing a language (translate would KeyError)
+        # or has empty text — the common failure when adding a message or a locale.
+        for key in MessageKey:
+            for language in get_args(LanguageCode):
+                text = translate(key, language)
+                assert text and text.strip(), f"{key} / {language} is empty"
 
     def test_returns_language_specific_text(self):
-        assert t("results_expired", "en") != t("results_expired", "pt")
-        assert t("results_expired", "en") != t("results_expired", "es")
+        expired = MessageKey.RESULTS_EXPIRED
+        assert translate(expired, "en") != translate(expired, "pt")
+        assert translate(expired, "en") != translate(expired, "es")
 
-    def test_unsupported_language_falls_back_to_default(self):
-        assert t("error_unexpected", "fr") == t("error_unexpected", DEFAULT_LANGUAGE)
+    def test_does_not_fall_back_on_unsupported_language(self):
+        # Normalization is the caller's responsibility (see normalize_language);
+        # translate trusts it receives a valid LanguageCode.
+        with pytest.raises(KeyError):
+            translate(MessageKey.ERROR_UNEXPECTED, "fr")
 
 
 class TestLanguageDirective:
@@ -46,5 +56,30 @@ class TestLanguageDirective:
     def test_names_the_target_language(self, language: str, expected_name: str):
         assert expected_name in language_directive(language)
 
-    def test_unsupported_language_falls_back_to_default_name(self):
-        assert "Portuguese" in language_directive("fr")
+    def test_does_not_fall_back_on_unsupported_language(self):
+        # language_directive trusts it receives a valid LanguageCode.
+        with pytest.raises(KeyError):
+            language_directive("fr")
+
+
+class TestLocalizedField:
+    """The metadata-localization primitive: pick `{field}{Suffix}`, fall back to pt."""
+
+    def test_returns_requested_language_value(self):
+        node = {"namePt": "Município", "nameEn": "Municipality", "nameEs": "Municipio"}
+        assert localized_field(node, "name", "en") == "Municipality"
+        assert localized_field(node, "name", "es") == "Municipio"
+        assert localized_field(node, "name", "pt") == "Município"
+
+    def test_falls_back_to_pt_when_requested_language_missing(self):
+        # Partial translation coverage: only pt is populated for this node.
+        node = {"namePt": "Município"}
+        assert localized_field(node, "name", "en") == "Município"
+
+    def test_falls_back_to_pt_when_requested_language_is_empty(self):
+        # An empty localized value is treated as "not translated" (the `or` branch).
+        node = {"namePt": "Município", "nameEn": ""}
+        assert localized_field(node, "name", "en") == "Município"
+
+    def test_returns_none_when_neither_language_present(self):
+        assert localized_field({}, "name", "en") is None

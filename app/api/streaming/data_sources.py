@@ -5,14 +5,12 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.i18n import DEFAULT_LANGUAGE, localized_field, normalize_language
+from app.i18n import LanguageCode, localized_field
 from app.settings import settings
 
 # Minimal GraphQL query to resolve a table's name and its dataset's name from the
-# table UUID. All three explicit modeltranslation columns are fetched so the
+# table UUID. All three explicit model translation columns are fetched so the
 # display name can match the thread's language; `namePt` is the pt fallback.
-# (The unqualified `name` accessor is deliberately avoided: it returns the
-# server's active-language value, which is ambiguous for a headless request.)
 TABLE_NAME_QUERY = """
 query getTableName($id: ID!) {
     allTable(id: $id, first: 1) {
@@ -35,27 +33,26 @@ query getTableName($id: ID!) {
 # Base dos Dados GraphQL endpoint, used to resolve data source display names.
 _GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 
-# Dedicated HTTP client + cache for resolving data source display names from table
-# UUIDs. The cache is keyed by (language, table_id) because the resolved name is
-# localized — the same table has a different display name per language.
+# Dedicated HTTP client + cache for resolving data source display names from table UUIDs.
+# The cache is keyed by (language, table_id) because the resolved name is localized.
 _http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, read=60.0))
 _TABLE_NAME_CACHE: dict[tuple[str, str], str] = {}
 
 
-async def _resolve_table_name(table_id: str, language: str) -> str | None:
+async def _resolve_table_name(table_id: str, language: LanguageCode) -> str | None:
     """Resolve a table UUID to a human-readable "{dataset_name} — {table_name}",
     localized to `language`, and cache results per (language, table_id).
 
     Args:
         table_id (str): A Table UUID.
-        language (str): The thread's language ("pt", "en", "es"); the resolved
-            name uses the matching localized fields, falling back to pt.
+        language (LanguageCode): A supported language code.
 
     Returns:
         str | None: "{dataset_name} — {table_name}", or None if the table can't
             be resolved (unknown UUID, missing names, network error, etc.).
     """
-    cache_key = (language, table_id)
+    cache_key = (table_id, language)
+
     if cache_key in _TABLE_NAME_CACHE:
         return _TABLE_NAME_CACHE[cache_key]
 
@@ -89,11 +86,10 @@ async def _resolve_table_name(table_id: str, language: str) -> str | None:
 
 
 async def resolve_data_source_names(
-    structured_response: dict[str, Any], language: str = DEFAULT_LANGUAGE
+    structured_response: dict[str, Any], language: LanguageCode
 ) -> None:
     """Overwrite each data source's display name with a deterministic
-    "{dataset_name} — {table_name}" resolved from its table UUID, localized to
-    `language` (falling back to the pt name where a translation is missing).
+    "{dataset_name} — {table_name}" resolved from its table UUID, localized to `language`.
 
     The resolved name is authoritative; the model-provided `name` (see
     `app.agent.schemas.DataSource`) is kept as a fallback for any source whose
@@ -103,9 +99,8 @@ async def resolve_data_source_names(
     Args:
         structured_response (dict[str, Any]): The dumped StructuredResponse whose
             `data_sources` entries are enriched in place.
-        language (str): The thread's language; selects the localized name fields.
+        language (LanguageCode): A supported language code.
     """
-    language = normalize_language(language)
     data_sources = structured_response.get("data_sources") or []
     resolvable = [source for source in data_sources if source["table_id"]]
 

@@ -131,7 +131,7 @@ Fill them **only** based on the tool results obtained in this conversation:
 - Do **NOT** use Markdown headers (# or ##) or section titles in the response.
 - Use only flowing text, bold for emphasis, lists, tables, and code blocks.
 - Keep a professional yet accessible tone.
-- Always respond in the user's language.
+- {language_directive}
 
 ---
 
