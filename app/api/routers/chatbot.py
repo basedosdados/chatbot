@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from app.agent.context import AgentContext
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
@@ -30,7 +31,7 @@ from app.exports import (
     ResultTooLarge,
     materialize_export,
 )
-from app.i18n import DEFAULT_LANGUAGE, t
+from app.i18n import MessageKey, translate
 from app.settings import settings
 from app.storage import generate_signed_url
 
@@ -66,8 +67,8 @@ async def _authorize_thread(
 
 async def _authorize_message(
     database: AsyncDatabase, message_id: str, user_id: str
-) -> Message:
-    """Fetch a message and verify the caller owns the thread it belongs to.
+) -> tuple[Message, Thread]:
+    """Fetch a message and its thread, verifying the caller owns the thread.
 
     Args:
         database (AsyncDatabase): The database repository.
@@ -75,7 +76,8 @@ async def _authorize_message(
         user_id (str): The authenticated caller.
 
     Returns:
-        Message: The message, whose thread is guaranteed to belong to `user_id`.
+        tuple[Message, Thread]: The message and its owning thread,
+            guaranteed to belong to `user_id`.
 
     Raises:
         HTTPException: 404 whether the message is missing or the caller doesn't own its thread.
@@ -91,7 +93,7 @@ async def _authorize_message(
             detail=f"Message {message_id} not found",
         )
 
-    return message
+    return message, thread
 
 
 @router.get("/threads")
@@ -175,13 +177,18 @@ async def send_message(
 
     run_id = str(uuid.uuid4())
 
+    # thread_id stays in `configurable` too because the
+    # langgraph checkpointer keys persistence on it;
     config = ConfigDict(
         run_id=run_id,
-        configurable={
-            "thread_id": thread_id,
-            "user_id": user_id,
-            "language": thread.language,
-        },
+        configurable={"thread_id": thread_id},
+    )
+
+    # application data rides on the context.
+    context = AgentContext(
+        thread_id=thread_id,
+        user_id=user_id,
+        language=thread.language,
     )
 
     message_create = MessageCreate(
@@ -199,10 +206,10 @@ async def send_message(
         run_agent(
             agent=agent,
             config=config,
+            context=context,
             thread_id=thread_id,
             user_message=message,
             model_uri=settings.MODEL_URI,
-            language=thread.language,
             queue=queue,
         ),
         name=f"run_agent:{run_id}",
@@ -258,12 +265,7 @@ async def export_message_results(
             ),
         )
 
-    message = await _authorize_message(database, message_id, user_id)
-
-    # The thread's language localizes the download-failure details below. _authorize_message
-    # already validated the thread exists and is owned; re-read it to read its language.
-    thread = await database.get_thread(message.thread_id)
-    language = thread.language if thread else DEFAULT_LANGUAGE
+    message, thread = await _authorize_message(database, message_id, user_id)
 
     query_handle = await database.get_query_handle(message.id, query_ref)
 
@@ -280,19 +282,20 @@ async def export_message_results(
             destination_table=query_handle.destination_table,
             file_format=file_format,
             filename=_sanitize_filename(
-                query_handle.slug, t("default_export_filename", language)
+                query_handle.slug,
+                translate(MessageKey.DEFAULT_EXPORT_FILENAME, thread.language),
             ),
             message_id=str(message.id),
         )
     except ResultTableExpired as e:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail=t("results_expired", language),
+            detail=translate(MessageKey.RESULTS_EXPIRED, thread.language),
         ) from e
     except ResultTooLarge as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=t("results_too_large", language),
+            detail=translate(MessageKey.RESULTS_TOO_LARGE, thread.language),
         ) from e
 
     signed_url = generate_signed_url(

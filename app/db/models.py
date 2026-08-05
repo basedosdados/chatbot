@@ -5,9 +5,18 @@ from typing import Any
 
 from pydantic import JsonValue, computed_field, field_validator
 from sqlalchemy import Enum as SAEnum
-from sqlmodel import JSON, TIMESTAMP, Column, Field, Integer, Relationship, SQLModel
+from sqlmodel import (
+    JSON,
+    TIMESTAMP,
+    Column,
+    Field,
+    Integer,
+    Relationship,
+    SQLModel,
+    String,
+)
 
-from app.i18n import DEFAULT_LANGUAGE, normalize_language
+from app.i18n import DEFAULT_LANGUAGE, LanguageCode, normalize_language
 
 
 # =============================================================================
@@ -15,13 +24,11 @@ from app.i18n import DEFAULT_LANGUAGE, normalize_language
 # =============================================================================
 class ThreadPayload(SQLModel):
     title: str
-    # Captured at creation from the site's locale (pt/en/es). Steers the assistant's response
-    # language and localizes server-emitted messages. Stored as a plain code; see app.i18n.
-    language: str = Field(default=DEFAULT_LANGUAGE)
+    language: LanguageCode = Field(default=DEFAULT_LANGUAGE, sa_type=String)
 
-    @field_validator("language")
+    @field_validator("language", mode="before")
     @classmethod
-    def _normalize_language(cls, value: str) -> str:
+    def _normalize_language(cls, value: str | None) -> LanguageCode:
         return normalize_language(value)
 
 

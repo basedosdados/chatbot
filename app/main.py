@@ -1,6 +1,5 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import date
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -15,6 +14,8 @@ from loguru import logger
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from app.agent.context import AgentContext
+from app.agent.middleware import system_prompt_middleware
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.schemas import StructuredResponse
 from app.agent.tools import BDToolkit
@@ -84,11 +85,14 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             agent = create_agent(
                 model=model,
                 tools=BDToolkit.get_tools(),
-                system_prompt=SYSTEM_PROMPT.format(
-                    current_date=date.today().isoformat()
-                ),
-                middleware=[summ_middleware, limit_middleware],
+                system_prompt=SYSTEM_PROMPT,
+                middleware=[
+                    system_prompt_middleware,
+                    summ_middleware,
+                    limit_middleware,
+                ],
                 response_format=StructuredResponse,
+                context_schema=AgentContext,
                 checkpointer=checkpointer,
             )
 

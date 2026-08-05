@@ -1,8 +1,6 @@
-# GraphQL queries fetch the explicit modeltranslation columns
-# (`namePt`/`nameEn`/`nameEs`, `descriptionPt`/...) rather than the unqualified
-# `name`/`description` accessors, so the caller can select the thread's language
-# with a pt fallback (see `app.i18n.localized_field`). Column *names* stay as the
-# real BigQuery identifiers and are never localized.
+# GraphQL queries fetch the explicit model translation columns (`namePt`/..., `descriptionPt`/...)
+# rather than the unqualified `name`/`description` accessors, so the caller can select the thread's
+# language with a pt fallback. Column names stay as the real BigQuery identifiers and are never localized.
 
 DATASET_DETAILS_QUERY = """
 query getDatasetDetails($id: ID!) {
