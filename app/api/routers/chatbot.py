@@ -10,10 +10,12 @@ from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, Us
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
 from app.api.streaming.schemas import StreamEvent
+from app.db.database import AsyncDatabase
 from app.db.models import (
     FeedbackCreate,
     FeedbackPayload,
     FeedbackPublic,
+    Message,
     MessageCreate,
     MessagePublic,
     MessageRole,
@@ -28,11 +30,68 @@ from app.exports import (
     ResultTooLarge,
     materialize_export,
 )
-from app.i18n import t
+from app.i18n import DEFAULT_LANGUAGE, t
 from app.settings import settings
 from app.storage import generate_signed_url
 
 router = APIRouter(prefix="/chatbot")
+
+
+async def _authorize_thread(
+    database: AsyncDatabase, thread_id: str, user_id: str
+) -> Thread:
+    """Fetch a thread and verify the caller owns it.
+
+    Args:
+        database (AsyncDatabase): The database repository.
+        thread_id (str): The thread the caller is trying to reach.
+        user_id (str): The authenticated caller.
+
+    Returns:
+        Thread: The thread, guaranteed to belong to `user_id`.
+
+    Raises:
+        HTTPException: 404 whether the thread is missing or owned by someone else.
+    """
+    thread = await database.get_thread(thread_id)
+
+    if thread is None or str(thread.user_id) != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thread {thread_id} not found",
+        )
+
+    return thread
+
+
+async def _authorize_message(
+    database: AsyncDatabase, message_id: str, user_id: str
+) -> Message:
+    """Fetch a message and verify the caller owns the thread it belongs to.
+
+    Args:
+        database (AsyncDatabase): The database repository.
+        message_id (str): The message the caller is trying to reach.
+        user_id (str): The authenticated caller.
+
+    Returns:
+        Message: The message, whose thread is guaranteed to belong to `user_id`.
+
+    Raises:
+        HTTPException: 404 whether the message is missing or the caller doesn't own its thread.
+    """
+    message = await database.get_message(message_id)
+    thread = (
+        await database.get_thread(message.thread_id) if message is not None else None
+    )
+
+    if message is None or thread is None or str(thread.user_id) != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found",
+        )
+
+    return message
 
 
 @router.get("/threads")
@@ -73,13 +132,9 @@ async def delete_thread_and_checkpoints(
     agent: Agent,
     user_id: UserID,
 ):
-    thread = await database.delete_thread(thread_id)
+    await _authorize_thread(database, thread_id, user_id)
 
-    if thread is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Thread {thread_id} not found",
-        )
+    await database.delete_thread(thread_id)
 
     if agent.checkpointer is not None:
         await agent.checkpointer.adelete_thread(thread_id)
@@ -98,13 +153,7 @@ async def list_messages(
             ),
         )
 
-    thread = await database.get_thread(thread_id)
-
-    if thread is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Thread {thread_id} not found",
-        )
+    thread = await _authorize_thread(database, thread_id, user_id)
 
     return await database.get_messages(thread.id, order_by)
 
@@ -122,13 +171,7 @@ async def send_message(
     running_runs: RunningRuns,
     user_id: UserID,
 ) -> StreamingResponse:
-    thread = await database.get_thread(thread_id)
-
-    if thread is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Thread {thread_id} not found",
-        )
+    thread = await _authorize_thread(database, thread_id, user_id)
 
     run_id = str(uuid.uuid4())
 
@@ -215,23 +258,12 @@ async def export_message_results(
             ),
         )
 
-    message = await database.get_message(message_id)
+    message = await _authorize_message(database, message_id, user_id)
 
-    if message is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Message {message_id} not found",
-        )
-
+    # The thread's language localizes the download-failure details below. _authorize_message
+    # already validated the thread exists and is owned; re-read it to read its language.
     thread = await database.get_thread(message.thread_id)
-
-    # Identical 404 whether the message is missing or the caller doesn't own its
-    # thread, so a non-owner can't tell the two apart (IDOR protection).
-    if thread is None or str(thread.user_id) != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Message {message_id} not found",
-        )
+    language = thread.language if thread else DEFAULT_LANGUAGE
 
     query_handle = await database.get_query_handle(message.id, query_ref)
 
@@ -248,19 +280,19 @@ async def export_message_results(
             destination_table=query_handle.destination_table,
             file_format=file_format,
             filename=_sanitize_filename(
-                query_handle.slug, t("default_export_filename", thread.language)
+                query_handle.slug, t("default_export_filename", language)
             ),
             message_id=str(message.id),
         )
     except ResultTableExpired as e:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail=t("results_expired", thread.language),
+            detail=t("results_expired", language),
         ) from e
     except ResultTooLarge as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=t("results_too_large", thread.language),
+            detail=t("results_too_large", language),
         ) from e
 
     signed_url = generate_signed_url(
@@ -281,6 +313,8 @@ async def upsert_feedback(
     feedback_sender: FeedbackSender,
     user_id: UserID,
 ):
+    await _authorize_message(database, message_id, user_id)
+
     feedback_create = FeedbackCreate(
         **feedback_payload.model_dump(exclude_unset=True),
         message_id=message_id,

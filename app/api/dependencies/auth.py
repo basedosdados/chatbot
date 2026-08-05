@@ -39,7 +39,7 @@ async def _is_user_authorized(token: str) -> bool:
     return payload["has_chatbot_access"]
 
 
-async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> int:
+async def get_user_id(token: Annotated[str | None, Depends(oauth2_scheme)]) -> str:
     if settings.AUTH_DEV_MODE and settings.ENVIRONMENT == "development":
         logger.warning(
             "AUTH DEV MODE ENABLED: bypassing JWT validation, "

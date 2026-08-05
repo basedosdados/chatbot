@@ -114,12 +114,12 @@ class AsyncDatabase:
         return thread
 
     async def get_threads(
-        self, user_id: int, order_by: str | None = None
+        self, user_id: str | UUID, order_by: str | None = None
     ) -> list[Thread]:
         """Get all threads that belongs to a user.
 
         Args:
-            user_id (int): The user unique identifier.
+            user_id (str | UUID): The user unique identifier.
             order_by (str | None, optional): A field by which results should be ordered. Defaults to None.
 
         Returns:
