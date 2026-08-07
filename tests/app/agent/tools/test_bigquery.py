@@ -12,9 +12,19 @@ from pytest_mock import MockerFixture
 from app.agent.context import AgentContext
 from app.agent.tools.bigquery import (
     MAX_BYTES_BILLED,
+    MAX_CONTEXT_ROWS,
     decode_table_values,
     execute_bigquery_sql,
 )
+
+
+def _mock_result(rows: list[dict], total_rows: int | None = None) -> MagicMock:
+    """Stand in for BigQuery's RowIterator: iterable over `rows`, and carrying a
+    `total_rows` count (the full result size, which may exceed the fetched rows)."""
+    result = MagicMock()
+    result.__iter__.return_value = iter(rows)
+    result.total_rows = len(rows) if total_rows is None else total_rows
+    return result
 
 
 @pytest.fixture
@@ -69,7 +79,9 @@ class TestExecuteBigQuerySQL:
         mock_dry_run_query_job.statement_type = "SELECT"
 
         mock_query_job = MagicMock()
-        mock_query_job.result.return_value = [{"col1": "value1"}, {"col1": "value2"}]
+        mock_query_job.result.return_value = _mock_result(
+            [{"col1": "value1"}, {"col1": "value2"}]
+        )
         mock_query_job.destination.to_api_repr.return_value = {
             "projectId": "p",
             "datasetId": "d",
@@ -106,7 +118,7 @@ class TestExecuteBigQuerySQL:
         mock_dry_run_query_job.statement_type = "SELECT"
 
         mock_query_job = MagicMock()
-        mock_query_job.result.return_value = [{"col1": "value1"}]
+        mock_query_job.result.return_value = _mock_result([{"col1": "value1"}])
         mock_query_job.destination.to_api_repr.return_value = {
             "projectId": "p",
             "datasetId": "d",
@@ -146,7 +158,7 @@ class TestExecuteBigQuerySQL:
         mock_dry_run_query_job.statement_type = "SELECT"
 
         mock_query_job = MagicMock()
-        mock_query_job.result.return_value = []
+        mock_query_job.result.return_value = _mock_result([])
 
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.side_effect = [
@@ -169,6 +181,91 @@ class TestExecuteBigQuerySQL:
             == "Query returned 0 rows. Review the filters per the empty-result protocol."
         )
         assert message.artifact is None
+
+    def test_large_result_is_truncated_for_context(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """A result larger than the cap only serializes a prefix, flags the truncation,
+        and still mints a download handle over the full (materialized) result."""
+        total = MAX_CONTEXT_ROWS + 500
+        all_rows = [{"n": i} for i in range(total)]
+
+        mock_dry_run_query_job = MagicMock()
+        mock_dry_run_query_job.statement_type = "SELECT"
+
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = _mock_result(all_rows, total_rows=total)
+        mock_query_job.destination.to_api_repr.return_value = {
+            "projectId": "p",
+            "datasetId": "d",
+            "tableId": "t",
+        }
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.side_effect = [
+            mock_dry_run_query_job,
+            mock_query_job,
+        ]
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        message = _invoke_tool(
+            execute_bigquery_sql,
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
+            context=mock_context,
+        )
+
+        output = json.loads(message.content)
+
+        assert output["row_count"] == total
+        assert len(output["rows"]) == MAX_CONTEXT_ROWS
+        assert output["rows"][0] == {"n": 0}
+        assert output["truncated"] is True
+        assert str(total) in output["truncation_note"]
+        # Full result is still downloadable.
+        assert re.fullmatch(r"qr_[0-9a-f]{32}", message.artifact["query_ref"])
+
+    def test_result_at_cap_is_not_flagged_truncated(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """A result exactly at the cap returns every row and no truncation flag."""
+        all_rows = [{"n": i} for i in range(MAX_CONTEXT_ROWS)]
+
+        mock_dry_run_query_job = MagicMock()
+        mock_dry_run_query_job.statement_type = "SELECT"
+
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = _mock_result(all_rows)
+        mock_query_job.destination.to_api_repr.return_value = {
+            "projectId": "p",
+            "datasetId": "d",
+            "tableId": "t",
+        }
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.side_effect = [
+            mock_dry_run_query_job,
+            mock_query_job,
+        ]
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        message = _invoke_tool(
+            execute_bigquery_sql,
+            {"sql_query": "SELECT * FROM project.dataset.table", "slug": "resultado"},
+            context=mock_context,
+        )
+
+        output = json.loads(message.content)
+
+        assert output["row_count"] == MAX_CONTEXT_ROWS
+        assert len(output["rows"]) == MAX_CONTEXT_ROWS
+        assert "truncated" not in output
+        assert "truncation_note" not in output
 
     def test_forbidden_statement_type(
         self, mocker: MockerFixture, mock_context: AgentContext
