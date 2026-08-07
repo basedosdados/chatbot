@@ -1,4 +1,5 @@
 import inspect
+import itertools
 import json
 import uuid
 from functools import cache
@@ -14,6 +15,11 @@ from app.agent.tools.exceptions import handle_tool_errors
 from app.settings import settings
 
 MAX_BYTES_BILLED = 10 * 10**9
+
+# Cap on how many rows are serialized into the agent's context. The full result set
+# is still materialized in BigQuery's destination table, so downloads (via query_ref)
+# get every row regardless — this only keeps a large result from blowing up context.
+MAX_CONTEXT_ROWS = 1000
 
 
 @cache
@@ -83,7 +89,9 @@ def execute_bigquery_sql(
                 labels=labels,
             ),
         )
-        rows = [dict(row) for row in job.result()]
+        result = job.result()
+        total_rows = result.total_rows
+        rows = [dict(row) for row in itertools.islice(result, MAX_CONTEXT_ROWS)]
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
         if reason == "bytesBilledLimitExceeded":
@@ -102,9 +110,18 @@ def execute_bigquery_sql(
     # (~24h TTL), so a later export hands back exactly these rows without re-running.
     query_ref = f"qr_{uuid.uuid4().hex}"
 
-    content = json.dumps(
-        {"row_count": len(rows), "rows": rows}, ensure_ascii=False, default=str
-    )
+    payload = {"row_count": total_rows, "rows": rows}
+
+    # Surface truncation only when it actually happened, so the agent knows the rows
+    # it sees are a subset — and that the full set is still available for download.
+    if total_rows > len(rows):
+        payload["truncated"] = True
+        payload["truncation_note"] = (
+            f"Only the first {len(rows)} of {total_rows} rows are shown here to keep "
+            "the context small. The full result can still be downloaded from the interface."
+        )
+
+    content = json.dumps(payload, ensure_ascii=False, default=str)
 
     artifact = {
         "type": "query_result",
