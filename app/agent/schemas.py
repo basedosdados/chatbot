@@ -1,41 +1,4 @@
-from enum import Enum
-
 from pydantic import BaseModel, Field
-
-
-class TemporalGranularity(str, Enum):
-    """Granularity of the data's temporal coverage."""
-
-    DAY = "day"
-    MONTH = "month"
-    YEAR = "year"
-
-
-class TemporalCoverage(BaseModel):
-    """The interval the SQL query actually filtered on in the answer."""
-
-    period_start: str = Field(
-        description=(
-            "Start of the interval filtered by the SQL query (e.g. '2010' for "
-            "`ano = 2010` or `ano BETWEEN 2010 AND 2012`). Format it to match `granularity`: "
-            "YYYY (year), YYYY-MM (month) or YYYY-MM-DD (day) — e.g. '2010', '2010-01', '2010-01-01'. "
-            "May be narrower than the table's full coverage."
-        )
-    )
-    period_end: str = Field(
-        description=(
-            "End of the interval filtered by the SQL query (e.g. '2010' for "
-            "`ano = 2010`; '2012' for `ano BETWEEN 2010 AND 2012`). Format it to match `granularity`: "
-            "YYYY (year), YYYY-MM (month) or YYYY-MM-DD (day) — e.g. '2012', '2012-01', '2012-01-01'. "
-            "May be narrower than the table's full coverage."
-        )
-    )
-    granularity: TemporalGranularity = Field(
-        description=(
-            "Granularity of `period_start`/`period_end`, matching their format: "
-            "YYYY (year), YYYY-MM (month), YYYY-MM-DD (day)."
-        )
-    )
 
 
 class DataSource(BaseModel):
@@ -73,16 +36,11 @@ class StructuredResponse(BaseModel):
             "on clarification turns. Leave empty (None) when no table is relevant."
         ),
     )
-    temporal_coverage: TemporalCoverage | None = Field(
+    follow_up_prompts: list[str] | None = Field(
         default=None,
         description=(
-            "The interval your SQL query actually filtered. Leave empty (None) when no query "
-            "was run (e.g. a clarification turn) or the answer has no temporal dimension."
-        ),
-    )
-    follow_up_questions: list[str] | None = Field(
-        default=None,
-        description=(
-            "3 suggested follow-up questions (in the user's language) to explore the data further."
+            "3 next prompts the user could send you to explore the data further, each written "
+            "in the user's own voice — a message the user types to you, never a question you ask "
+            "the user. In the user's language."
         ),
     )

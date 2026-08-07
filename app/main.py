@@ -8,7 +8,7 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     SummarizationMiddleware,
 )
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 from psycopg.rows import dict_row
@@ -53,18 +53,23 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             "row_factory": dict_row,
         }
 
-        model = init_chat_model(
+        model = ChatOpenAI(
+            api_key=settings.OPENAI_API_KEY,
             model=settings.MODEL_URI,
-            temperature=settings.MODEL_TEMPERATURE,
-            credentials=settings.GOOGLE_CREDENTIALS,
-            thinking_level=settings.THINKING_LEVEL,
-            include_thoughts=True,
+            reasoning={
+                "effort": settings.REASONING_EFFORT,
+                "summary": "auto",
+            },
         )
 
+        # Once the running context passes the trigger, summarize: older turns
+        # collapse into one summary while the most recent tokens are kept verbatim,
+        # and the summary is built from the full discarded history (no trimming).
         summ_middleware = SummarizationMiddleware(
             model=model,
-            trigger=("fraction", 0.5),
-            keep=("fraction", 0.25),
+            trigger=("tokens", 500_000),
+            keep=("tokens", 100_000),
+            trim_tokens_to_summarize=None,
         )
 
         limit_middleware = ModelCallLimitMiddleware(

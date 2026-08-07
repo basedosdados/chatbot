@@ -72,25 +72,14 @@ async def _fetch_usage_guide(gcp_dataset_id: str, language: LanguageCode) -> str
 @tool
 @handle_tool_errors
 async def search_datasets(query: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Search for datasets in Base dos Dados using keywords.
-
-    CRITICAL: Use individual KEYWORDS only, not full sentences. The search engine uses Elasticsearch.
+    """Search Base dos Dados datasets (Elasticsearch).
 
     Args:
-        query (str): 2-3 keywords maximum. Use Portuguese terms, organization names, or dataset names.
-            Good Examples: "censo", "rais", "ibge", "inep", "educacao", "saude".
-            Avoid: "Brazilian population data by municipality".
+        query (str): 1-3 keywords, never a sentence — a dataset or organization name,
+            else a theme. Start with one keyword; broaden only if it returns empty.
 
     Returns:
-        str: JSON array of datasets. If empty/irrelevant results, try different keywords.
-
-    Strategy: hierarchical funnel — ALWAYS start with a SINGLE keyword and broaden a level only if it returns nothing:
-        1. Dataset name ("censo", "rais", "enem") or organization ("ibge", "inep", "tse").
-        2. Core theme ("educacao", "saude", "economia", "emprego").
-        3. English term ("health", "education").
-        4. A 2-3 word combination only if the levels above fail ("saude ms", "censo municipio").
-
-    Next step: Use `get_dataset_details()` with returned dataset IDs.
+        JSON array of datasets (id, name, description, organizations, tags, themes).
     """
     response = await _client.get(
         url=SEARCH_URL,
@@ -128,23 +117,14 @@ async def search_datasets(query: str, runtime: ToolRuntime[AgentContext]) -> str
 async def get_dataset_details(
     dataset_id: str, runtime: ToolRuntime[AgentContext]
 ) -> str:
-    """Get comprehensive details about a specific dataset including all its tables.
-
-    Use AFTER `search_datasets()` to understand data structure before writing queries.
+    """Get a dataset's tables and metadata by its id.
 
     Args:
-        dataset_id (str): Dataset ID obtained from `search_datasets()`.
-            This is a UUID-like string, not the human-readable name.
+        dataset_id (str): Dataset UUID from `search_datasets()`.
 
     Returns:
-        str: JSON object with complete dataset information, including:
-            - Basic metadata (name, description, tags, themes, organizations).
-            - tables: Array of all tables in the dataset with:
-                - gcp_id: Full BigQuery table reference (`project.dataset.table`).
-                - table descriptions explaining what each table contains.
-            - usage_guide: Provide key information and best practices for using the dataset.
-
-    Next step: Use `get_table_details()` with returned table IDs.
+        JSON object — dataset metadata, a `usage_guide`, and `tables`,
+        each with its `gcp_id` (`project.dataset.table`), name, and description.
     """
     response = await _client.post(
         url=GRAPHQL_URL,
@@ -248,24 +228,14 @@ async def get_dataset_details(
 @tool
 @handle_tool_errors
 async def get_table_details(table_id: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Get comprehensive details about a specific table including all its columns.
-
-    Use AFTER `get_dataset_details()` to understand table structure before writing queries.
+    """Get a table's schema and metadata by its id.
 
     Args:
-        table_id (str): Table ID obtained from `get_dataset_details()`.
-            This is typically a UUID-like string, not the human-readable name.
+        table_id (str): Table UUID from `get_dataset_details()`.
 
     Returns:
-        str: JSON object with complete table information, including:
-            - Basic metadata (name, description).
-            - gcp_id: Full BigQuery table reference (`project.dataset.table`).
-            - columns: All column names, types, and descriptions, including
-                `needs_decoding` and `reference_table_id` for coded columns.
-            - partitioned_by: Columns to filter on for cost control.
-            - period_start / period_end: First and last period covered by the table.
-                Format varies (`2024`, `'2026-04-12'`, etc.) — use the value verbatim,
-                matched to the appropriate temporal column (`ano`, `data`, etc.).
+        JSON object — table metadata, `gcp_id`, `period_start`/`period_end`, `partitioned_by`, and
+        `columns` (name, type, description, and the `needs_decoding` / `reference_table_id` flags).
     """
     response = await _client.post(
         url=GRAPHQL_URL,

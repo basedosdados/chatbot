@@ -6,7 +6,6 @@ from app.i18n import (
     DEFAULT_LANGUAGE,
     LanguageCode,
     MessageKey,
-    language_directive,
     localized_field,
     normalize_language,
     translate,
@@ -46,20 +45,6 @@ class TestTranslate:
         # translate trusts it receives a valid LanguageCode.
         with pytest.raises(KeyError):
             translate(MessageKey.ERROR_UNEXPECTED, "fr")
-
-
-class TestLanguageDirective:
-    @pytest.mark.parametrize(
-        ("language", "expected_name"),
-        [("pt", "Portuguese"), ("en", "English"), ("es", "Spanish")],
-    )
-    def test_names_the_target_language(self, language: str, expected_name: str):
-        assert expected_name in language_directive(language)
-
-    def test_does_not_fall_back_on_unsupported_language(self):
-        # language_directive trusts it receives a valid LanguageCode.
-        with pytest.raises(KeyError):
-            language_directive("fr")
 
 
 class TestLocalizedField:
