@@ -49,23 +49,6 @@ def localized_field(node: dict, field: str, language: LanguageCode) -> str | Non
     return node.get(f"{field}{suffix}") or node.get(f"{field}Pt")
 
 
-def language_directive(language: LanguageCode) -> str:
-    """Build the instruction that sets the site's language as the response default.
-
-    Args:
-        language (LanguageCode): A supported language code.
-
-    Returns:
-        str: A one-line directive.
-    """
-    name = _LANGUAGE_NAMES[language]
-
-    return (
-        f"The interface language is {name}. Respond in {name} unless the user clearly "
-        f"writes in another language, in which case respond in that language."
-    )
-
-
 # ===========================================================================
 # ==                    Server-emitted user-facing text                    ==
 # ===========================================================================

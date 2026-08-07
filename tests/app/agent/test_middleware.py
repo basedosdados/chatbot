@@ -1,72 +1,43 @@
 from datetime import date
 
-import pytest
-from langchain.agents import create_agent
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain.agents.middleware import ModelRequest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.agent.context import AgentContext
 from app.agent.middleware import system_prompt_middleware
-from app.i18n import LanguageCode, language_directive
-
-# A template mirroring the real prompt's placeholders (see app.agent.prompts.SYSTEM_PROMPT).
-PROMPT_TEMPLATE = "Today is {current_date}.\n{language_directive}"
+from app.agent.prompts import SYSTEM_PROMPT
 
 
-class _SpyModel(GenericFakeChatModel):
-    """Fake model that records the system message it was asked to answer with."""
-
-    system_seen: str = ""
-
-    def _generate(self, messages: list[BaseMessage], *args, **kwargs):
-        type(self).system_seen = messages[0].content
-        return super()._generate(messages, *args, **kwargs)
-
-
-def _system_prompt_for(language: LanguageCode) -> str:
-    model = _SpyModel(messages=iter([AIMessage(content="ok")]))
-    agent = create_agent(
-        model=model,
+def _run_middleware(system_prompt: str, messages: list) -> ModelRequest:
+    """Run system_prompt_middleware over a request and return the request the model
+    would have been called with (the middleware overrides its `system_message`)."""
+    request = ModelRequest(
+        model=None,
+        messages=messages,
+        system_message=SystemMessage(content=system_prompt),
+        tool_choice=None,
         tools=[],
-        system_prompt=PROMPT_TEMPLATE,
-        middleware=[system_prompt_middleware],
-        context_schema=AgentContext,
+        response_format=None,
+        state={"messages": messages},
+        runtime=None,
+        model_settings={},
     )
-    agent.invoke(
-        {"messages": [{"role": "user", "content": "oi"}]},
-        context=AgentContext(thread_id="t", user_id="u", language=language),
-    )
-    return _SpyModel.system_seen
+
+    captured: dict = {}
+
+    def handler(seen: ModelRequest) -> AIMessage:
+        captured["request"] = seen
+        return AIMessage(content="ok")
+
+    system_prompt_middleware.wrap_model_call(request, handler)
+
+    return captured["request"]
 
 
 class TestSystemPromptMiddleware:
-    @pytest.mark.parametrize("language", ["pt", "en", "es"])
-    def test_fills_language_directive_placeholder(self, language: str):
-        system = _system_prompt_for(language)
+    def test_real_system_prompt_renders_without_stray_placeholders(self):
+        """Render the actual SYSTEM_PROMPT: the date must land and no brace may survive."""
+        request = _run_middleware(SYSTEM_PROMPT, [HumanMessage(content="oi")])
+        content = request.system_message.content
 
-        assert language_directive(language) in system
-        assert "{language_directive}" not in system
-
-    def test_fills_current_date_placeholder(self):
-        system = _system_prompt_for("pt")
-
-        assert date.today().isoformat() in system
-        assert "{current_date}" not in system
-
-    def test_user_message_is_left_untouched(self):
-        """The directive rides on the system prompt, never the user's message."""
-        model = _SpyModel(messages=iter([AIMessage(content="ok")]))
-        agent = create_agent(
-            model=model,
-            tools=[],
-            system_prompt=PROMPT_TEMPLATE,
-            middleware=[system_prompt_middleware],
-            context_schema=AgentContext,
-        )
-
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": "oi"}]},
-            context=AgentContext(thread_id="t", user_id="u", language="en"),
-        )
-
-        assert result["messages"][0].content == "oi"
+        assert date.today().isoformat() in content
+        assert "{" not in content and "}" not in content

@@ -35,34 +35,16 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 def execute_bigquery_sql(
     sql_query: str, slug: str, runtime: ToolRuntime[AgentContext]
 ) -> tuple[str, dict[str, Any] | None]:
-    """Execute a SQL query against BigQuery tables from the Base dos Dados database.
-
-    PRECONDITION — only call this when the question is already specific enough to
-    answer with data. For a broad/exploratory question (a bare topic) or one that
-    references an entity the user did not name, do NOT call this tool: explore the
-    metadata and ask the user to refine the question first.
-
-    Use AFTER identifying the right datasets and understanding tables structure.
-    It includes a 10GB processing limit for safety.
+    """Run one read-only GoogleSQL query against Base dos Dados (10GB scan limit).
 
     Args:
-        sql_query (str): Standard GoogleSQL query. Must reference tables using their full `gcp_id` from `get_dataset_details()`.
-        slug (str): A short filename-safe slug for this query's result, in the user's language, lowercase with underscores (e.g. "populacao_por_ano").
-
-    Rules:
-        - Use fully qualified names: `project.dataset.table`.
-        - Select only needed columns, don't use `SELECT *`.
-        - Always filter by partitioned columns when present (see `partitioned_by` in `get_table_details` results). In `JOIN` queries, each partitioned table needs its own partition filter.
-        - Order by relevant columns.
-        - Use `LIMIT` for exploration.
-        - Use appropriate data types in comparisons.
-        - Only `SELECT` statements are allowed.
+        sql_query (str): The query. Follow the SQL rules in the system prompt.
+        slug (str): Short, filename-safe, lowercase_with_underscores name for this result's
+            download, in the user's language. Must be distinct from the other queries in the
+            current request — each slug names a separate download.
 
     Returns:
-        str: A JSON object with:
-                - `row_count`: the number of rows returned.
-                - `rows`: the rows as a JSON array.
-            If the query returns no rows, a short message string is returned instead.
+        JSON object with `row_count` and `rows`.
     """
     client = _bq_client()
 
@@ -100,16 +82,6 @@ def execute_bigquery_sql(
             ) from e
         raise
 
-    if not rows:
-        message = (
-            "Query returned 0 rows. Review the filters per the empty-result protocol."
-        )
-        return json.dumps(message, ensure_ascii=False), None
-
-    # Server-minted handle for the anonymous result table BigQuery already materialized
-    # (~24h TTL), so a later export hands back exactly these rows without re-running.
-    query_ref = f"qr_{uuid.uuid4().hex}"
-
     payload = {"row_count": total_rows, "rows": rows}
 
     # Surface truncation only when it actually happened, so the agent knows the rows
@@ -122,6 +94,14 @@ def execute_bigquery_sql(
         )
 
     content = json.dumps(payload, ensure_ascii=False, default=str)
+
+    # No rows -> nothing to download
+    if not rows:
+        return content, None
+
+    # Server-minted handle for the anonymous result table BigQuery already materialized
+    # (~24h TTL), so a later export hands back exactly these rows without re-running.
+    query_ref = f"qr_{uuid.uuid4().hex}"
 
     artifact = {
         "type": "query_result",
@@ -140,21 +120,15 @@ def decode_table_values(
     runtime: ToolRuntime[AgentContext],
     column_name: str | None = None,
 ) -> str:
-    """Fetch the dictionary mapping (code -> human-readable value) for a coded column.
-
-    REQUIRED whenever a column has `needs_decoding: true` in `get_table_details`,
-    BEFORE writing any SQL that filters, joins, or displays that column.
-
-    Returns pairs of `chave` (the literal value stored in the table) and `valor` (its meaning).
+    """Fetch the code->label dictionary for a coded (`needs_decoding`) column.
 
     Args:
-        table_gcp_id (str): Full BigQuery table reference (`project.dataset.table`).
-        column_name (str | None, optional): The specific column to decode. Always
-            provide this when you know which column you need; passing None returns
-            the entire dictionary for the table and wastes tokens.
+        table_gcp_id (str): Full table reference (`project.dataset.table`).
+        column_name (str | None, optional): The column to decode. Omit only to fetch the
+            whole table's dictionary, which costs more tokens.
 
     Returns:
-        str: JSON array of {nome_coluna, chave, valor} entries.
+        JSON array of {nome_coluna, chave (stored value), valor (meaning)}.
     """
     if "`" in table_gcp_id:
         table_gcp_id = table_gcp_id.replace("`", "")

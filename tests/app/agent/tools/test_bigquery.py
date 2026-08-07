@@ -153,7 +153,7 @@ class TestExecuteBigQuerySQL:
     def test_successful_query_empty_result(
         self, mocker: MockerFixture, mock_context: AgentContext
     ):
-        """A query with no rows returns a message and no downloadable handle."""
+        """A query with no rows returns an empty result and no downloadable handle."""
         mock_dry_run_query_job = MagicMock()
         mock_dry_run_query_job.statement_type = "SELECT"
 
@@ -176,10 +176,7 @@ class TestExecuteBigQuerySQL:
             context=mock_context,
         )
 
-        assert (
-            json.loads(message.content)
-            == "Query returned 0 rows. Review the filters per the empty-result protocol."
-        )
+        assert json.loads(message.content) == {"row_count": 0, "rows": []}
         assert message.artifact is None
 
     def test_large_result_is_truncated_for_context(

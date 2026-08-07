@@ -12,8 +12,6 @@ from app.agent.context import AgentContext
 from app.agent.schemas import (
     DataSource,
     StructuredResponse,
-    TemporalCoverage,
-    TemporalGranularity,
 )
 from app.api.schemas import ConfigDict
 from app.api.streaming.agent_runner import (
@@ -289,12 +287,7 @@ class TestProcessChunk:
             data_sources=[
                 DataSource(dataset_id="ds1", table_id="tb1", name="Tabela 1")
             ],
-            temporal_coverage=TemporalCoverage(
-                period_start="2020",
-                period_end="2025",
-                granularity=TemporalGranularity.YEAR,
-            ),
-            follow_up_questions=["E em 2026?", "Por estado?", "Por região?"],
+            follow_up_prompts=["E em 2026?", "Por estado?", "Por região?"],
         )
 
         # The model node sets `structured_response` alongside the internal
@@ -330,12 +323,7 @@ class TestProcessChunk:
         assert event.data.structured_response["data_sources"] == [
             {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
         ]
-        assert event.data.structured_response["temporal_coverage"] == {
-            "period_start": "2020",
-            "period_end": "2025",
-            "granularity": "year",
-        }
-        assert event.data.structured_response["follow_up_questions"] == [
+        assert event.data.structured_response["follow_up_prompts"] == [
             "E em 2026?",
             "Por estado?",
             "Por região?",
@@ -754,12 +742,7 @@ class TestRunAgent:
             data_sources=[
                 DataSource(dataset_id="ds1", table_id="tb1", name="model fallback")
             ],
-            temporal_coverage=TemporalCoverage(
-                period_start="2020",
-                period_end="2025",
-                granularity=TemporalGranularity.YEAR,
-            ),
-            follow_up_questions=["E em 2026?"],
+            follow_up_prompts=["E em 2026?"],
         )
 
         async def fake_resolve(structured_response: dict[str, Any], language: str):
@@ -815,14 +798,7 @@ class TestRunAgent:
                 "name": "Conjunto DS1 - Tabela TB1",
             }
         ]
-        assert events[0].data.structured_response["temporal_coverage"] == {
-            "period_start": "2020",
-            "period_end": "2025",
-            "granularity": "year",
-        }
-        assert events[0].data.structured_response["follow_up_questions"] == [
-            "E em 2026?"
-        ]
+        assert events[0].data.structured_response["follow_up_prompts"] == ["E em 2026?"]
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
