@@ -12,8 +12,8 @@ from langchain_core.messages import AIMessage
 from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
-from app.api.routers.chatbot import _sanitize_filename
 from app.api.streaming.schemas import StreamEvent
+from app.charts import ChartResultTooLarge, ChartSpecInvalid
 from app.db.database import AsyncDatabase
 from app.db.models import (
     Feedback,
@@ -400,7 +400,7 @@ class TestListMessagesEndpoint:
         assert download["type"] == "query_result"
         assert download["query_ref"] == "qr_test"
         assert download["slug"] == "slug"
-        assert download["formats"] == ["CSV"]
+        assert download["formats"] == ["AVRO", "CSV", "JSONL", "PARQUET"]
         # The internal handles (and their destination tables) never reach the client.
         assert "query_handles" not in message_json
 
@@ -836,7 +836,7 @@ class TestExportMessageResultsEndpoint:
         downloadable_message: Message,
         mocker: MockerFixture,
     ):
-        """A not-offered format (valid for BigQuery, but not offered) is rejected, not downgraded."""
+        """An unsupported format is rejected outright, not downgraded to a default."""
         materialize = mocker.patch(
             "app.api.routers.chatbot.materialize_export",
             return_value=self._exported(),
@@ -844,11 +844,11 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=PARQUET",
+            "?query_ref=qr_test&format=XLSX",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
         # The request is rejected outright — no CSV is silently produced.
         materialize.assert_not_called()
 
@@ -1025,36 +1025,143 @@ class TestExportMessageResultsEndpoint:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-class TestSanitizeFilename:
-    """Tests for _sanitize_filename — the download filename guard."""
+class TestChartMessageResultEndpoint:
+    """Tests for POST /api/v1/chatbot/messages/{message_id}/charts"""
 
-    @pytest.mark.parametrize(
-        ("slug", "expected"),
-        [
-            # A clean slug (what the model is asked to produce) passes through unchanged.
-            ("vendas_por_ano", "vendas_por_ano"),
-            # Hyphens and digits are allowed.
-            ("ideb-2021", "ideb-2021"),
-            # Spaces and punctuation collapse to a single underscore.
-            ("Vendas por ano", "Vendas_por_ano"),
-            ("a   b", "a_b"),
-            ("café & leite!", "café_leite"),
-            # Leading/trailing separators are stripped, not left dangling.
-            ("_vendas_", "vendas"),
-            ("  vendas  ", "vendas"),
-            # Path separators and traversal are neutralized (no slashes or dots survive).
-            ("../../etc/passwd", "etc_passwd"),
-            ("relatorio/2021", "relatorio_2021"),
-            # File extensions are neutralized.
-            ("vendas_por_ano.csv", "vendas_por_ano_csv"),
-            # Accented word characters are preserved (\\w is unicode).
-            ("população", "população"),
-        ],
-    )
-    def test_sanitizes_slug(self, slug: str, expected: str):
-        assert _sanitize_filename(slug, "resultados") == expected
+    DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
 
-    @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
-    def test_falls_back_when_nothing_usable_remains(self, slug: str):
-        """A slug that sanitizes to empty falls back to the provided fallback, never ''."""
-        assert _sanitize_filename(slug, "resultados") == "resultados"
+    @pytest_asyncio.fixture
+    async def chartable_message(
+        self, database: AsyncDatabase, thread: Thread
+    ) -> Message:
+        """An assistant message backed by qr_test, with its query handle persisted."""
+        message = await database.create_message(
+            MessageCreate(
+                thread_id=thread.id,
+                model_uri="mock-model",
+                role=MessageRole.ASSISTANT,
+                content="Answer",
+                status=MessageStatus.SUCCESS,
+            )
+        )
+        await database.create_query_handles(
+            [
+                QueryHandle(
+                    query_ref="qr_test",
+                    message_id=message.id,
+                    slug="resultado_final",
+                    destination_table=self.DESTINATION,
+                )
+            ]
+        )
+        return message
+
+    def test_returns_spec_with_bound_data(
+        self,
+        client: TestClient,
+        access_token: str,
+        chartable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """The button reads the rows, the model picks encodings, the server binds data."""
+        rows = [{"ano": 2025, "total": 10}]
+        mocker.patch(
+            "app.api.routers.chatbot.read_chart_data",
+            return_value=(["ano", "total"], rows),
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.generate_chart_spec",
+            new=AsyncMock(
+                return_value={"mark": "bar", "encoding": {"x": {"field": "ano"}}}
+            ),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{chartable_message.id}/charts"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        spec = response.json()["spec"]
+        assert spec["mark"] == "bar"
+        assert spec["data"] == {"values": rows}
+
+    def test_unknown_query_ref_404(
+        self, client: TestClient, access_token: str, chartable_message: Message
+    ):
+        """A query_ref not backing the message is rejected."""
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{chartable_message.id}/charts"
+            "?query_ref=qr_other",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_expired_result_410(
+        self,
+        client: TestClient,
+        access_token: str,
+        chartable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A gone result table surfaces as 410 from the BigQuery read."""
+        mocker.patch(
+            "app.api.routers.chatbot.read_chart_data",
+            side_effect=ResultTableExpired("gone"),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{chartable_message.id}/charts"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_410_GONE
+
+    def test_too_many_rows_400(
+        self,
+        client: TestClient,
+        access_token: str,
+        chartable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """An over-cap result is rejected (the button can't aggregate for the user)."""
+        mocker.patch(
+            "app.api.routers.chatbot.read_chart_data",
+            side_effect=ChartResultTooLarge("too many rows"),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{chartable_message.id}/charts"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_unproducible_spec_500(
+        self,
+        client: TestClient,
+        access_token: str,
+        chartable_message: Message,
+        mocker: MockerFixture,
+    ):
+        """A valid request the generator can't satisfy is a server error, not a 4xx."""
+        mocker.patch(
+            "app.api.routers.chatbot.read_chart_data",
+            return_value=(["ano"], [{"ano": 2025}]),
+        )
+        mocker.patch(
+            "app.api.routers.chatbot.generate_chart_spec",
+            new=AsyncMock(side_effect=ChartSpecInvalid("gave up")),
+        )
+
+        response = client.post(
+            url=f"/api/v1/chatbot/messages/{chartable_message.id}/charts"
+            "?query_ref=qr_test",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
