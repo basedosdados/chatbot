@@ -109,6 +109,8 @@ class TestExecuteBigQuerySQL:
         assert output["rows"] == [{"col1": "value1"}, {"col1": "value2"}]
         assert output["row_count"] == 2
         assert re.fullmatch(r"qr_[0-9a-f]{32}", message.artifact["query_ref"])
+        # The handle is surfaced in the content too, so the model can reference it.
+        assert output["query_ref"] == message.artifact["query_ref"]
 
     def test_successful_query_exposes_destination_table_on_artifact(
         self, mocker: MockerFixture, mock_context: AgentContext
