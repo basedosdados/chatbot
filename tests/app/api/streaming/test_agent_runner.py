@@ -61,17 +61,19 @@ def mock_database(
     of opening a real DB connection."""
     db = MagicMock()
 
-    db.create_message = AsyncMock(
-        return_value=Message(
-            id=config["run_id"],
-            thread_id=mock_user_message.thread_id,
-            user_message_id=mock_user_message.id,
-            model_uri=mock_user_message.model_uri,
-            role=MessageRole.ASSISTANT,
-            content="Mock assistant message",
-            status=MessageStatus.SUCCESS,
-        )
+    assistant_message = Message(
+        id=config["run_id"],
+        thread_id=mock_user_message.thread_id,
+        user_message_id=mock_user_message.id,
+        model_uri=mock_user_message.model_uri,
+        role=MessageRole.ASSISTANT,
+        content="Mock assistant message",
+        status=MessageStatus.SUCCESS,
     )
+    # create_message mints the up-front STREAMING placeholder; update_message
+    # writes the terminal state at run end (the only finalize path).
+    db.create_message = AsyncMock(return_value=assistant_message)
+    db.update_message = AsyncMock(return_value=assistant_message)
     db.create_query_handles = AsyncMock(return_value=None)
 
     @asynccontextmanager
@@ -615,9 +617,10 @@ class TestRunAgent:
             queue=queue,
         )
 
-        message = mock_database.create_message.call_args[0][0]
-        assert message.status == MessageStatus.ERROR
-        assert message.content == translate(MessageKey.ERROR_UNEXPECTED, "es")
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.ERROR
+        assert kwargs["content"] == translate(MessageKey.ERROR_UNEXPECTED, "es")
 
     async def test_emits_events_and_persists_success(
         self,
@@ -655,11 +658,16 @@ class TestRunAgent:
         assert events[0].data.content == "Final answer"
         assert events[-1].data.run_id == config["run_id"]
 
+        # Created up front as a STREAMING placeholder, then finalized as SUCCESS.
         mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.SUCCESS
-        assert message.content == "Final answer"
+        placeholder = mock_database.create_message.call_args[0][0]
+        assert isinstance(placeholder, MessageCreate)
+        assert placeholder.status == MessageStatus.STREAMING
+        assert placeholder.content == ""
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.SUCCESS
+        assert kwargs["content"] == "Final answer"
 
     async def test_handle_persist_failure_still_persists_message(
         self,
@@ -721,7 +729,8 @@ class TestRunAgent:
 
         # The handle write was attempted and failed, but the message still persisted
         # and the run completes without a persistence error.
-        mock_database.create_message.assert_called_once()
+        mock_database.create_message.assert_called_once()  # placeholder
+        mock_database.update_message.assert_awaited_once()  # terminal state
         mock_database.create_query_handles.assert_awaited_once()
         assert complete.type == "complete"
         assert complete.data.run_id == config["run_id"]
@@ -800,12 +809,17 @@ class TestRunAgent:
         ]
         assert events[0].data.structured_response["follow_up_prompts"] == ["E em 2026?"]
 
+        # Created up front as a STREAMING placeholder, then finalized as SUCCESS.
         mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.SUCCESS
-        assert message.content == "Final answer"
-        assert message.structured_response == events[0].data.structured_response
+        placeholder = mock_database.create_message.call_args[0][0]
+        assert isinstance(placeholder, MessageCreate)
+        assert placeholder.status == MessageStatus.STREAMING
+        assert placeholder.content == ""
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.SUCCESS
+        assert kwargs["content"] == "Final answer"
+        assert kwargs["structured_response"] == events[0].data.structured_response
 
     async def test_executed_query_derives_download_and_persists_handle(
         self,
@@ -980,11 +994,10 @@ class TestRunAgent:
         assert events[0].data.content == translate(MessageKey.ERROR_UNEXPECTED, "pt")
         assert events[0].data.error_details == {"reason": "agent_failed"}
 
-        mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.ERROR
-        assert message.content == translate(MessageKey.ERROR_UNEXPECTED, "pt")
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.ERROR
+        assert kwargs["content"] == translate(MessageKey.ERROR_UNEXPECTED, "pt")
 
     async def test_model_call_limit_persists_with_dedicated_status(
         self,
@@ -1024,21 +1037,21 @@ class TestRunAgent:
         )
         assert events[-1].data.run_id == config["run_id"]
 
-        mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.MODEL_CALL_LIMIT
-        assert message.content == translate(MessageKey.ERROR_MODEL_CALL_LIMIT, "pt")
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.MODEL_CALL_LIMIT
+        assert kwargs["content"] == translate(MessageKey.ERROR_MODEL_CALL_LIMIT, "pt")
 
-    async def test_complete_still_emitted_when_db_write_fails(
+    async def test_aborts_run_when_placeholder_cannot_be_written(
         self,
         monkeypatch: pytest.MonkeyPatch,
         mock_user_message: Message,
         config: ConfigDict,
         thread_id: str,
     ):
-        """If `database.create_message` raises, the consumer must still
-        receive a `complete` event - otherwise it hangs on `queue.get()`.
+        """If the placeholder can't be written the DB is unhealthy, so the run aborts
+        before the model runs — yet still emits error + complete so the consumer does
+        not hang on `queue.get()`. Persistence stays deterministic: no run without a row.
         """
         db = MagicMock()
         db.create_message = AsyncMock(side_effect=RuntimeError("db down"))
@@ -1055,15 +1068,7 @@ class TestRunAgent:
             "app.api.streaming.agent_runner.AsyncDatabase", lambda session: db
         )
 
-        agent = MagicMock()
-
-        async def astream(*args, **kwargs):
-            yield (
-                "updates",
-                {"model": {"messages": [AIMessage(content="Final answer")]}},
-            )
-
-        agent.astream = astream
+        agent = MagicMock()  # its astream must never be reached
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
 
         await run_agent(
@@ -1079,14 +1084,16 @@ class TestRunAgent:
         )
 
         events = await self._drain(queue)
-        assert [e.type for e in events] == ["final_answer", "complete"]
-        assert events[0].data.content == "Final answer"
+        # The model was never invoked; the run ended with error + complete only.
+        agent.astream.assert_not_called()
+        assert [e.type for e in events] == ["error", "complete"]
+        assert events[0].data.content == translate(MessageKey.ERROR_UNEXPECTED, "pt")
 
         complete = events[-1]
-        assert complete.type == "complete"
         assert complete.data.run_id is None
         assert complete.data.error_details == {"reason": "persistence_failed"}
-        assert "db down" not in str(complete.data.error_details)
+        # No terminal update is attempted — there is no placeholder to update.
+        db.update_message.assert_not_called()
 
     async def test_consumer_cancel_does_not_cancel_producer(
         self,
@@ -1125,11 +1132,16 @@ class TestRunAgent:
         await asyncio.wait_for(task, timeout=2.0)
 
         # Producer persisted the message regardless of consumer presence
+        # Created up front as a STREAMING placeholder, then finalized as SUCCESS.
         mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.SUCCESS
-        assert message.content == "Final answer"
+        placeholder = mock_database.create_message.call_args[0][0]
+        assert isinstance(placeholder, MessageCreate)
+        assert placeholder.status == MessageStatus.STREAMING
+        assert placeholder.content == ""
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.SUCCESS
+        assert kwargs["content"] == "Final answer"
 
         # The complete event is sitting in the queue waiting
         events = await self._drain(queue)
@@ -1180,11 +1192,10 @@ class TestRunAgent:
 
         assert task.cancelled()
 
-        mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.INTERRUPTED
-        assert message.content == translate(MessageKey.ERROR_INTERRUPTED, "pt")
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.INTERRUPTED
+        assert kwargs["content"] == translate(MessageKey.ERROR_INTERRUPTED, "pt")
 
     async def test_cancellation_after_final_answer_preserves_success(
         self,
@@ -1236,8 +1247,13 @@ class TestRunAgent:
 
         assert task.cancelled()
 
+        # Created up front as a STREAMING placeholder, then finalized as SUCCESS.
         mock_database.create_message.assert_called_once()
-        message = mock_database.create_message.call_args[0][0]
-        assert isinstance(message, MessageCreate)
-        assert message.status == MessageStatus.SUCCESS
-        assert message.content == "Final answer"
+        placeholder = mock_database.create_message.call_args[0][0]
+        assert isinstance(placeholder, MessageCreate)
+        assert placeholder.status == MessageStatus.STREAMING
+        assert placeholder.content == ""
+        mock_database.update_message.assert_awaited_once()
+        kwargs = mock_database.update_message.call_args.kwargs
+        assert kwargs["status"] == MessageStatus.SUCCESS
+        assert kwargs["content"] == "Final answer"

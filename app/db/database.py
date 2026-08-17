@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 from uuid import UUID
 
 from loguru import logger
@@ -18,6 +18,7 @@ from app.db.models import (
     FeedbackSyncStatus,
     Message,
     MessageCreate,
+    MessageStatus,
     QueryHandle,
     Thread,
     ThreadCreate,
@@ -175,6 +176,44 @@ class AsyncDatabase:
 
         return message
 
+    async def update_message(
+        self,
+        message_id: str | UUID,
+        *,
+        content: str,
+        events: Any,
+        structured_response: Any,
+        status: MessageStatus,
+    ) -> Message | None:
+        """Write the terminal fields of a streaming message row.
+
+        Args:
+            message_id (str | UUID): The message (run) to finalize.
+            content (str): The final assistant text.
+            events (Any): The serialized stream events, or None.
+            structured_response (Any): The structured response payload, or None.
+            status (MessageStatus): The terminal status to write.
+
+        Returns:
+            Message | None: The updated message, or None if it doesn't exist
+                (e.g. the placeholder was never created).
+        """
+        message = await self.session.get(Message, message_id)
+
+        if message is None:
+            self.logger.warning(f"Message {message_id} not found for update")
+            return None
+
+        message.content = content
+        message.events = events
+        message.structured_response = structured_response
+        message.status = status
+
+        await self.session.commit()
+        await self.session.refresh(message)
+
+        return message
+
     async def get_message(self, message_id: str | UUID) -> Message | None:
         """Get a message from the messages table.
 
@@ -205,9 +244,14 @@ class AsyncDatabase:
         """
         # Eager-load the query handles so `MessagePublic.downloads` can
         # derive the download affordance without a lazy load per message.
+        # STREAMING rows are in-flight placeholders — exclude them so the listing
+        # shows only completed messages, as it did before message-at-turn-start.
         query = (
             select(Message)
-            .where(Message.thread_id == thread_id)
+            .where(
+                Message.thread_id == thread_id,
+                Message.status != MessageStatus.STREAMING,
+            )
             .options(selectinload(Message.query_handles))
         )
         query = self._apply_order_by(query, Message, order_by)
@@ -230,21 +274,30 @@ class AsyncDatabase:
         self.session.add_all(query_handles)
         await self.session.commit()
 
-    async def get_query_handle(
-        self, message_id: str | UUID, query_ref: str
+    async def get_query_handle_from_message(
+        self,
+        query_ref: str,
+        message_id: str | UUID,
     ) -> QueryHandle | None:
-        """Get a stored query handle by its (`message_id`, `query_ref`).
+        """Resolve a query handle by `query_ref`, scoped to a message.
 
         Args:
-            message_id (str | UUID): The message the handle is scoped to.
             query_ref (str): The short handle minted by `execute_bigquery_sql`.
+            message_id (str | UUID): The message the handle is scoped to.
 
         Returns:
             QueryHandle | None: The handle if found, None otherwise.
         """
-        query_handle = await self.session.get(
-            QueryHandle, {"message_id": message_id, "query_ref": query_ref}
+        # query_ref alone is the PK, but the lookup stays scoped to message_id: the
+        # download endpoint relies on that scoping to authorize a handle against the
+        # message the caller already owns.
+        result = await self.session.execute(
+            select(QueryHandle).where(
+                QueryHandle.query_ref == query_ref,
+                QueryHandle.message_id == message_id,
+            )
         )
+        query_handle = result.scalar_one_or_none()
 
         if query_handle is None:
             self.logger.warning(
@@ -252,6 +305,46 @@ class AsyncDatabase:
             )
 
         return query_handle
+
+    async def get_query_handle_from_thread(
+        self, query_ref: str, thread_id: str | UUID
+    ) -> QueryHandle | None:
+        """Resolve a query handle by `query_ref`, scoped to a thread.
+
+        Args:
+            query_ref (str): The globally-unique handle to resolve.
+            thread_id (str | UUID): The thread the handle is scoped to.
+
+        Returns:
+            QueryHandle | None: The handle if found in this thread, None otherwise.
+        """
+        result = await self.session.execute(
+            select(QueryHandle)
+            .join(Message, QueryHandle.message_id == Message.id)
+            .where(QueryHandle.query_ref == query_ref, Message.thread_id == thread_id)
+        )
+
+        return result.scalar_one_or_none()
+
+    async def get_query_handles_by_thread(
+        self, thread_id: str | UUID
+    ) -> list[QueryHandle]:
+        """List every query handle produced in a thread, oldest first.
+
+        Args:
+            thread_id (str | UUID): The thread whose handles to list.
+
+        Returns:
+            list[QueryHandle]: The thread's handles, ordered by creation time.
+        """
+        result = await self.session.execute(
+            select(QueryHandle)
+            .join(Message, QueryHandle.message_id == Message.id)
+            .where(Message.thread_id == thread_id)
+            .order_by(QueryHandle.created_at)
+        )
+
+        return list(result.scalars().all())
 
     # ==================================== Feedback ====================================
     async def upsert_feedback(

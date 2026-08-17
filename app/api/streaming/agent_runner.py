@@ -20,27 +20,24 @@ from app.db.models import (
     MessageStatus,
     QueryHandle,
 )
-from app.exports import CollectedQueryHandle, collect_query_handles
+from app.exports import collect_query_handles
 from app.i18n import LanguageCode, MessageKey, translate
 
 
 def _truncate_json(
     json_string: str, max_list_len: int = 10, max_str_len: int = 300
 ) -> str:
-    """Iteratively truncates a serialized JSON object by shortening lists and strings
-    and adding human-readable placeholders.
+    """Shorten a serialized JSON object's long lists and strings, with placeholders.
 
-    Note:
-        This function only processes JSON objects (dictionaries). If the serialized JSON
-        represents any other type, the original JSON string will be returned unchanged.
+    Non-dict JSON is returned unchanged.
 
     Args:
         json_string (str): The serialized JSON to process.
-        max_list_len (int, optional): The max number of items to keep in a list. Defaults to 10.
-        max_str_len (int, optional): The max length for any single string. Defaults to 300.
+        max_list_len (int, optional): Max items to keep in a list. Defaults to 10.
+        max_str_len (int, optional): Max length for any single string. Defaults to 300.
 
     Returns:
-        str: The truncated, formatted, and serialized JSON object.
+        str: The truncated, re-serialized JSON object.
     """
     try:
         data = json.loads(json_string)
@@ -83,19 +80,15 @@ def _truncate_json(
 
 
 def _process_chunk(chunk: dict[str, Any], language: LanguageCode) -> StreamEvent | None:
-    """Process a streaming chunk from a react agent workflow into a StreamEvent.
+    """Turn a raw agent stream chunk into a StreamEvent.
 
     Args:
         chunk (dict[str, Any]): A raw update chunk from the agent workflow.
-        language (LanguageCode): A supported language code, for localizing server-emitted content.
+        language (LanguageCode): Language for localizing server-emitted content.
 
     Returns:
-        StreamEvent | None: Structured event or None if the chunk is ignored:
-            - "tool_call" for agent messages with tool calls
-            - "tool_output" for tool execution results
-            - "final_answer" for agent messages without tool calls
-            - "model_call_limit" when the model call limit is reached
-            - None for ignored chunks
+        StreamEvent | None: The tool_call, tool_output, final_answer or model_call_limit
+            event, or None for an ignored chunk.
     """
     if "model" in chunk:
         update: dict[str, Any] = chunk["model"]
@@ -189,29 +182,115 @@ def _process_chunk(chunk: dict[str, Any], language: LanguageCode) -> StreamEvent
     return None
 
 
-async def _persist_query_handles(
-    database: AsyncDatabase,
+async def _create_placeholder_message(
     *,
-    message_id: str,
-    collected_handles: list[CollectedQueryHandle],
-):
-    """Persist query handles for a message.
+    run_id: str,
+    thread_id: str,
+    user_message: Message,
+    model_uri: str,
+) -> None:
+    """Create the assistant row up front (id == run_id, STREAMING) so query handles
+    can be persisted against a real FK during the run.
+
+    Raises on failure so the caller aborts the run: persistence is deterministic,
+    and `_finalize_message` only ever updates this row.
 
     Args:
-        database (AsyncDatabase): The repository to persist through.
-        message_id (str): The owning message/run the handles are scoped to.
-        collected_handles: list[CollectedQueryHandle]: Collected query handles.
+        run_id (str): The run id, reused as the message id.
+        thread_id (str): The thread the message belongs to.
+        user_message (Message): The user message driving the run.
+        model_uri (str): Model URI.
     """
+    message_create = MessageCreate(
+        id=run_id,
+        thread_id=thread_id,
+        user_message_id=user_message.id,
+        model_uri=model_uri,
+        role=MessageRole.ASSISTANT,
+        content="",
+        status=MessageStatus.STREAMING,
+    )
+    async with sessionmaker() as session:
+        await AsyncDatabase(session).create_message(message_create)
+
+
+async def _persist_query_handles(
+    *,
+    run_id: str,
+    tool_outputs: list[ToolOutput],
+) -> None:
+    """Persist the query handles carried by the tool outputs, scoped to the run's message.
+
+    Best-effort: a failure is logged and never interrupts the run. No dedup — a repeated
+    query_ref would be a bug, so a duplicate-key insert surfaces it rather than hiding it.
+
+    Args:
+        run_id (str): The owning message/run the handles are scoped to.
+        tool_outputs (list[ToolOutput]): The tool outputs to scan for query_result artifacts.
+    """
+    collected = collect_query_handles(output.artifact for output in tool_outputs)
+
+    if not collected:
+        return
+
     handles = [
         QueryHandle(
             query_ref=handle.query_ref,
-            message_id=message_id,
+            message_id=run_id,
             slug=handle.slug,
             destination_table=handle.destination_table,
         )
-        for handle in collected_handles
+        for handle in collected
     ]
-    await database.create_query_handles(handles)
+
+    try:
+        async with sessionmaker() as session:
+            await AsyncDatabase(session).create_query_handles(handles)
+    except Exception:
+        logger.exception(f"Failed to persist query handles for run {run_id}:")
+
+
+async def _finalize_message(
+    *,
+    run_id: str,
+    content: str,
+    events: list[dict[str, Any]] | None,
+    structured_response: dict[str, Any] | None,
+    status: MessageStatus,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Write the terminal state onto the placeholder created at run start.
+
+    The placeholder is guaranteed to exist (its creation gates the run), so this only updates.
+
+    Args:
+        run_id (str): The run/message id to finalize.
+        content (str): The assistant message content.
+        events (list[dict[str, Any]] | None): The streamed events to persist.
+        structured_response (dict[str, Any] | None): The structured response, if any.
+        status (MessageStatus): The terminal status to write.
+
+    Returns:
+        tuple[str | None, dict[str, Any] | None]: (message_id, None) on success, or
+            (None, error_details) if the row could not be written.
+    """
+    try:
+        async with sessionmaker() as session:
+            message = await AsyncDatabase(session).update_message(
+                run_id,
+                content=content,
+                events=events,
+                structured_response=structured_response,
+                status=status,
+            )
+        if message is None:
+            logger.error(
+                f"Placeholder message for run {run_id} vanished before finalize"
+            )
+            return None, {"reason": "persistence_failed"}
+        return str(message.id), None
+    except Exception:
+        logger.exception(f"Failed to persist assistant message for run {run_id}:")
+        return None, {"reason": "persistence_failed"}
 
 
 async def run_agent(
@@ -223,27 +302,54 @@ async def run_agent(
     model_uri: str,
     queue: asyncio.Queue[StreamEvent],
 ):
-    """Run the agent to completion and push events onto the queue.
+    """Run the agent to completion, streaming events onto the queue and owning persistence.
 
-    Owns persistence: writes the assistant `messages` row in `finally` and
-    emits a terminal `complete` event carrying either the persisted run_id
-    (on success) or `error_details` (if persistence fails). Exactly one
-    `complete` event is emitted per run.
+    Creates the assistant row up front (STREAMING), persists query handles as tool outputs
+    arrive, writes the terminal state in `finally`, and emits exactly one `complete` event.
 
     Args:
-        agent (CompiledStateGraph): Agent compiled state graph.
+        agent (CompiledStateGraph): The compiled agent graph.
         config (ConfigDict): Config for agent execution.
         context (AgentContext): The run context.
-        thread_id (str): Thread unique identifier.
-        user_message (Message): User message.
+        thread_id (str): Thread identifier.
+        user_message (Message): The user message driving the run.
         model_uri (str): Model URI.
-        queue (asyncio.Queue[StreamEvent]): Events queue.
+        queue (asyncio.Queue[StreamEvent]): Queue the events are pushed onto.
     """
+    run_id = config["run_id"]
     events = []
     assistant_message = ""
     structured_response: dict[str, Any] | None = None
-    collected_handles: list[CollectedQueryHandle] = []
     status: MessageStatus | None = None
+
+    # Create the assistant row up front so query handles persist eagerly against a real FK
+    # during the run. It stays STREAMING until the finally block writes the terminal state.
+    try:
+        await _create_placeholder_message(
+            run_id=run_id,
+            thread_id=thread_id,
+            user_message=user_message,
+            model_uri=model_uri,
+        )
+    except Exception:
+        logger.exception(f"Failed to create placeholder message for run {run_id}:")
+        error_details = {"reason": "persistence_failed"}
+        await queue.put(
+            StreamEvent(
+                type="error",
+                data=EventData(
+                    content=translate(MessageKey.ERROR_UNEXPECTED, context.language),
+                    error_details=error_details,
+                ),
+            )
+        )
+        await queue.put(
+            StreamEvent(
+                type="complete",
+                data=EventData(run_id=None, error_details=error_details),
+            )
+        )
+        return
 
     try:
         async for mode, chunk in agent.astream(  # pragma: no cover
@@ -261,11 +367,11 @@ async def run_agent(
                 continue
 
             if event.type == "tool_output":
-                # Collect every query handle from the execute_bigquery_sql
-                # tool artifacts, for lazy on-click downloads.
-                collect_query_handles(
-                    (output.artifact for output in event.data.tool_outputs),
-                    collected_handles,
+                # Persist each query handle as its tool output arrives, so a later
+                # tool in the same run (or a later turn) can resolve it from the DB.
+                await _persist_query_handles(
+                    run_id=run_id,
+                    tool_outputs=event.data.tool_outputs,
                 )
             elif event.type == "final_answer":
                 # Resolve data source names to a localized "{dataset_name} — {table_name}".
@@ -304,42 +410,13 @@ async def run_agent(
         events.append(event.model_dump())
         await queue.put(event)
     finally:
-        message_create = MessageCreate(
-            id=config["run_id"],
-            thread_id=thread_id,
-            user_message_id=user_message.id,
-            model_uri=model_uri,
-            role=MessageRole.ASSISTANT,
+        message_id, error_details = await _finalize_message(
+            run_id=run_id,
             content=assistant_message,
             events=events or None,
             structured_response=structured_response,
             status=status or MessageStatus.ERROR,
         )
-        try:
-            async with sessionmaker() as session:
-                database = AsyncDatabase(session)
-                message = await database.create_message(message_create)
-                message_id = str(message.id)
-                error_details = None
-                # Query handles are a best-effort download convenience, persisted after
-                # the message (its own commit) so a handle failure never loses the message.
-                if collected_handles:
-                    try:
-                        await _persist_query_handles(
-                            database,
-                            message_id=message_id,
-                            collected_handles=collected_handles,
-                        )
-                    except Exception:
-                        logger.exception(
-                            f"Failed to persist query handles for run {config['run_id']}:"
-                        )
-        except Exception:
-            logger.exception(
-                f"Failed to persist assistant message for run {config['run_id']}:"
-            )
-            message_id = None
-            error_details = {"reason": "persistence_failed"}
         await queue.put(
             StreamEvent(
                 type="complete",

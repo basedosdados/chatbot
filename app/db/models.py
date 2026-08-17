@@ -57,6 +57,10 @@ class MessageRole(str, Enum):
 
 
 class MessageStatus(str, Enum):
+    # Non-terminal: the assistant row is created up front and stays STREAMING while
+    # the run is in flight (hidden from the thread listing) until a terminal status
+    # is written. Every other value is terminal.
+    STREAMING = "STREAMING"
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
     INTERRUPTED = "INTERRUPTED"
@@ -120,12 +124,11 @@ class MessagePublic(MessageCreate):
 class QueryHandle(SQLModel, table=True):
     __tablename__ = "query_handles"
 
-    # Field order defines the composite PK column order (message_id, query_ref) — keep
-    # message_id first to match the migration; reordering these fields changes the PK.
-    message_id: uuid.UUID = Field(foreign_key="message.id", primary_key=True)
+    # query_ref (a globally-unique `qr_<uuid4hex>` minted by execute_bigquery_sql) is
+    # the sole PK; message_id is a plain indexed FK that scopes a handle to the message
+    # that produced it (used for per-message download authorization).
+    message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
 
-    # The `str` column leaves room to shorten it to a model-reproducible
-    # token should exports ever key off the answer again.
     query_ref: str = Field(primary_key=True)
 
     # The model-generated slug for the query.
