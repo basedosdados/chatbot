@@ -1,5 +1,7 @@
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from functools import cache
 from typing import Any, Literal, TypedDict
 
@@ -90,9 +92,21 @@ EXPORT_FORMATS = {
 }
 
 
-# Formats offered to the frontend. Every format in EXPORT_FORMATS
-# is materializable on demand, but only CSV is offered for now.
-OFFERED_EXPORT_FORMATS: list[ExportFormat] = ["CSV"]
+# Formats offered to the frontend: every format in EXPORT_FORMATS, each materializable on
+# demand via a BigQuery extract job. XLSX is the one format left out — an extract job
+# can't emit it (it would mean pulling rows into the pod to build the workbook).
+OFFERED_EXPORT_FORMATS: list[ExportFormat] = ["AVRO", "CSV", "JSONL", "PARQUET"]
+
+# BigQuery's anonymous result tables live ~24h, so a handle older than this points at a
+# table that has almost certainly been garbage-collected. Treat it as expired up front
+# (from the stored `created_at`, no BigQuery call) so exports/charts can degrade to a
+# "re-run the query" prompt instead of a late NotFound.
+RESULT_TABLE_TTL = timedelta(hours=24)
+
+
+def is_result_expired(created_at: datetime) -> bool:
+    """Whether a query handle is old enough that its result table has likely expired."""
+    return datetime.now(timezone.utc) - created_at >= RESULT_TABLE_TTL
 
 
 @cache
@@ -111,21 +125,18 @@ def _extract_table_to_gcs(
 ) -> int:
     """Extract a materialized BigQuery result table to a single GCS object.
 
-    Byte-identical to the referenced table — no query is re-run.
-
     Args:
         destination_table (dict[str, Any]): `TableReference.to_api_repr()` of the result table.
         object_key (str): Destination object key within the export bucket.
         file_format (ExportFormat): The output format.
 
     Returns:
-        int: The size in bytes of the written object.
+        int: Size in bytes of the written object.
 
     Raises:
-        ResultTableExpired: If the result table no longer exists (~24h TTL).
-        ResultTooLarge: If the result set is over `MAX_EXPORT_BYTES`, or too big
-            for a single file despite passing that check.
-        RuntimeError: If the extract reports success but no object was written.
+        ResultTableExpired: The result table no longer exists (~24h TTL).
+        ResultTooLarge: The result set is over `MAX_EXPORT_BYTES` or too big for one file.
+        RuntimeError: The extract reported success but no object was written.
     """
     bucket = settings.GOOGLE_GCS_BUCKET
     gcs_uri = f"gs://{bucket}/{object_key}"
@@ -178,10 +189,7 @@ def materialize_export(
 ) -> ExportedFile:
     """Materialize a query handle as a downloadable GCS object.
 
-    Extracts the result table (see `_extract_table_to_gcs`) to a deterministic,
-    message-scoped key (`query_results/{message_id}/{query_ref}.{ext}`; `query_ref` is
-    only unique within its run). The determinism makes downloads idempotent: a repeat
-    reuses the existing object, and a lifecycle-deleted one is re-extracted in place.
+    The object key is deterministic and message-scoped, so a repeat reuses it.
 
     Args:
         query_ref (str): The handle whose result table is exported.
@@ -194,8 +202,8 @@ def materialize_export(
         ExportedFile: The GCS object (bucket, key, filename, mime type, size) to sign.
 
     Raises:
-        ResultTableExpired: the result table no longer exists (~24h TTL).
-        ResultTooLarge: the result set is too big for a single file.
+        ResultTableExpired: The result table no longer exists (~24h TTL).
+        ResultTooLarge: The result set is too big for a single file.
     """
     bucket = settings.GOOGLE_GCS_BUCKET
     extension = EXPORT_FORMATS[file_format].extension
@@ -220,28 +228,43 @@ def materialize_export(
     )
 
 
+def sanitize_export_filename(slug: str, fallback: str) -> str:
+    """Sanitize a query's slug into a safe base filename (no extension).
+
+    Args:
+        slug (str): The query's slug.
+        fallback (str): Base name to use when the slug yields nothing filesystem-safe.
+
+    Returns:
+        str: A filesystem-safe base filename, without extension.
+    """
+    filename = re.sub(r"[^\w-]+", "_", slug).strip("_")
+    return filename or fallback
+
+
 def collect_query_handles(
     artifacts: Iterable[JsonValue | None],
-    collected_handles: list[CollectedQueryHandle],
-) -> None:
-    """Append the `query_result` handles found in a run's tool-output artifacts.
+) -> list[CollectedQueryHandle]:
+    """Return the `query_result` handles found in a run's tool-output artifacts.
 
-    Picks out the handles minted by the `execute_bigquery_sql` tool and appends each
-    (its `query_ref`, display `slug`, and result table) to `collected_handles` in place.
+    Picks out the handles minted by the `execute_bigquery_sql` tool (each with its
+    `query_ref`, display `slug`, and result table).
 
     Args:
         artifacts (Iterable[JsonValue | None]): The run's tool-output artifacts.
-        collected_handles (list[CollectedQueryHandle]): The run's accumulator, appended to in place.
+
+    Returns:
+        list[CollectedQueryHandle]: The query handles found, in artifact order.
     """
-    for artifact in artifacts:
-        if isinstance(artifact, dict) and artifact.get("type") == "query_result":
-            collected_handles.append(
-                CollectedQueryHandle(
-                    query_ref=artifact["query_ref"],
-                    slug=artifact["slug"],
-                    destination_table=artifact["destination_table"],
-                )
-            )
+    return [
+        CollectedQueryHandle(
+            query_ref=artifact["query_ref"],
+            slug=artifact["slug"],
+            destination_table=artifact["destination_table"],
+        )
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("type") == "query_result"
+    ]
 
 
 def query_result_download(query_ref: str, slug: str) -> QueryResultDownload:
