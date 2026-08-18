@@ -47,9 +47,9 @@ jobs:
           GOOGLE_GCS_BUCKET: mock-bucket
 
           # Mock LLM configuration
+          OPENAI_API_KEY: mock-openai-api-key
           MODEL_URI: mock-model-uri
-          MODEL_TEMPERATURE: 0.0
-          THINKING_LEVEL: low
+          REASONING_EFFORT: medium
 
           # Mock LangSmith configuration
           LANGSMITH_TRACING: false

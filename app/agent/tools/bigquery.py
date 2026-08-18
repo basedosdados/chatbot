@@ -1,4 +1,5 @@
 import inspect
+import itertools
 import json
 import uuid
 from functools import cache
@@ -6,13 +7,19 @@ from typing import Any
 
 from google.api_core.exceptions import GoogleAPICallError, NotFound
 from google.cloud import bigquery as bq
-from langchain_core.runnables import RunnableConfig
+from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
+from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
 from app.settings import settings
 
 MAX_BYTES_BILLED = 10 * 10**9
+
+# Cap on how many rows are serialized into the agent's context. The full result set
+# is still materialized in BigQuery's destination table, so downloads (via query_ref)
+# get every row regardless — this only keeps a large result from blowing up context.
+MAX_CONTEXT_ROWS = 1000
 
 
 @cache
@@ -26,36 +33,18 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 @tool(response_format="content_and_artifact")
 @handle_tool_errors(response_format="content_and_artifact")
 def execute_bigquery_sql(
-    sql_query: str, slug: str, config: RunnableConfig
+    sql_query: str, slug: str, runtime: ToolRuntime[AgentContext]
 ) -> tuple[str, dict[str, Any] | None]:
-    """Execute a SQL query against BigQuery tables from the Base dos Dados database.
-
-    PRECONDITION — only call this when the question is already specific enough to
-    answer with data. For a broad/exploratory question (a bare topic) or one that
-    references an entity the user did not name, do NOT call this tool: explore the
-    metadata and ask the user to refine the question first.
-
-    Use AFTER identifying the right datasets and understanding tables structure.
-    It includes a 10GB processing limit for safety.
+    """Run one read-only GoogleSQL query against Base dos Dados (10GB scan limit).
 
     Args:
-        sql_query (str): Standard GoogleSQL query. Must reference tables using their full `gcp_id` from `get_dataset_details()`.
-        slug (str): A short filename-safe slug for this query's result, in the user's language, lowercase with underscores (e.g. "populacao_por_ano").
-
-    Rules:
-        - Use fully qualified names: `project.dataset.table`.
-        - Select only needed columns, don't use `SELECT *`.
-        - Always filter by partitioned columns when present (see `partitioned_by` in `get_table_details` results). In `JOIN` queries, each partitioned table needs its own partition filter.
-        - Order by relevant columns.
-        - Use `LIMIT` for exploration.
-        - Use appropriate data types in comparisons.
-        - Only `SELECT` statements are allowed.
+        sql_query (str): The query. Follow the SQL rules in the system prompt.
+        slug (str): Short, filename-safe, lowercase_with_underscores name for this result's
+            download, in the user's language. Must be distinct from the other queries in the
+            current request — each slug names a separate download.
 
     Returns:
-        str: A JSON object with:
-                - `row_count`: the number of rows returned.
-                - `rows`: the rows as a JSON array.
-            If the query returns no rows, a short message string is returned instead.
+        JSON object with `row_count` and `rows`.
     """
     client = _bq_client()
 
@@ -69,8 +58,8 @@ def execute_bigquery_sql(
         )
 
     labels = {
-        "thread_id": config.get("configurable", {}).get("thread_id", "unknown"),
-        "user_id": config.get("configurable", {}).get("user_id", "unknown"),
+        "thread_id": runtime.context.thread_id,
+        "user_id": runtime.context.user_id,
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 
@@ -82,7 +71,9 @@ def execute_bigquery_sql(
                 labels=labels,
             ),
         )
-        rows = [dict(row) for row in job.result()]
+        result = job.result()
+        total_rows = result.total_rows
+        rows = [dict(row) for row in itertools.islice(result, MAX_CONTEXT_ROWS)]
     except GoogleAPICallError as e:
         reason = e.errors[0].get("reason") if getattr(e, "errors", None) else None
         if reason == "bytesBilledLimitExceeded":
@@ -91,19 +82,26 @@ def execute_bigquery_sql(
             ) from e
         raise
 
-    if not rows:
-        message = (
-            "Query returned 0 rows. Review the filters per the empty-result protocol."
+    payload = {"row_count": total_rows, "rows": rows}
+
+    # Surface truncation only when it actually happened, so the agent knows the rows
+    # it sees are a subset — and that the full set is still available for download.
+    if total_rows > len(rows):
+        payload["truncated"] = True
+        payload["truncation_note"] = (
+            f"Only the first {len(rows)} of {total_rows} rows are shown here to keep "
+            "the context small. The full result can still be downloaded from the interface."
         )
-        return json.dumps(message, ensure_ascii=False), None
+
+    content = json.dumps(payload, ensure_ascii=False, default=str)
+
+    # No rows -> nothing to download
+    if not rows:
+        return content, None
 
     # Server-minted handle for the anonymous result table BigQuery already materialized
     # (~24h TTL), so a later export hands back exactly these rows without re-running.
     query_ref = f"qr_{uuid.uuid4().hex}"
-
-    content = json.dumps(
-        {"row_count": len(rows), "rows": rows}, ensure_ascii=False, default=str
-    )
 
     artifact = {
         "type": "query_result",
@@ -118,23 +116,19 @@ def execute_bigquery_sql(
 @tool
 @handle_tool_errors
 def decode_table_values(
-    table_gcp_id: str, config: RunnableConfig, column_name: str | None = None
+    table_gcp_id: str,
+    runtime: ToolRuntime[AgentContext],
+    column_name: str | None = None,
 ) -> str:
-    """Fetch the dictionary mapping (code -> human-readable value) for a coded column.
-
-    REQUIRED whenever a column has `needs_decoding: true` in `get_table_details`,
-    BEFORE writing any SQL that filters, joins, or displays that column.
-
-    Returns pairs of `chave` (the literal value stored in the table) and `valor` (its meaning).
+    """Fetch the code->label dictionary for a coded (`needs_decoding`) column.
 
     Args:
-        table_gcp_id (str): Full BigQuery table reference (`project.dataset.table`).
-        column_name (str | None, optional): The specific column to decode. Always
-            provide this when you know which column you need; passing None returns
-            the entire dictionary for the table and wastes tokens.
+        table_gcp_id (str): Full table reference (`project.dataset.table`).
+        column_name (str | None, optional): The column to decode. Omit only to fetch the
+            whole table's dictionary, which costs more tokens.
 
     Returns:
-        str: JSON array of {nome_coluna, chave, valor} entries.
+        JSON array of {nome_coluna, chave (stored value), valor (meaning)}.
     """
     if "`" in table_gcp_id:
         table_gcp_id = table_gcp_id.replace("`", "")
@@ -167,8 +161,8 @@ def decode_table_values(
     search_query += "ORDER BY nome_coluna, chave"
 
     labels = {
-        "thread_id": config.get("configurable", {}).get("thread_id", "unknown"),
-        "user_id": config.get("configurable", {}).get("user_id", "unknown"),
+        "thread_id": runtime.context.thread_id,
+        "user_id": runtime.context.user_id,
         "tool_name": inspect.currentframe().f_code.co_name,
     }
 

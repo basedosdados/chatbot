@@ -8,15 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from app.agent.context import AgentContext
 from app.agent.schemas import (
     DataSource,
     StructuredResponse,
-    TemporalCoverage,
-    TemporalGranularity,
 )
 from app.api.schemas import ConfigDict
 from app.api.streaming.agent_runner import (
-    ErrorMessage,
     _process_chunk,
     _truncate_json,
     run_agent,
@@ -24,6 +22,7 @@ from app.api.streaming.agent_runner import (
 from app.api.streaming.schemas import StreamEvent
 from app.db.models import Message, MessageCreate, MessageRole, MessageStatus
 from app.exports import OFFERED_EXPORT_FORMATS
+from app.i18n import MessageKey, translate
 
 MODEL_URI = "mock-model"
 
@@ -212,7 +211,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_call"
@@ -248,7 +247,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_call"
@@ -260,7 +259,7 @@ class TestProcessChunk:
         """Test agent chunk without tool calls returns final_answer event."""
         chunk = {"model": {"messages": [AIMessage(content="Here is your answer.")]}}
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "final_answer"
@@ -274,7 +273,7 @@ class TestProcessChunk:
         """Test agent chunk with empty messages list returns empty final_answer."""
         chunk = {"model": {"messages": []}}
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "final_answer"
@@ -288,12 +287,7 @@ class TestProcessChunk:
             data_sources=[
                 DataSource(dataset_id="ds1", table_id="tb1", name="Tabela 1")
             ],
-            temporal_coverage=TemporalCoverage(
-                period_start="2020",
-                period_end="2025",
-                granularity=TemporalGranularity.YEAR,
-            ),
-            follow_up_questions=["E em 2026?", "Por estado?", "Por região?"],
+            follow_up_prompts=["E em 2026?", "Por estado?", "Por região?"],
         )
 
         # The model node sets `structured_response` alongside the internal
@@ -316,7 +310,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "final_answer"
@@ -329,12 +323,7 @@ class TestProcessChunk:
         assert event.data.structured_response["data_sources"] == [
             {"dataset_id": "ds1", "table_id": "tb1", "name": "Tabela 1"}
         ]
-        assert event.data.structured_response["temporal_coverage"] == {
-            "period_start": "2020",
-            "period_end": "2025",
-            "granularity": "year",
-        }
-        assert event.data.structured_response["follow_up_questions"] == [
+        assert event.data.structured_response["follow_up_prompts"] == [
             "E em 2026?",
             "Por estado?",
             "Por região?",
@@ -351,7 +340,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "final_answer"
@@ -373,7 +362,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_output"
@@ -412,7 +401,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
         output = event.data.tool_outputs[0]
 
         # In memory the handle is present (run_agent reads destination_table off it) ...
@@ -443,7 +432,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
         output = event.data.tool_outputs[0]
 
         # A client-facing artifact passes through redaction untouched, in memory ...
@@ -479,7 +468,7 @@ class TestProcessChunk:
             ]
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_output"
@@ -502,7 +491,7 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_output"
@@ -512,7 +501,7 @@ class TestProcessChunk:
         """Test tools chunk with unexpected format returns empty tool_outputs."""
         chunk = {"tools": "unexpected string"}
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "tool_output"
@@ -527,32 +516,32 @@ class TestProcessChunk:
             }
         }
 
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
 
         assert event is not None
         assert event.type == "model_call_limit"
-        assert event.data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert event.data.content == translate(MessageKey.ERROR_MODEL_CALL_LIMIT, "pt")
 
     def test_model_call_limit_passthrough_chunk_returns_none(self):
         """Test before_model passthrough chunk (None payload) returns None."""
         chunk = {"ModelCallLimitMiddleware.before_model": None}
-        assert _process_chunk(chunk) is None
+        assert _process_chunk(chunk, "pt") is None
 
     def test_model_call_limit_passthrough_chunk_no_jump_returns_none(self):
         """Test before_model chunk without jump_to returns None."""
         chunk = {"ModelCallLimitMiddleware.before_model": {"messages": []}}
-        assert _process_chunk(chunk) is None
+        assert _process_chunk(chunk, "pt") is None
 
     def test_unrecognized_chunk_returns_none(self):
         """Test unrecognized chunk returns None."""
         chunk = {"unknown_node": {"data": "something"}}
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
         assert event is None
 
     def test_empty_chunk_returns_none(self):
         """Test empty chunk returns None."""
         chunk = {}
-        event = _process_chunk(chunk)
+        event = _process_chunk(chunk, "pt")
         assert event is None
 
 
@@ -566,6 +555,69 @@ class TestRunAgent:
             events.append(event)
             if event.type == "complete":
                 return events
+
+    async def test_forwards_context_to_agent(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """The run context must reach `agent.astream` — that's how tools and the
+        system-prompt middleware receive the thread's language/user/thread ids."""
+        agent = MagicMock()
+        seen = {}
+
+        async def astream(*args, **kwargs):
+            seen["context"] = kwargs.get("context")
+            yield ("updates", {"model": {"messages": [AIMessage(content="ok")]}})
+
+        agent.astream = astream
+        context = AgentContext(thread_id=thread_id, user_id="u", language="es")
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            context=context,
+            queue=queue,
+        )
+
+        assert seen["context"] is context
+
+    async def test_localizes_error_message_to_context_language(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A crash mid-run persists the error message in the thread's language."""
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # pragma: no cover — make this an async generator
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            context=AgentContext(thread_id=thread_id, user_id="u", language="es"),
+            queue=queue,
+        )
+
+        message = mock_database.create_message.call_args[0][0]
+        assert message.status == MessageStatus.ERROR
+        assert message.content == translate(MessageKey.ERROR_UNEXPECTED, "es")
 
     async def test_emits_events_and_persists_success(
         self,
@@ -592,6 +644,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
@@ -656,6 +711,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
@@ -684,15 +742,10 @@ class TestRunAgent:
             data_sources=[
                 DataSource(dataset_id="ds1", table_id="tb1", name="model fallback")
             ],
-            temporal_coverage=TemporalCoverage(
-                period_start="2020",
-                period_end="2025",
-                granularity=TemporalGranularity.YEAR,
-            ),
-            follow_up_questions=["E em 2026?"],
+            follow_up_prompts=["E em 2026?"],
         )
 
-        async def fake_resolve(structured_response: dict[str, Any]):
+        async def fake_resolve(structured_response: dict[str, Any], language: str):
             for source in structured_response.get("data_sources") or []:
                 source["name"] = "Conjunto DS1 - Tabela TB1"
 
@@ -724,6 +777,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
@@ -742,14 +798,7 @@ class TestRunAgent:
                 "name": "Conjunto DS1 - Tabela TB1",
             }
         ]
-        assert events[0].data.structured_response["temporal_coverage"] == {
-            "period_start": "2020",
-            "period_end": "2025",
-            "granularity": "year",
-        }
-        assert events[0].data.structured_response["follow_up_questions"] == [
-            "E em 2026?"
-        ]
+        assert events[0].data.structured_response["follow_up_prompts"] == ["E em 2026?"]
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
@@ -809,6 +858,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
         events = await self._drain(queue)
@@ -879,6 +931,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
@@ -914,19 +969,22 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
         events = await self._drain(queue)
         assert [e.type for e in events] == ["error", "complete"]
-        assert events[0].data.content == ErrorMessage.UNEXPECTED
+        assert events[0].data.content == translate(MessageKey.ERROR_UNEXPECTED, "pt")
         assert events[0].data.error_details == {"reason": "agent_failed"}
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.ERROR
-        assert message.content == ErrorMessage.UNEXPECTED
+        assert message.content == translate(MessageKey.ERROR_UNEXPECTED, "pt")
 
     async def test_model_call_limit_persists_with_dedicated_status(
         self,
@@ -953,19 +1011,24 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
         events = await self._drain(queue)
         assert [e.type for e in events] == ["model_call_limit", "complete"]
-        assert events[0].data.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert events[0].data.content == translate(
+            MessageKey.ERROR_MODEL_CALL_LIMIT, "pt"
+        )
         assert events[-1].data.run_id == config["run_id"]
 
         mock_database.create_message.assert_called_once()
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.MODEL_CALL_LIMIT
-        assert message.content == ErrorMessage.MODEL_CALL_LIMIT_REACHED
+        assert message.content == translate(MessageKey.ERROR_MODEL_CALL_LIMIT, "pt")
 
     async def test_complete_still_emitted_when_db_write_fails(
         self,
@@ -1009,6 +1072,9 @@ class TestRunAgent:
             thread_id=thread_id,
             user_message=mock_user_message,
             model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
             queue=queue,
         )
 
@@ -1048,6 +1114,9 @@ class TestRunAgent:
                 thread_id=thread_id,
                 user_message=mock_user_message,
                 model_uri=MODEL_URI,
+                context=AgentContext(
+                    thread_id="test-thread", user_id="test-user", language="pt"
+                ),
                 queue=queue,
             )
         )
@@ -1094,6 +1163,9 @@ class TestRunAgent:
                 thread_id=thread_id,
                 user_message=mock_user_message,
                 model_uri=MODEL_URI,
+                context=AgentContext(
+                    thread_id="test-thread", user_id="test-user", language="pt"
+                ),
                 queue=queue,
             )
         )
@@ -1112,7 +1184,7 @@ class TestRunAgent:
         message = mock_database.create_message.call_args[0][0]
         assert isinstance(message, MessageCreate)
         assert message.status == MessageStatus.INTERRUPTED
-        assert message.content == ErrorMessage.INTERRUPTED
+        assert message.content == translate(MessageKey.ERROR_INTERRUPTED, "pt")
 
     async def test_cancellation_after_final_answer_preserves_success(
         self,
@@ -1147,6 +1219,9 @@ class TestRunAgent:
                 thread_id=thread_id,
                 user_message=mock_user_message,
                 model_uri=MODEL_URI,
+                context=AgentContext(
+                    thread_id="test-thread", user_id="test-user", language="pt"
+                ),
                 queue=queue,
             )
         )

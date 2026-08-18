@@ -24,8 +24,51 @@ class TestResolveTableName:
 
     @staticmethod
     def _node_response(dataset_name: str | None, table_name: str | None):
-        node = {"name": table_name, "dataset": {"name": dataset_name}}
+        node = {"namePt": table_name, "dataset": {"namePt": dataset_name}}
         return {"data": {"allTable": {"edges": [{"node": node}]}}}
+
+    @staticmethod
+    def _bilingual_response(pt: tuple[str, str], en: tuple[str, str]):
+        node = {
+            "namePt": pt[1],
+            "nameEn": en[1],
+            "dataset": {"namePt": pt[0], "nameEn": en[0]},
+        }
+        return {"data": {"allTable": {"edges": [{"node": node}]}}}
+
+    @respx.mock
+    async def test_resolves_in_requested_language(self):
+        """The resolved name uses the requested language's fields."""
+        respx.post(_GRAPHQL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=self._bilingual_response(
+                    pt=("Diretórios", "Município"), en=("Directories", "Municipality")
+                ),
+            )
+        )
+
+        assert await _resolve_table_name("tb1", "en") == "Directories — Municipality"
+
+    @respx.mock
+    async def test_cache_is_keyed_per_language(self):
+        """The same table resolves independently per language — the cache must not collide."""
+        route = respx.post(_GRAPHQL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=self._bilingual_response(
+                    pt=("Diretórios", "Município"), en=("Directories", "Municipality")
+                ),
+            )
+        )
+
+        pt_name = await _resolve_table_name("tb1", "pt")
+        en_name = await _resolve_table_name("tb1", "en")
+
+        assert pt_name == "Diretórios — Município"
+        assert en_name == "Directories — Municipality"
+        # Two distinct cache keys => two lookups (not one shared, wrong-language entry).
+        assert route.call_count == 2
 
     @respx.mock
     async def test_builds_dataset_dash_table_name(self):
@@ -36,7 +79,10 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") == "Diretórios Brasileiros — Município"
+        assert (
+            await _resolve_table_name("tb1", "pt")
+            == "Diretórios Brasileiros — Município"
+        )
 
     @respx.mock
     async def test_caches_successful_resolution(self):
@@ -47,8 +93,8 @@ class TestResolveTableName:
             )
         )
 
-        first = await _resolve_table_name("tb1")
-        second = await _resolve_table_name("tb1")
+        first = await _resolve_table_name("tb1", "pt")
+        second = await _resolve_table_name("tb1", "pt")
 
         assert first == second == "Diretórios Brasileiros — Município"
         assert route.call_count == 1
@@ -60,8 +106,10 @@ class TestResolveTableName:
             return_value=httpx.Response(200, json={"data": {"allTable": {"edges": []}}})
         )
 
-        assert await _resolve_table_name("missing") is None
-        assert "missing" not in _TABLE_NAME_CACHE
+        assert await _resolve_table_name("missing", "pt") is None
+        # Cache is keyed (table_id, language); assert the real key
+        # so this actually verifies that None results are not cached.
+        assert ("missing", "pt") not in _TABLE_NAME_CACHE
 
     @respx.mock
     async def test_returns_none_on_missing_dataset_name(self):
@@ -72,7 +120,7 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_missing_table_name(self):
@@ -83,14 +131,14 @@ class TestResolveTableName:
             )
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_http_error(self):
         """A backend error is swallowed and resolves to None."""
         respx.post(_GRAPHQL_URL).mock(return_value=httpx.Response(500))
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
     @respx.mock
     async def test_returns_none_on_json_decode_error(self):
@@ -101,7 +149,7 @@ class TestResolveTableName:
             return_value=httpx.Response(200, content=b"{'malformed': 'json'")
         )
 
-        assert await _resolve_table_name("tb1") is None
+        assert await _resolve_table_name("tb1", "pt") is None
 
 
 class TestResolveDataSourceNames:
@@ -111,7 +159,7 @@ class TestResolveDataSourceNames:
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """A successful resolution overwrites the model-provided fallback name."""
-        resolve_name = AsyncMock(side_effect=lambda tid: f"Conjunto - {tid}")
+        resolve_name = AsyncMock(side_effect=lambda tid, language: f"Conjunto - {tid}")
 
         monkeypatch.setattr(
             "app.api.streaming.data_sources._resolve_table_name", resolve_name
@@ -124,7 +172,7 @@ class TestResolveDataSourceNames:
             ]
         }
 
-        await resolve_data_source_names(structured)
+        await resolve_data_source_names(structured, "pt")
 
         assert structured["data_sources"] == [
             {"dataset_id": "ds1", "table_id": "tb1", "name": "Conjunto - tb1"},
@@ -146,7 +194,7 @@ class TestResolveDataSourceNames:
             ]
         }
 
-        await resolve_data_source_names(structured)
+        await resolve_data_source_names(structured, "pt")
 
         assert structured["data_sources"] == [
             {"dataset_id": "ds1", "table_id": "tb1", "name": "model fallback"}
@@ -162,8 +210,8 @@ class TestResolveDataSourceNames:
             "app.api.streaming.data_sources._resolve_table_name", resolve_name
         )
 
-        await resolve_data_source_names({"data_sources": None})
-        await resolve_data_source_names({"data_sources": []})
-        await resolve_data_source_names({})
+        await resolve_data_source_names({"data_sources": None}, "pt")
+        await resolve_data_source_names({"data_sources": []}, "pt")
+        await resolve_data_source_names({}, "pt")
 
         resolve_name.assert_not_awaited()

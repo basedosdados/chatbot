@@ -119,21 +119,15 @@ class Settings(BaseSettings):
     # ============================================================
     # ==                      LLM settings                      ==
     # ============================================================
+    OPENAI_API_KEY: NonEmptyStr = Field(description="OpenAI API Key.")
     MODEL_URI: NonEmptyStr = Field(
         description=(
-            "Defines the LLM to be used. Refer to the LangChain docs for valid values: "
-            "https://reference.langchain.com/python/langchain/models/#langchain.chat_models.init_chat_model."
+            "Defines the OpenAI model to be used. Refer to the OpenAI api docs "
+            "for valid values: https://developers.openai.com/api/docs/models."
         )
     )
-    MODEL_TEMPERATURE: float = Field(
-        description=(
-            "Controls the randomness of the model’s output. "
-            "A higher number makes responses more creative; "
-            "lower ones make them more deterministic."
-        )
-    )
-    THINKING_LEVEL: Literal["minimum", "low", "medium", "high"] = Field(
-        description="Controls the amount of thinking Gemini models performs before returning a response."
+    REASONING_EFFORT: Literal["none", "low", "medium", "high", "xhigh", "max"] = Field(
+        description="Controls how much GPT-5.6 models think when performing a task."
     )
 
     # ============================================================

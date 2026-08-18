@@ -1,8 +1,10 @@
 import json
 
 import httpx
+from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
+from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
 from app.agent.tools.models import (
     Column,
@@ -12,6 +14,7 @@ from app.agent.tools.models import (
     TableOverview,
 )
 from app.agent.tools.queries import DATASET_DETAILS_QUERY, TABLE_DETAILS_QUERY
+from app.i18n import DEFAULT_LANGUAGE, LanguageCode, localized_field
 from app.settings import settings
 
 # httpx default timeout
@@ -32,38 +35,60 @@ SEARCH_URL = f"{settings.BASEDOSDADOS_BASE_URL}/search/"
 # URL for fetching dataset details
 GRAPHQL_URL = f"{settings.BASEDOSDADOS_BASE_URL}/graphql"
 
-# URL for fetching usage guides
-BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/refs/heads/main/next/content/userGuide/pt"
+# Base URL for fetching usage guides; the language subpath (pt/en/es) is appended
+# per request, falling back to pt when a localized guide does not exist yet.
+BASE_USAGE_GUIDE_URL = "https://raw.githubusercontent.com/basedosdados/website/refs/heads/main/next/content/userGuide"
 
 _client = httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT, read=READ_TIMEOUT))
 
 
-@tool
-@handle_tool_errors
-async def search_datasets(query: str) -> str:
-    """Search for datasets in Base dos Dados using keywords.
+async def _fetch_usage_guide(gcp_dataset_id: str, language: LanguageCode) -> str | None:
+    """Fetch a dataset's usage-guide markdown for `language`, falling back to the default.
 
-    CRITICAL: Use individual KEYWORDS only, not full sentences. The search engine uses Elasticsearch.
+    Localized guides may not exist yet (only the default language is populated today), so
+    a missing localized file falls back to the default-language guide.
 
     Args:
-        query (str): 2-3 keywords maximum. Use Portuguese terms, organization names, or dataset names.
-            Good Examples: "censo", "rais", "ibge", "inep", "educacao", "saude".
-            Avoid: "Brazilian population data by municipality".
+        gcp_dataset_id (str): The BigQuery dataset id.
+        language (LanguageCode): The thread's language.
 
     Returns:
-        str: JSON array of datasets. If empty/irrelevant results, try different keywords.
+        str | None: The guide markdown, or None if no guide exists in any language.
+    """
+    filename = gcp_dataset_id.replace("_", "-")
 
-    Strategy: hierarchical funnel — ALWAYS start with a SINGLE keyword and broaden a level only if it returns nothing:
-        1. Dataset name ("censo", "rais", "enem") or organization ("ibge", "inep", "tse").
-        2. Core theme ("educacao", "saude", "economia", "emprego").
-        3. English term ("health", "education").
-        4. A 2-3 word combination only if the levels above fail ("saude ms", "censo municipio").
+    # Try the requested language, then the default; `fromkeys` preserves order
+    # and drops the duplicate when `language` is already the default.
+    locales = dict.fromkeys((language, DEFAULT_LANGUAGE))
 
-    Next step: Use `get_dataset_details()` with returned dataset IDs.
+    for locale in locales:
+        response = await _client.get(f"{BASE_USAGE_GUIDE_URL}/{locale}/{filename}.md")
+        if response.status_code == httpx.codes.OK:
+            return response.text.strip()
+
+    return None
+
+
+@tool
+@handle_tool_errors
+async def search_datasets(query: str, runtime: ToolRuntime[AgentContext]) -> str:
+    """Search Base dos Dados datasets (Elasticsearch).
+
+    Args:
+        query (str): 1-3 keywords, never a sentence — a dataset or organization name,
+            else a theme. Start with one keyword; broaden only if it returns empty.
+
+    Returns:
+        JSON array of datasets (id, name, description, organizations, tags, themes).
     """
     response = await _client.get(
         url=SEARCH_URL,
-        params={"contains": "tables", "q": query, "page_size": PAGE_SIZE},
+        params={
+            "contains": "tables",
+            "q": query,
+            "page_size": PAGE_SIZE,
+            "locale": runtime.context.language,
+        },
     )
 
     response.raise_for_status()
@@ -89,24 +114,17 @@ async def search_datasets(query: str) -> str:
 
 @tool
 @handle_tool_errors
-async def get_dataset_details(dataset_id: str) -> str:
-    """Get comprehensive details about a specific dataset including all its tables.
-
-    Use AFTER `search_datasets()` to understand data structure before writing queries.
+async def get_dataset_details(
+    dataset_id: str, runtime: ToolRuntime[AgentContext]
+) -> str:
+    """Get a dataset's tables and metadata by its id.
 
     Args:
-        dataset_id (str): Dataset ID obtained from `search_datasets()`.
-            This is a UUID-like string, not the human-readable name.
+        dataset_id (str): Dataset UUID from `search_datasets()`.
 
     Returns:
-        str: JSON object with complete dataset information, including:
-            - Basic metadata (name, description, tags, themes, organizations).
-            - tables: Array of all tables in the dataset with:
-                - gcp_id: Full BigQuery table reference (`project.dataset.table`).
-                - table descriptions explaining what each table contains.
-            - usage_guide: Provide key information and best practices for using the dataset.
-
-    Next step: Use `get_table_details()` with returned table IDs.
+        JSON object — dataset metadata, a `usage_guide`, and `tables`,
+        each with its `gcp_id` (`project.dataset.table`), name, and description.
     """
     response = await _client.post(
         url=GRAPHQL_URL,
@@ -129,29 +147,31 @@ async def get_dataset_details(dataset_id: str) -> str:
 
     dataset = dataset_edges[0]["node"]
 
+    language = runtime.context.language
+
     dataset_id = dataset["id"].split("DatasetNode:")[-1]
-    dataset_name = dataset["name"]
-    dataset_description = dataset.get("description")
+    dataset_name = localized_field(dataset, "name", language)
+    dataset_description = localized_field(dataset, "description", language)
 
     # Tags
     dataset_tags = []
 
     for edge in dataset.get("tags", {}).get("edges", []):
-        if tag := edge.get("node", {}).get("name"):
+        if tag := localized_field(edge.get("node", {}), "name", language):
             dataset_tags.append(tag)
 
     # Themes
     dataset_themes = []
 
     for edge in dataset.get("themes", {}).get("edges", []):
-        if theme := edge.get("node", {}).get("name"):
+        if theme := localized_field(edge.get("node", {}), "name", language):
             dataset_themes.append(theme)
 
     # Organizations
     dataset_organizations = []
 
     for edge in dataset.get("organizations", {}).get("edges", []):
-        if org := edge.get("node", {}).get("name"):
+        if org := localized_field(edge.get("node", {}), "name", language):
             dataset_organizations.append(org)
 
     # Tables
@@ -162,8 +182,8 @@ async def get_dataset_details(dataset_id: str) -> str:
         table = edge["node"]
 
         table_id = table["id"].split("TableNode:")[-1]
-        table_name = table["name"]
-        table_description = table.get("description")
+        table_name = localized_field(table, "name", language)
+        table_description = localized_field(table, "description", language)
 
         cloud_table_edges = table["cloudTables"]["edges"]
         if cloud_table_edges:
@@ -185,16 +205,11 @@ async def get_dataset_details(dataset_id: str) -> str:
             )
         )
 
-    # Fetch usage guide
+    # Fetch usage guide (localized, pt fallback)
     usage_guide = None
 
     if gcp_dataset_id is not None:
-        filename = gcp_dataset_id.replace("_", "-")
-
-        response = await _client.get(f"{BASE_USAGE_GUIDE_URL}/{filename}.md")
-
-        if response.status_code == httpx.codes.OK:
-            usage_guide = response.text.strip()
+        usage_guide = await _fetch_usage_guide(gcp_dataset_id, language)
 
     result = Dataset(
         id=dataset_id,
@@ -212,25 +227,15 @@ async def get_dataset_details(dataset_id: str) -> str:
 
 @tool
 @handle_tool_errors
-async def get_table_details(table_id: str) -> str:
-    """Get comprehensive details about a specific table including all its columns.
-
-    Use AFTER `get_dataset_details()` to understand table structure before writing queries.
+async def get_table_details(table_id: str, runtime: ToolRuntime[AgentContext]) -> str:
+    """Get a table's schema and metadata by its id.
 
     Args:
-        table_id (str): Table ID obtained from `get_dataset_details()`.
-            This is typically a UUID-like string, not the human-readable name.
+        table_id (str): Table UUID from `get_dataset_details()`.
 
     Returns:
-        str: JSON object with complete table information, including:
-            - Basic metadata (name, description).
-            - gcp_id: Full BigQuery table reference (`project.dataset.table`).
-            - columns: All column names, types, and descriptions, including
-                `needs_decoding` and `reference_table_id` for coded columns.
-            - partitioned_by: Columns to filter on for cost control.
-            - period_start / period_end: First and last period covered by the table.
-                Format varies (`2024`, `'2026-04-12'`, etc.) — use the value verbatim,
-                matched to the appropriate temporal column (`ano`, `data`, etc.).
+        JSON object — table metadata, `gcp_id`, `period_start`/`period_end`, `partitioned_by`, and
+        `columns` (name, type, description, and the `needs_decoding` / `reference_table_id` flags).
     """
     response = await _client.post(
         url=GRAPHQL_URL,
@@ -253,9 +258,11 @@ async def get_table_details(table_id: str) -> str:
 
     table = table_edges[0]["node"]
 
+    language = runtime.context.language
+
     table_id = table["id"].split("TableNode:")[-1]
-    table_name = table["name"]
-    table_description = table.get("description")
+    table_name = localized_field(table, "name", language)
+    table_description = localized_field(table, "description", language)
     table_temporal_coverage = table.get("temporalCoverage") or {}
 
     cloud_table_edges = table["cloudTables"]["edges"]
@@ -293,7 +300,7 @@ async def get_table_details(table_id: str) -> str:
             Column(
                 name=column["name"],
                 type=column["bigqueryType"]["name"],
-                description=column.get("description"),
+                description=localized_field(column, "description", language),
                 unit=column.get("measurementUnit"),
                 reference_table_id=directory_table_id,
                 needs_decoding=column["coveredByDictionary"],

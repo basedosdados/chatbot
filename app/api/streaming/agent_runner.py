@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
+from app.agent.context import AgentContext
 from app.agent.schemas import StructuredResponse
 from app.api.schemas import ConfigDict
 from app.api.streaming.data_sources import resolve_data_source_names
@@ -20,19 +21,7 @@ from app.db.models import (
     QueryHandle,
 )
 from app.exports import CollectedQueryHandle, collect_query_handles
-
-
-class ErrorMessage:
-    INTERRUPTED = (
-        "A conexão com o servidor foi interrompida. Por favor, tente novamente."
-    )
-
-    MODEL_CALL_LIMIT_REACHED = (
-        "Essa pergunta gerou um raciocínio muito longo e não consegui chegar a uma conclusão. "
-        "Por favor, tente ser mais específico ou divida sua pergunta em partes menores."
-    )
-
-    UNEXPECTED = "Ocorreu um erro inesperado. Por favor, tente novamente. Se o problema persistir, avise-nos."
+from app.i18n import LanguageCode, MessageKey, translate
 
 
 def _truncate_json(
@@ -93,11 +82,12 @@ def _truncate_json(
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
+def _process_chunk(chunk: dict[str, Any], language: LanguageCode) -> StreamEvent | None:
     """Process a streaming chunk from a react agent workflow into a StreamEvent.
 
     Args:
         chunk (dict[str, Any]): A raw update chunk from the agent workflow.
+        language (LanguageCode): A supported language code, for localizing server-emitted content.
 
     Returns:
         StreamEvent | None: Structured event or None if the chunk is ignored:
@@ -192,7 +182,7 @@ def _process_chunk(chunk: dict[str, Any]) -> StreamEvent | None:
         update = chunk["ModelCallLimitMiddleware.before_model"] or {}
         if update.get("jump_to") == "end":
             event_data = EventData(
-                content=ErrorMessage.MODEL_CALL_LIMIT_REACHED,
+                content=translate(MessageKey.ERROR_MODEL_CALL_LIMIT, language),
                 tool_calls=None,
             )
             return StreamEvent(type="model_call_limit", data=event_data)
@@ -227,6 +217,7 @@ async def _persist_query_handles(
 async def run_agent(
     agent: CompiledStateGraph,
     config: ConfigDict,
+    context: AgentContext,
     thread_id: str,
     user_message: Message,
     model_uri: str,
@@ -242,6 +233,7 @@ async def run_agent(
     Args:
         agent (CompiledStateGraph): Agent compiled state graph.
         config (ConfigDict): Config for agent execution.
+        context (AgentContext): The run context.
         thread_id (str): Thread unique identifier.
         user_message (Message): User message.
         model_uri (str): Model URI.
@@ -257,12 +249,13 @@ async def run_agent(
         async for mode, chunk in agent.astream(  # pragma: no cover
             input={"messages": [{"role": "user", "content": user_message.content}]},
             config=config,
+            context=context,
             stream_mode=["updates", "values"],
         ):
             if mode == "values":
                 continue
 
-            event = _process_chunk(chunk)
+            event = _process_chunk(chunk, context.language)
 
             if event is None:
                 continue
@@ -275,9 +268,11 @@ async def run_agent(
                     collected_handles,
                 )
             elif event.type == "final_answer":
-                # Resolve data source names to {dataset_name}—{table_name}
+                # Resolve data source names to a localized "{dataset_name} — {table_name}".
                 if event.data.structured_response is not None:
-                    await resolve_data_source_names(event.data.structured_response)
+                    await resolve_data_source_names(
+                        event.data.structured_response, context.language
+                    )
                 structured_response = event.data.structured_response
                 # Set the assistant message
                 assistant_message = event.data.content
@@ -290,12 +285,14 @@ async def run_agent(
             await queue.put(event)
     except asyncio.CancelledError:
         if status is None:
-            assistant_message = ErrorMessage.INTERRUPTED
+            assistant_message = translate(
+                MessageKey.ERROR_INTERRUPTED, context.language
+            )
             status = MessageStatus.INTERRUPTED
         raise
     except Exception:
         logger.exception(f"Unexpected error in run {config['run_id']}:")
-        assistant_message = ErrorMessage.UNEXPECTED
+        assistant_message = translate(MessageKey.ERROR_UNEXPECTED, context.language)
         status = MessageStatus.ERROR
         event = StreamEvent(
             type="error",
