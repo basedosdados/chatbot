@@ -16,7 +16,7 @@ from app.agent.tools.dataviz import (
 )
 from app.charts import ChartResultTooLarge
 from app.db.models import QueryHandle
-from app.exports import ExportedFile, ResultTooLarge
+from app.exports import ExportedFile, ResultTableExpired, ResultTooLarge
 
 
 def _exported(size_bytes: int = 2048) -> ExportedFile:
@@ -204,6 +204,25 @@ class TestExportQueryResult:
 
         assert content["status"] == "error"
         assert "too large" in content["message"]
+
+    async def test_expired_during_materialize_is_reported(self, monkeypatch):
+        """The table can vanish between the age check and the extract; report it cleanly."""
+        db = MagicMock()
+        db.get_query_handle_from_thread = AsyncMock(return_value=_handle())
+        _patch_db(monkeypatch, db)
+        monkeypatch.setattr(
+            dataviz_module,
+            "materialize_export",
+            MagicMock(side_effect=ResultTableExpired("gone")),
+        )
+
+        message = await _ainvoke(
+            export_query_result, {"query_ref": "qr_1", "file_format": "CSV"}
+        )
+        content = json.loads(message.content)
+
+        assert content["status"] == "error"
+        assert "expired" in content["message"]
 
 
 class TestChartQueryResult:

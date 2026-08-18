@@ -848,7 +848,8 @@ class TestExportMessageResultsEndpoint:
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Unsupported format" in response.json()["detail"]
         # The request is rejected outright — no CSV is silently produced.
         materialize.assert_not_called()
 

@@ -33,7 +33,6 @@ from app.db.models import (
 )
 from app.exports import (
     OFFERED_EXPORT_FORMATS,
-    ExportFormat,
     ResultTableExpired,
     ResultTooLarge,
     materialize_export,
@@ -253,8 +252,10 @@ async def export_message_result(
     database: AsyncDB,
     user_id: UserID,
     query_ref: str,
-    file_format: ExportFormat = Query("CSV", alias="format"),
+    file_format: str = Query("CSV", alias="format"),
 ):
+    file_format = file_format.upper()
+
     if file_format not in OFFERED_EXPORT_FORMATS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

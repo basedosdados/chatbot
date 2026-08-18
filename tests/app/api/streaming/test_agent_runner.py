@@ -1257,3 +1257,124 @@ class TestRunAgent:
         kwargs = mock_database.update_message.call_args.kwargs
         assert kwargs["status"] == MessageStatus.SUCCESS
         assert kwargs["content"] == "Final answer"
+
+    async def test_no_handles_persisted_for_non_query_tool_output(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """A tool output with no query_result artifact persists no handles."""
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(
+                                content='{"ok": true}',
+                                tool_call_id="1",
+                                name="search_datasets",
+                                status="success",
+                            )
+                        ]
+                    }
+                },
+            )
+            yield ("updates", {"model": {"messages": [AIMessage(content="done")]}})
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
+            queue=queue,
+        )
+
+        events = await self._drain(queue)
+        assert any(e.type == "tool_output" for e in events)
+        mock_database.create_query_handles.assert_not_awaited()
+
+    async def test_finalize_reports_failure_when_placeholder_missing(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """If the placeholder vanished mid-run (update finds nothing), report the failure."""
+        mock_database.update_message = AsyncMock(return_value=None)
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Final answer")]}},
+            )
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
+            queue=queue,
+        )
+
+        complete = (await self._drain(queue))[-1]
+        assert complete.type == "complete"
+        assert complete.data.run_id is None
+        assert complete.data.error_details == {"reason": "persistence_failed"}
+
+    async def test_finalize_reports_failure_when_update_raises(
+        self,
+        mock_database: MagicMock,
+        mock_user_message: Message,
+        config: ConfigDict,
+        thread_id: str,
+    ):
+        """If the terminal update raises, the run still completes with a persistence error."""
+        mock_database.update_message = AsyncMock(side_effect=RuntimeError("db down"))
+        agent = MagicMock()
+
+        async def astream(*args, **kwargs):
+            yield (
+                "updates",
+                {"model": {"messages": [AIMessage(content="Final answer")]}},
+            )
+
+        agent.astream = astream
+        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        await run_agent(
+            agent=agent,
+            config=config,
+            thread_id=thread_id,
+            user_message=mock_user_message,
+            model_uri=MODEL_URI,
+            context=AgentContext(
+                thread_id="test-thread", user_id="test-user", language="pt"
+            ),
+            queue=queue,
+        )
+
+        complete = (await self._drain(queue))[-1]
+        assert complete.type == "complete"
+        assert complete.data.run_id is None
+        assert complete.data.error_details == {"reason": "persistence_failed"}
