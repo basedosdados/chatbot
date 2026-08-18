@@ -124,14 +124,9 @@ class MessagePublic(MessageCreate):
 class QueryHandle(SQLModel, table=True):
     __tablename__ = "query_handles"
 
-    # query_ref (a globally-unique `qr_<uuid4hex>` minted by execute_bigquery_sql) is
-    # the sole PK; message_id is a plain indexed FK that scopes a handle to the message
-    # that produced it (used for per-message download authorization).
-    message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
-
+    # Globally-unique qr_<uuid4hex> minted by execute_bigquery_sql
     query_ref: str = Field(primary_key=True)
-
-    # The model-generated slug for the query.
+    message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
     slug: str
     destination_table: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(

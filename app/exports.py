@@ -92,15 +92,10 @@ EXPORT_FORMATS = {
 }
 
 
-# Formats offered to the frontend: every format in EXPORT_FORMATS, each materializable on
-# demand via a BigQuery extract job. XLSX is the one format left out — an extract job
-# can't emit it (it would mean pulling rows into the pod to build the workbook).
+# Formats offered to the frontend, each materializable on demand via a BigQuery extract job.
 OFFERED_EXPORT_FORMATS: list[ExportFormat] = ["AVRO", "CSV", "JSONL", "PARQUET"]
 
-# BigQuery's anonymous result tables live ~24h, so a handle older than this points at a
-# table that has almost certainly been garbage-collected. Treat it as expired up front
-# (from the stored `created_at`, no BigQuery call) so exports/charts can degrade to a
-# "re-run the query" prompt instead of a late NotFound.
+# BigQuery's anonymous result tables live ~24h.
 RESULT_TABLE_TTL = timedelta(hours=24)
 
 

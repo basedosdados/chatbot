@@ -244,8 +244,8 @@ class AsyncDatabase:
         """
         # Eager-load the query handles so `MessagePublic.downloads` can
         # derive the download affordance without a lazy load per message.
-        # STREAMING rows are in-flight placeholders — exclude them so the listing
-        # shows only completed messages, as it did before message-at-turn-start.
+        # STREAMING rows are in-flight placeholders — exclude them so the
+        # listing shows only completed messages
         query = (
             select(Message)
             .where(
@@ -288,15 +288,13 @@ class AsyncDatabase:
         Returns:
             QueryHandle | None: The handle if found, None otherwise.
         """
-        # query_ref alone is the PK, but the lookup stays scoped to message_id: the
-        # download endpoint relies on that scoping to authorize a handle against the
-        # message the caller already owns.
         result = await self.session.execute(
             select(QueryHandle).where(
                 QueryHandle.query_ref == query_ref,
                 QueryHandle.message_id == message_id,
             )
         )
+
         query_handle = result.scalar_one_or_none()
 
         if query_handle is None:

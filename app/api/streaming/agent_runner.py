@@ -193,7 +193,7 @@ async def _create_placeholder_message(
     can be persisted against a real FK during the run.
 
     Raises on failure so the caller aborts the run: persistence is deterministic,
-    and `_finalize_message` only ever updates this row.
+    and :func:`_finalize_message` only ever updates this row.
 
     Args:
         run_id (str): The run id, reused as the message id.
