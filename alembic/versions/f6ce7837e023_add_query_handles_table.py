@@ -1,4 +1,4 @@
-"""Add query handles table
+"""Add query handles table.
 
 Revision ID: f6ce7837e023
 Revises: 21d5a7602704
