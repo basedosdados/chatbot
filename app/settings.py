@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     GOOGLE_GCS_BUCKET: NonEmptyStr = Field(
         description="GCS bucket where exported query results are stored."
     )
+
+    @computed_field
+    @cached_property
+    def GOOGLE_CREDENTIALS(self) -> Credentials:  # pragma: no cover
+        """Google Cloud credentials."""
+        return Credentials.from_service_account_file(
+            filename=self.GOOGLE_SERVICE_ACCOUNT,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
+    # ============================================================
+    # ==                Exports & Charts settings               ==
+    # ============================================================
     SIGNED_URL_TTL_SECONDS: int = Field(
         default=10 * 60,
         description="Lifetime of signed URLs generated for downloading exported query results.",
@@ -106,15 +119,15 @@ class Settings(BaseSettings):
             "file size. Must stay under BigQuery's 1 GB single-file extract limit."
         ),
     )
-
-    @computed_field
-    @cached_property
-    def GOOGLE_CREDENTIALS(self) -> Credentials:  # pragma: no cover
-        """Google Cloud credentials."""
-        return Credentials.from_service_account_file(
-            filename=self.GOOGLE_SERVICE_ACCOUNT,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+    CHART_MAX_BYTES: int = Field(
+        default=5 * 1024 * 1024,
+        gt=0,
+        le=10 * 1024 * 1024,
+        description=(
+            "Largest chart payload, as the JSON size in bytes of the rows bound inline "
+            "into a chart spec. Bounds the SSE payload, server memory, and in-browser render."
+        ),
+    )
 
     # ============================================================
     # ==                      LLM settings                      ==

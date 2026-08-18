@@ -11,7 +11,6 @@ from langchain_core.messages import SystemMessage
 
 from app import charts
 from app.charts import (
-    CHART_MAX_ROWS,
     VEGA_LITE_SCHEMA,
     ChartHandleNotFound,
     ChartResultTooLarge,
@@ -65,37 +64,41 @@ class TestStripUntrusted:
 
 
 class TestReadChartData:
-    def _client(self, num_rows, rows, columns=("col1",)):
+    def _client(self, rows, columns=("col1",)):
         client = MagicMock()
         client.get_table.return_value = SimpleNamespace(
-            num_rows=num_rows,
             schema=[SimpleNamespace(name=name) for name in columns],
         )
         client.list_rows.return_value = iter(rows)
         return client
 
     def test_reads_columns_and_rows(self, mocker):
-        client = self._client(2, [{"col1": "a"}, {"col1": "b"}])
+        client = self._client([{"col1": "a"}, {"col1": "b"}])
         mocker.patch("app.charts._bq_client", return_value=client)
 
         columns, rows = read_chart_data(DESTINATION)
 
         assert columns == ["col1"]
         assert rows == [{"col1": "a"}, {"col1": "b"}]
-        # Reads one past the cap so an overflow can be detected, never pulling the whole table.
-        assert client.list_rows.call_args.kwargs["max_results"] == CHART_MAX_ROWS + 1
 
-    def test_raises_when_over_row_cap(self, mocker):
-        client = self._client(CHART_MAX_ROWS + 1, [])
+    def test_allows_a_dense_result_within_budget(self, mocker):
+        """A high-cardinality result (e.g. a municipal choropleth ~5.5k rows) is allowed."""
+        rows = [{"id": i} for i in range(6000)]
+        client = self._client(rows, columns=("id",))
         mocker.patch("app.charts._bq_client", return_value=client)
 
-        with pytest.raises(ChartResultTooLarge):
-            read_chart_data(DESTINATION)
+        _, got = read_chart_data(DESTINATION)
 
-    def test_raises_when_row_count_unknown_and_over_cap(self, mocker):
-        """When BigQuery does not report num_rows, an overflow is still rejected, not truncated."""
-        over_cap = [{"col1": "x"}] * (CHART_MAX_ROWS + 1)
-        client = self._client(None, over_cap)
+        assert len(got) == 6000
+
+    def test_raises_when_over_byte_budget(self, mocker, monkeypatch):
+        """The bound data is rejected once it would exceed the payload budget."""
+        monkeypatch.setattr(
+            charts,
+            "settings",
+            charts.settings.model_copy(update={"CHART_MAX_BYTES": 32}),
+        )
+        client = self._client([{"col1": "x" * 100}, {"col1": "y" * 100}])
         mocker.patch("app.charts._bq_client", return_value=client)
 
         with pytest.raises(ChartResultTooLarge):

@@ -17,10 +17,6 @@ from app.settings import settings
 
 VEGA_LITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 
-# A chart must be small and pre-aggregated. Refuse to bind a result larger than
-# this, so a raw, unaggregated table never becomes an unreadable and heavy chart.
-CHART_MAX_ROWS = 1000
-
 # Rows shown to the spec generator. It only needs the shape (columns + a few
 # example values); the full result is bound afterwards by build_chart_spec.
 CHART_SPEC_SAMPLE_ROWS = 10
@@ -83,7 +79,10 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 def read_chart_data(
     destination_table: dict[str, Any],
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """Read a result table's rows for charting, capped at CHART_MAX_ROWS.
+    """Read a result table's rows for charting, capped at settings.CHART_MAX_BYTES.
+
+    Reads row by row and stops as soon as the JSON that would be bound into the spec
+    exceeds the budget, so a huge result is rejected without materializing all of it.
 
     Args:
         destination_table (dict[str, Any]): `TableReference.to_api_repr()` of the result table.
@@ -92,7 +91,7 @@ def read_chart_data(
         tuple[list[str], list[dict[str, Any]]]: Column names and row dicts.
 
     Raises:
-        ChartResultTooLarge: The result has more than CHART_MAX_ROWS rows.
+        ChartResultTooLarge: The bound data would exceed settings.CHART_MAX_BYTES.
         ResultTableExpired: The result table no longer exists (~24h TTL).
     """
     table_ref = bq.TableReference.from_api_repr(destination_table)
@@ -100,27 +99,20 @@ def read_chart_data(
     try:
         table = _bq_client().get_table(table_ref)
 
-        if table.num_rows is not None and table.num_rows > CHART_MAX_ROWS:
-            raise ChartResultTooLarge(
-                f"Result has {table.num_rows} rows, over the {CHART_MAX_ROWS}-row chart "
-                "limit. Aggregate or summarize it in SQL first, then chart the result."
-            )
-
         columns = [field.name for field in table.schema]
 
-        # Read one past the cap so an over-limit result is rejected rather than silently
-        # truncated. The count check above already rejects it when BigQuery reports `num_rows`;
-        # This covers the case where it does not (`num_rows is None`), which would otherwise skip
-        # the check and silently chart only the first CHART_MAX_ROWS rows.
-        rows = [
-            dict(row)
-            for row in _bq_client().list_rows(table_ref, max_results=CHART_MAX_ROWS + 1)
-        ]
-        if len(rows) > CHART_MAX_ROWS:
-            raise ChartResultTooLarge(
-                f"Result has more than the {CHART_MAX_ROWS}-row chart limit. "
-                "Aggregate or summarize it in SQL first, then chart the result."
-            )
+        rows = []
+        size = 0
+        for row in _bq_client().list_rows(table_ref):
+            row = dict(row)
+            size += len(json.dumps(row, ensure_ascii=False, default=str).encode())
+            if size > settings.CHART_MAX_BYTES:
+                raise ChartResultTooLarge(
+                    f"The result is too large to chart (over "
+                    f"{settings.CHART_MAX_BYTES // (1024 * 1024)} MB of data). Aggregate "
+                    "or summarize it in SQL first, then chart the smaller result."
+                )
+            rows.append(row)
     except NotFound as e:
         raise ResultTableExpired(str(e)) from e
 
