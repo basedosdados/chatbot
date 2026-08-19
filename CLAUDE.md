@@ -9,30 +9,38 @@ Canonical reference: https://github.com/basedosdados/backend/wiki/Boas-Pr%C3%A1t
 - `main` — production. Source of truth: resets flow *from* `main`.
 - `staging` — pre-production / QA.
 
-This repo has no `dev` branch; `staging` is the pre-production environment. If the team
-later adds a `dev` branch to match `backend`, insert it here as the integration target.
+This repo has no `dev` branch. If the team later adds one to match `backend`, insert it here
+as a third target and open three PRs instead of two.
 
 ### How work flows
-Cut every feature off `main`, then merge the **same commits** into `staging` and `main` —
-one PR per target. The two branches are meant to hold identical history for each feature.
-They drift apart as changes land at different times, so the team periodically **resets
-`staging` back to `main`** to re-align them. Because resets flow from `main`, a change must
-reach `main` to survive — anything living only on `staging` is discarded at the next reset.
+Every feature starts from `main` and is promoted back into `staging` using **one branch and
+two PRs** — the same head branch is PR'd into `staging` and into `main`. Merging the same
+branch into each target puts the *same commit objects* into both, so the feature's own
+commits share SHAs. Only the merge commits differ, which is expected and fine.
 
-### Feature workflow — same commits into every branch
-1. Cut your feature branch off `main` (ideally just after a reset, when the branches are aligned).
-   Name it by intent: `feat/…`, `fix/…`, `chore/…`, `docs/…`, `refactor/…`. One logical change per branch.
-2. Open a PR from that branch into each target branch: `staging` and `main`.
-3. Merge with a **merge commit or fast-forward — never squash, never cherry-pick** — so the
-   identical commit SHA lands on both branches.
-4. If `staging` has drifted far from `main`, realign it via the periodic reset rather than
-   forcing a noisy cross-branch merge.
+The environments still drift apart as those merge commits accumulate at different times, so
+the team **resets `staging` back to `main` roughly every two weeks**. Because resets flow
+*from* `main`, a change must reach `main` to survive — anything living only on `staging` is
+discarded at the next reset.
+
+### Feature workflow — one branch, two PRs
+1. Cut your feature branch off `main` — never off `staging`.
+   Name it by intent: `feat/…`, `fix/…`, `chore/…`, `docs/…`, `refactor/…`.
+   One logical change per branch.
+2. From that **same branch**, open two PRs: one into `staging`, one into `main`.
+   Do not cut a separate branch per target, and do not cherry-pick.
+3. Merge with a **merge commit or fast-forward — never squash**. A squash mints a new,
+   unrelated commit on each branch and breaks the shared history the resets rely on.
+4. Timing: a `main`-based branch merges cleanly into `staging` when `staging` is aligned
+   with `main` — in practice, shortly after a reset. The longer since the last reset, the
+   more of `main`'s accumulated commits the PR will drag along. If `staging` has drifted
+   far, wait for the reset rather than forcing a noisy merge.
 
 ### Rules for agents working in this repo
 - Never commit or push to `main` or `staging` directly — always a feature branch + PR.
-- Cut features off `main` so the same commit can enter both environments.
-- Merge as merge-commit/FF, **never squash** (squash mints a new SHA per branch) and
-  **never cherry-pick** (also a new SHA) — both break the "same commits everywhere" rule.
+- Always cut features off `main`, never off `staging`.
+- Use **one branch for all PRs**. Never a branch-per-target, never cherry-pick.
+- **Never squash-merge.** Merge commit or fast-forward only.
 - Never merge `staging` into `main` (or vice versa) to promote a feature.
 - Before committing, verify you are on a feature branch: `git branch --show-current`.
 - Do not push without explicit permission.
