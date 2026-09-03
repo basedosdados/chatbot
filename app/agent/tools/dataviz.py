@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 
 from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
-from app.charts import build_chart_spec, generate_chart_spec, load_chart_source
+from app.charts import fetch_chart_data, generate_chart_spec, inject_chart_data
 from app.db.database import AsyncDatabase, sessionmaker
 from app.exports import (
     OFFERED_EXPORT_FORMATS,
@@ -149,9 +149,7 @@ async def chart_query_result(
     Returns:
         A confirmation that the chart was rendered, or an error describing what to fix.
     """
-    handle, columns, rows = await load_chart_source(
-        query_ref, runtime.context.thread_id
-    )
+    handle, columns, rows = await fetch_chart_data(query_ref, runtime.context.thread_id)
 
     spec = await generate_chart_spec(columns, rows, instructions)
 
@@ -161,7 +159,7 @@ async def chart_query_result(
     artifact = {
         "type": "chart",
         "query_ref": handle.query_ref,
-        "spec": build_chart_spec(spec, rows),
+        "spec": inject_chart_data(spec, rows),
     }
 
     content = json.dumps(

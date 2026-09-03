@@ -10,14 +10,6 @@ from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, Us
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
 from app.api.streaming.schemas import StreamEvent
-from app.charts import (
-    DEFAULT_CHART_INSTRUCTIONS,
-    ChartResultTooLarge,
-    ChartSpecInvalid,
-    build_chart_spec,
-    generate_chart_spec,
-    read_chart_data,
-)
 from app.db.database import AsyncDatabase
 from app.db.models import (
     FeedbackCreate,
@@ -305,51 +297,6 @@ async def export_message_result(
     )
 
     return {"url": signed_url}
-
-
-@router.post("/messages/{message_id}/charts")
-async def chart_message_result(
-    message_id: str,
-    database: AsyncDB,
-    user_id: UserID,
-    query_ref: str,
-):
-    message, thread = await _authorize_message(database, message_id, user_id)
-
-    query_handle = await database.get_query_handle_from_message(query_ref, message.id)
-
-    if query_handle is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No chartable results for query_ref '{query_ref}'",
-        )
-
-    try:
-        columns, rows = await asyncio.to_thread(
-            read_chart_data, query_handle.destination_table
-        )
-    except ResultTableExpired as e:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail=translate(MessageKey.RESULTS_EXPIRED, thread.language),
-        ) from e
-    except ChartResultTooLarge as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=translate(MessageKey.RESULTS_TOO_LARGE, thread.language),
-        ) from e
-
-    try:
-        spec = await generate_chart_spec(columns, rows, DEFAULT_CHART_INSTRUCTIONS)
-    except ChartSpecInvalid as e:
-        # Server-side failure: the request was valid, but the model could not
-        # produce a renderable spec after its retries — not a client (4xx) error.
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not generate a chart for this result.",
-        ) from e
-
-    return {"spec": build_chart_spec(spec, rows)}
 
 
 @router.put("/messages/{message_id}/feedback", response_model=FeedbackPublic)

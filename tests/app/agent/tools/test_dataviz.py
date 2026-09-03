@@ -232,7 +232,7 @@ class TestChartQueryResult:
         rows = [{"ano": 2025, "total": 10}]
         monkeypatch.setattr(
             dataviz_module,
-            "load_chart_source",
+            "fetch_chart_data",
             AsyncMock(return_value=(handle, ["ano", "total"], rows)),
         )
         # The spec generator (validate-and-repair loop) is exercised in test_charts;
@@ -268,7 +268,7 @@ class TestChartQueryResult:
     async def test_too_large_result_is_reported(self, monkeypatch):
         monkeypatch.setattr(
             dataviz_module,
-            "load_chart_source",
+            "fetch_chart_data",
             AsyncMock(side_effect=ChartResultTooLarge("2500 rows, over the limit")),
         )
 

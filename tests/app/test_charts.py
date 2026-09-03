@@ -1,7 +1,8 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,16 +12,23 @@ from langchain_core.messages import SystemMessage
 
 from app import charts
 from app.charts import (
+    _CHART_SPEC_INSTRUCTIONS,
+    MAX_CHART_SPEC_ATTEMPTS,
     VEGA_LITE_SCHEMA,
     ChartHandleNotFound,
     ChartResultTooLarge,
     ChartSpec,
     ChartSpecInvalid,
+    _chart_spec_user_prompt,
+    _collect,
+    _fetch_rows,
+    _geo_data_node,
+    _resolve_named_data,
+    _sanitize_chart_spec,
     _validate_chart_spec,
-    build_chart_spec,
+    fetch_chart_data,
     generate_chart_spec,
-    load_chart_source,
-    read_chart_data,
+    inject_chart_data,
 )
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired
@@ -38,7 +46,30 @@ def _handle(query_ref="qr_1", slug="resultado", age=timedelta(0)):
     )
 
 
-class TestStripUntrusted:
+def _choropleth_spec() -> dict:
+    """A states choropleth as the model would emit it (named sources, lookup join)."""
+    return {
+        "data": {"name": "brazil_states"},
+        "transform": [
+            {
+                "lookup": "id",
+                "from": {
+                    "data": {"name": "query_result"},
+                    "key": "sigla_uf",
+                    "fields": ["valor"],
+                },
+            }
+        ],
+        "projection": {"type": "mercator"},
+        "mark": "geoshape",
+        "encoding": {
+            "color": {"field": "valor", "type": "quantitative"},
+            "tooltip": [{"field": "properties.name", "type": "nominal"}],
+        },
+    }
+
+
+class TestSanitizeChartSpec:
     def test_strips_data_datasets_and_urls_recursively(self):
         raw = {
             "data": {"url": "https://evil.example/top.json"},
@@ -52,7 +83,7 @@ class TestStripUntrusted:
             ],
         }
 
-        clean = charts._strip_untrusted(raw)
+        clean = _sanitize_chart_spec(raw)
 
         assert "data" not in clean
         assert "datasets" not in clean
@@ -62,8 +93,19 @@ class TestStripUntrusted:
         # The presentational parts are untouched.
         assert clean["layer"][0]["encoding"] == {"x": {"field": "ano"}}
 
+    def test_keeps_allowlisted_named_sources(self):
+        clean = _sanitize_chart_spec(_choropleth_spec())
 
-class TestReadChartData:
+        assert clean["data"] == {"name": "brazil_states"}
+        assert clean["transform"][0]["from"]["data"] == {"name": "query_result"}
+
+    def test_drops_unknown_named_source_inline_values_and_url(self):
+        assert "data" not in _sanitize_chart_spec({"data": {"name": "secret"}})
+        assert "data" not in _sanitize_chart_spec({"data": {"values": [{"x": 1}]}})
+        assert "data" not in _sanitize_chart_spec({"data": {"url": "http://x"}})
+
+
+class TestFetchRows:
     def _client(self, rows, columns=("col1",)):
         client = MagicMock()
         client.get_table.return_value = SimpleNamespace(
@@ -76,7 +118,7 @@ class TestReadChartData:
         client = self._client([{"col1": "a"}, {"col1": "b"}])
         mocker.patch("app.charts._bq_client", return_value=client)
 
-        columns, rows = read_chart_data(DESTINATION)
+        columns, rows = _fetch_rows(DESTINATION)
 
         assert columns == ["col1"]
         assert rows == [{"col1": "a"}, {"col1": "b"}]
@@ -87,7 +129,7 @@ class TestReadChartData:
         client = self._client(rows, columns=("id",))
         mocker.patch("app.charts._bq_client", return_value=client)
 
-        _, got = read_chart_data(DESTINATION)
+        _, got = _fetch_rows(DESTINATION)
 
         assert len(got) == 6000
 
@@ -102,7 +144,21 @@ class TestReadChartData:
         mocker.patch("app.charts._bq_client", return_value=client)
 
         with pytest.raises(ChartResultTooLarge):
-            read_chart_data(DESTINATION)
+            _fetch_rows(DESTINATION)
+
+    def test_coerces_non_json_types_to_json_native(self, mocker):
+        """BigQuery date/datetime/Decimal values become JSON-serializable rows."""
+        rows = [
+            {"data": date(2025, 12, 31), "temperatura_media": Decimal("24.79")},
+        ]
+        client = self._client(rows, columns=("data", "temperatura_media"))
+        mocker.patch("app.charts._bq_client", return_value=client)
+
+        _, got = _fetch_rows(DESTINATION)
+
+        assert got == [{"data": "2025-12-31", "temperatura_media": "24.79"}]
+        # The bound rows must be plain JSON values, or spec serialization fails.
+        json.dumps(got)
 
     def test_missing_table_maps_to_expired(self, mocker):
         client = MagicMock()
@@ -110,27 +166,78 @@ class TestReadChartData:
         mocker.patch("app.charts._bq_client", return_value=client)
 
         with pytest.raises(ResultTableExpired):
-            read_chart_data(DESTINATION)
+            _fetch_rows(DESTINATION)
 
 
-class TestBuildChartSpec:
-    def test_binds_rows_and_strips_untrusted(self):
-        spec = {
-            "mark": "bar",
-            "encoding": {"x": {"field": "ano"}},
-            "data": {"url": "https://evil.example/x.json"},
-        }
+class TestGeoDataNode:
+    def test_states_node_is_inline_topojson(self):
+        node = _geo_data_node("brazil_states")
+
+        assert node["format"] == {"type": "topojson", "feature": "uf"}
+        assert node["values"]["type"] == "Topology"
+
+    def test_municipality_ids_are_text_for_the_join(self):
+        # The lookup matches geometry `id` to the result's text `id_municipio`, so the
+        # geometry ids must be strings — an int id would silently match nothing.
+        node = _geo_data_node("brazil_municipalities")
+        geometries = node["values"]["objects"]["Munic"]["geometries"]
+
+        assert node["format"] == {"type": "topojson", "feature": "Munic"}
+        assert isinstance(geometries[0]["id"], str)
+
+
+class TestResolveNamedData:
+    def test_resolves_query_result_to_rows(self):
+        rows = [{"sigla_uf": "SP", "valor": 1}]
+
+        assert _resolve_named_data({"name": "query_result"}, rows) == {"values": rows}
+
+    def test_resolves_a_geo_name_to_its_topojson_node(self):
+        node = _resolve_named_data({"name": "brazil_states"}, [])
+
+        assert node["format"] == {"type": "topojson", "feature": "uf"}
+        assert node["values"]["type"] == "Topology"
+
+    def test_resolves_references_nested_anywhere(self):
+        rows = [{"sigla_uf": "SP", "valor": 1}]
+        spec = {"transform": [{"from": {"data": {"name": "query_result"}}}]}
+
+        resolved = _resolve_named_data(spec, rows)
+
+        assert resolved["transform"][0]["from"]["data"] == {"values": rows}
+
+    def test_leaves_unknown_names_and_plain_nodes_untouched(self):
+        # An unknown name is not resolved here (sanitize drops it earlier).
+        assert _resolve_named_data({"name": "secret"}, []) == {"name": "secret"}
+        # A node with no named source passes through unchanged.
+        assert _resolve_named_data({"mark": "bar"}, []) == {"mark": "bar"}
+
+
+class TestInjectChartData:
+    def test_binds_rows_for_a_plain_chart(self):
+        # inject_chart_data trusts an already-sanitized spec (see generate_chart_spec);
+        # it does not strip — it binds the rows a plain chart declared no data for.
+        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
         rows = [{"ano": 2025, "total": 10}]
 
-        chart = build_chart_spec(spec, rows)
+        chart = inject_chart_data(spec, rows)
 
         assert chart["$schema"] == VEGA_LITE_SCHEMA
-        # Model-supplied data is stripped; the server binds the real rows.
         assert chart["data"] == {"values": rows}
         assert chart["mark"] == "bar"
 
+    def test_resolves_named_sources_in_a_choropleth(self):
+        rows = [{"sigla_uf": "SP", "valor": 1}]
 
-class TestLoadChartSource:
+        chart = inject_chart_data(_choropleth_spec(), rows)
+
+        # Top-level geometry becomes inline TopoJSON; the rows fill the lookup source.
+        assert chart["data"]["format"] == {"type": "topojson", "feature": "uf"}
+        assert chart["data"]["values"]["type"] == "Topology"
+        assert chart["transform"][0]["from"]["data"] == {"values": rows}
+
+
+class TestFetchChartData:
     def _patch_db(self, monkeypatch, handle):
         db = MagicMock()
         db.get_query_handle_from_thread = AsyncMock(return_value=handle)
@@ -147,10 +254,10 @@ class TestLoadChartSource:
         handle = _handle(age=timedelta(hours=1))
         self._patch_db(monkeypatch, handle)
         monkeypatch.setattr(
-            charts, "read_chart_data", lambda dest: (["ano"], [{"ano": 2025}])
+            charts, "_fetch_rows", lambda dest: (["ano"], [{"ano": 2025}])
         )
 
-        got_handle, columns, rows = await load_chart_source("qr_1", "test-thread")
+        got_handle, columns, rows = await fetch_chart_data("qr_1", "test-thread")
 
         assert got_handle is handle
         assert columns == ["ano"]
@@ -160,13 +267,26 @@ class TestLoadChartSource:
         self._patch_db(monkeypatch, None)
 
         with pytest.raises(ChartHandleNotFound):
-            await load_chart_source("qr_missing", "test-thread")
+            await fetch_chart_data("qr_missing", "test-thread")
 
     async def test_expired_handle_raises(self, monkeypatch):
         self._patch_db(monkeypatch, _handle(age=timedelta(hours=48)))
 
         with pytest.raises(ResultTableExpired):
-            await load_chart_source("qr_old", "test-thread")
+            await fetch_chart_data("qr_old", "test-thread")
+
+
+class TestCollect:
+    def test_collects_string_values_under_key_recursively(self):
+        node = {
+            "encoding": {"x": {"field": "ano"}, "y": {"field": "total"}},
+            "layer": [{"encoding": {"color": {"field": "uf"}}}],
+        }
+
+        assert _collect(node, "field") == {"ano", "total", "uf"}
+
+    def test_ignores_non_string_values_under_the_key(self):
+        assert _collect({"field": 5, "x": {"field": "ano"}}, "field") == {"ano"}
 
 
 class TestValidateChartSpec:
@@ -225,6 +345,49 @@ class TestValidateChartSpec:
 
         assert any("compile" in error for error in errors)
 
+    def test_unknown_color_scheme_fails_to_compile(self):
+        """An invalid scheme (d3's RdBu) is rejected by the compile step, like any bad value."""
+        spec = {
+            "mark": "rect",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "mes", "type": "ordinal"},
+                "color": {
+                    "field": "temp",
+                    "type": "quantitative",
+                    "scale": {"scheme": "RdBu"},
+                },
+            },
+        }
+
+        errors = _validate_chart_spec(spec, ["ano", "mes", "temp"])
+
+        assert any("compile" in error for error in errors)
+
+    def test_choropleth_spec_is_valid(self):
+        """A choropleth compiles (real geometry) and its geo properties are allowed."""
+        assert _validate_chart_spec(_choropleth_spec(), ["sigla_uf", "valor"]) == []
+
+
+class TestChartSpecUserPrompt:
+    def test_carries_task_data_on_the_first_attempt(self):
+        prompt = _chart_spec_user_prompt(
+            ["ano", "total"], [{"ano": 2025, "total": 10}], "a bar chart", None, []
+        )
+
+        assert "a bar chart" in prompt
+        assert "ano" in prompt and "total" in prompt
+        assert "rejected" not in prompt  # no retry feedback on the first attempt
+
+    def test_echoes_the_rejected_spec_and_errors_on_retry(self):
+        prompt = _chart_spec_user_prompt(
+            ["ano"], [{"ano": 2025}], "a bar chart", {"mark": "nope"}, ["bad column"]
+        )
+
+        assert '"nope"' in prompt  # the model's own rejected spec, echoed back
+        assert "bad column" in prompt  # the validator's reason
+        assert "rejected" in prompt
+
 
 def _structured_reply(spec: dict | None) -> dict:
     """A `with_structured_output(include_raw=True)` result: a parsed spec, or a parse miss."""
@@ -279,7 +442,7 @@ class TestGenerateChartSpec:
         system_message, user_message = model.ainvoke.await_args_list[1].args[0]
         # The durable how-to is a system message; the retry data rides the user message.
         assert isinstance(system_message, SystemMessage)
-        assert system_message.content == charts._CHART_SPEC_INSTRUCTIONS
+        assert system_message.content == _CHART_SPEC_INSTRUCTIONS
         assert '"nope"' in user_message.content  # its own rejected spec, echoed back
         assert "not in the result" in user_message.content  # the validator's reason
 
@@ -313,9 +476,7 @@ class TestGenerateChartSpec:
 
     async def test_raises_after_max_attempts(self, monkeypatch):
         spec = {"mark": "bar", "encoding": {}}
-        messages = [
-            _structured_reply(spec) for _ in range(charts.MAX_CHART_SPEC_ATTEMPTS)
-        ]
+        messages = [_structured_reply(spec) for _ in range(MAX_CHART_SPEC_ATTEMPTS)]
         model = self._model(monkeypatch, *messages)
         monkeypatch.setattr(
             charts, "_validate_chart_spec", lambda spec, columns: ["always bad"]
@@ -324,4 +485,4 @@ class TestGenerateChartSpec:
         with pytest.raises(ChartSpecInvalid):
             await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
 
-        assert model.ainvoke.await_count == charts.MAX_CHART_SPEC_ATTEMPTS
+        assert model.ainvoke.await_count == MAX_CHART_SPEC_ATTEMPTS
