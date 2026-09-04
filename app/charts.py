@@ -142,7 +142,7 @@ def _bq_client() -> bq.Client:  # pragma: no cover
 def _json_default(value: Any) -> Any:
     """Coerce a BigQuery value that JSON can't render natively into a JSON-native one.
 
-    `Decimal` (NUMERIC/BIGNUMERIC) becomes a `float` so quantitative encodings and color
+    `Decimal` (NUMERIC/BIGNUMERIC) becomes a number so quantitative encodings and color
     scales see a number, not a string. Everything else (date/datetime/…) falls back to
     its string form, which Vega-Lite parses for temporal encodings.
 
@@ -153,6 +153,8 @@ def _json_default(value: Any) -> Any:
         Any: A JSON-native replacement.
     """
     if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
         return float(value)
     return str(value)
 
@@ -261,7 +263,7 @@ def _geo_url_node(name: str) -> dict[str, Any]:
     """
     asset = _GEO_ASSETS[name]
     return {
-        "url": f"{settings.GEO_ASSET_URL_BASE}/{asset['file']}",
+        "url": f"{settings.GEO_ASSET_URL_BASE.rstrip('/')}/{asset['file']}",
         "format": {"type": "topojson", "feature": asset["feature"]},
     }
 
@@ -330,7 +332,7 @@ def inject_chart_data(
     """Inject the real geometry and result rows into an already-sanitized spec.
 
     Takes an already sanitized spec from `generate_chart_spec` and makes it render-ready:
-    resolves its named sources (a geo name to inline TopoJSON, `query_result` to the rows)
+    resolves its named sources (a geo name to a TopoJSON URL, `query_result` to the rows)
     and binds the rows as the default data for a plain chart that declared none.
 
     Args:
@@ -494,7 +496,7 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
             f"Available columns: {sorted(columns)}."
         )
 
-    # Resolve named sources (real geometry, empty rows) so a geoshape/lookup spec renders
+    # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
     # its geometry; a normal chart just gets empty data. Rendering (not just VL→Vega compiling)
     # is the only way to validate expression strings in the spec.
     compile_spec = _resolve_named_data(spec, [], _geo_stub_node)
