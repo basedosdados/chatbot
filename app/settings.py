@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     AUTH_DEV_MODE: bool = Field(
         default=False,
         description=(
-            "When enabled, bypasses JWT validation and returns AUTH_DEV_USER_ID for all requests. "
-            "Only works when ENVIRONMENT is set to 'development'. "
+            "When enabled, bypasses JWT validation and returns AUTH_DEV_USER_ID for "
+            "all requests. Only works when ENVIRONMENT is set to 'development'. "
             "WARNING: Must NEVER be enabled in production."
         ),
     )
@@ -128,6 +128,14 @@ class Settings(BaseSettings):
             "into a chart spec. Bounds the SSE payload, server memory, and in-browser render."
         ),
     )
+    GEO_ASSET_URL_BASE: str = Field(
+        default="/chatbot/geo",
+        description=(
+            "Client-facing base path for chart geometry. A choropleth spec references its "
+            "TopoJSON as `{base}/{filename}`, which the browser fetches (and caches) directly. "
+            "Defaults to where the website serves the files statically (public/chatbot/geo/)."
+        ),
+    )
 
     # ============================================================
     # ==                      LLM settings                      ==
@@ -172,8 +180,9 @@ class Settings(BaseSettings):
     LOG_ENQUEUE: bool = Field(
         default=False,
         description=(
-            "Whether the messages to be logged should first pass through a multiprocessing-safe queue before reaching the sink. "
-            "This is useful while logging to a file through multiple processes and also has the advantage of making logging calls non-blocking."
+            "Whether the messages to be logged should first pass through a multiprocessing-safe queue "
+            "before reaching the sink. This is useful while logging to a file through multiple processes "
+            "and also has the advantage of making logging calls non-blocking."
         ),
     )
 

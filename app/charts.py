@@ -1,7 +1,8 @@
 import asyncio
 import json
+from collections.abc import Callable
+from decimal import Decimal
 from functools import cache
-from pathlib import Path
 from typing import Any
 
 import vl_convert as vlc
@@ -28,8 +29,8 @@ MAX_CHART_SPEC_ATTEMPTS = 3
 # Keys that are always stripped anywhere in a model-generated spec for security.
 _UNTRUSTED_KEYS = frozenset({"datasets", "url"})
 
-# Static geographic assets a spec may inject by name for choropleth maps.
-_GEO_DIR = Path(__file__).parent / "assets"
+# Geographic assets a spec may inject by name for choropleth maps. The TopoJSON
+# files are served as static assets by the website (see settings.GEO_ASSET_URL_BASE).
 _GEO_ASSETS: dict[str, dict[str, str]] = {
     "brazil_states": {
         "file": "brazil_states.topojson",
@@ -136,6 +137,24 @@ def _bq_client() -> bq.Client:  # pragma: no cover
     )
 
 
+def _json_default(value: Any) -> Any:
+    """Coerce a BigQuery value that JSON can't render natively into a JSON-native one.
+
+    `Decimal` (NUMERIC/BIGNUMERIC) becomes a `float` so quantitative encodings and color
+    scales see a number, not a string. Everything else (date/datetime/…) falls back to
+    its string form, which Vega-Lite parses for temporal encodings.
+
+    Args:
+        value (Any): The value json.dumps could not serialize.
+
+    Returns:
+        Any: A JSON-native replacement.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    return str(value)
+
+
 def _fetch_rows(
     destination_table: dict[str, Any],
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -167,7 +186,9 @@ def _fetch_rows(
             # Serialize once to both measure the row and coerce BigQuery types
             # (date/datetime/Decimal/…) to JSON-native values. Raw objects are
             # not valid JSON and would fail serialization when the spec is bound.
-            serialized = json.dumps(dict(row), ensure_ascii=False, default=str)
+            serialized = json.dumps(
+                dict(row), ensure_ascii=False, default=_json_default
+            )
             size += len(serialized.encode())
             if size > settings.CHART_MAX_BYTES:
                 raise ChartResultTooLarge(
@@ -223,33 +244,66 @@ async def fetch_chart_data(
 # ===================================================================
 # CHART DATA INJECTION
 # ===================================================================
-@cache
-def _geo_data_node(name: str) -> dict[str, Any]:
-    """Build a Vega-Lite inline-TopoJSON data node for an allowlisted geo source.
+def _geo_url_node(name: str) -> dict[str, Any]:
+    """Build a Vega-Lite TopoJSON data node that points at the geometry by URL.
+
+    The URL is the website's static path for the file; the browser fetches (and caches) the
+    ~megabytes of geometry directly, so it never inflates the spec, the SSE payload, or the
+    persisted `events`.
 
     Args:
         name (str): A geo source name from `_GEO_ASSETS` (e.g. "brazil_states").
 
     Returns:
-        dict[str, Any]: The `data` node — the TopoJSON `values` plus its topojson `format`.
+        dict[str, Any]: The `data` node — a topojson `url` plus its topojson `format`.
     """
     asset = _GEO_ASSETS[name]
-    topojson = json.loads((_GEO_DIR / asset["file"]).read_text(encoding="utf-8"))
     return {
-        "values": topojson,
+        "url": f"{settings.GEO_ASSET_URL_BASE}/{asset['file']}",
         "format": {"type": "topojson", "feature": asset["feature"]},
     }
 
 
-def _resolve_named_data(node: JsonValue, rows: list[dict[str, Any]]) -> JsonValue:
-    """Replace every `{"name": <allowlisted>}` data reference with the real data.
+def _geo_stub_node(name: str) -> dict[str, Any]:
+    """Build a minimal single-feature TopoJSON node for offline spec validation.
 
-    `query_result` resolves to the rows, a geo name to its inline TopoJSON; any other
+    Args:
+        name (str): A geo source name from `_GEO_ASSETS` (e.g. "brazil_states").
+
+    Returns:
+        dict[str, Any]: A `data` node with a tiny inline TopoJSON and its topojson `format`.
+    """
+    feature = _GEO_ASSETS[name]["feature"]
+    stub = {
+        "type": "Topology",
+        "objects": {
+            feature: {
+                "type": "GeometryCollection",
+                "geometries": [
+                    {"type": "Polygon", "id": "0", "properties": {}, "arcs": [[0]]}
+                ],
+            }
+        },
+        "arcs": [[[0, 0], [1, 0], [0, 1], [0, 0]]],
+    }
+    return {"values": stub, "format": {"type": "topojson", "feature": feature}}
+
+
+def _resolve_named_data(
+    node: JsonValue,
+    rows: list[dict[str, Any]],
+    geo_node: Callable[[str], dict[str, Any]],
+) -> JsonValue:
+    """Replace every `{"name": <allowlisted>}` data reference with real data.
+
+    `query_result` resolves to the rows; a geo name resolves via a `geo_node` — a URL
+    node for a render-ready spec, a tiny inline stub for offline validation. Any other
     `{"name": ...}` was already dropped by `_sanitize_chart_spec`.
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.
         rows (list[dict[str, Any]]): The exact result rows to bind for `query_result`.
+        geo_node (Callable[[str], dict[str, Any]]): Resolver for a geo source name.
 
     Returns:
         JsonValue: The same node with its named data references resolved.
@@ -258,10 +312,13 @@ def _resolve_named_data(node: JsonValue, rows: list[dict[str, Any]]) -> JsonValu
         if set(node) == {"name"} and node["name"] in _ALLOWED_SOURCES:
             if node["name"] == _RESULT_SOURCE:
                 return {"values": rows}
-            return _geo_data_node(node["name"])
-        return {key: _resolve_named_data(value, rows) for key, value in node.items()}
+            return geo_node(node["name"])
+        return {
+            key: _resolve_named_data(value, rows, geo_node)
+            for key, value in node.items()
+        }
     if isinstance(node, list):
-        return [_resolve_named_data(item, rows) for item in node]
+        return [_resolve_named_data(item, rows, geo_node) for item in node]
     return node
 
 
@@ -281,7 +338,7 @@ def inject_chart_data(
     Returns:
         dict[str, Any]: A render-ready Vega-Lite spec with the real data bound in.
     """
-    chart = _resolve_named_data(spec, rows)
+    chart = _resolve_named_data(spec, rows, _geo_url_node)
     chart["$schema"] = VEGA_LITE_SCHEMA
     chart.setdefault("data", {"values": rows})
     return chart
@@ -437,7 +494,7 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
     # Resolve named sources (real geometry, empty rows) so a geoshape/lookup spec renders
     # its geometry; a normal chart just gets empty data. Rendering (not just VL→Vega compiling)
     # is the only way to validate expression strings in the spec.
-    compile_spec = _resolve_named_data(spec, [])
+    compile_spec = _resolve_named_data(spec, [], _geo_stub_node)
     compile_spec = {**compile_spec, "$schema": VEGA_LITE_SCHEMA}
     compile_spec.setdefault("data", {"values": []})
 

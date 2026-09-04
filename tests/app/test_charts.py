@@ -22,7 +22,8 @@ from app.charts import (
     _chart_spec_user_prompt,
     _collect,
     _fetch_rows,
-    _geo_data_node,
+    _geo_stub_node,
+    _geo_url_node,
     _resolve_named_data,
     _sanitize_chart_spec,
     _validate_chart_spec,
@@ -32,6 +33,7 @@ from app.charts import (
 )
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired
+from app.settings import settings
 
 DESTINATION = {"projectId": "p", "datasetId": "d", "tableId": "t"}
 
@@ -147,7 +149,11 @@ class TestFetchRows:
             _fetch_rows(DESTINATION)
 
     def test_coerces_non_json_types_to_json_native(self, mocker):
-        """BigQuery date/datetime/Decimal values become JSON-serializable rows."""
+        """BigQuery date/datetime/Decimal values become JSON-serializable rows.
+
+        A Decimal (NUMERIC/BIGNUMERIC) must become a float, not a string — a quantitative
+        axis or colour scale binds these values, and a string breaks the numeric encoding.
+        """
         rows = [
             {"data": date(2025, 12, 31), "temperatura_media": Decimal("24.79")},
         ]
@@ -156,7 +162,8 @@ class TestFetchRows:
 
         _, got = _fetch_rows(DESTINATION)
 
-        assert got == [{"data": "2025-12-31", "temperatura_media": "24.79"}]
+        assert got == [{"data": "2025-12-31", "temperatura_media": 24.79}]
+        assert isinstance(got[0]["temperatura_media"], float)
         # The bound rows must be plain JSON values, or spec serialization fails.
         json.dumps(got)
 
@@ -169,48 +176,69 @@ class TestFetchRows:
             _fetch_rows(DESTINATION)
 
 
-class TestGeoDataNode:
-    def test_states_node_is_inline_topojson(self):
-        node = _geo_data_node("brazil_states")
+class TestGeoUrlNode:
+    def test_points_at_the_static_geo_url(self):
+        node = _geo_url_node("brazil_states")
+
+        assert node == {
+            "url": f"{settings.GEO_ASSET_URL_BASE}/brazil_states.topojson",
+            "format": {"type": "topojson", "feature": "uf"},
+        }
+
+    def test_carries_no_inline_geometry(self):
+        # The whole point: geometry travels by URL, never inline in the spec.
+        node = _geo_url_node("brazil_municipalities")
+
+        assert "values" not in node
+        assert node["url"].endswith("/brazil_municipalities.topojson")
+
+
+class TestGeoStubNode:
+    def test_is_a_minimal_single_feature_topojson(self):
+        node = _geo_stub_node("brazil_states")
+        geometries = node["values"]["objects"]["uf"]["geometries"]
 
         assert node["format"] == {"type": "topojson", "feature": "uf"}
         assert node["values"]["type"] == "Topology"
+        assert len(geometries) == 1
 
-    def test_municipality_ids_are_text_for_the_join(self):
-        # The lookup matches geometry `id` to the result's text `id_municipio`, so the
-        # geometry ids must be strings — an int id would silently match nothing.
-        node = _geo_data_node("brazil_municipalities")
-        geometries = node["values"]["objects"]["Munic"]["geometries"]
+    def test_keys_the_stub_by_the_assets_feature(self):
+        node = _geo_stub_node("brazil_municipalities")
 
-        assert node["format"] == {"type": "topojson", "feature": "Munic"}
-        assert isinstance(geometries[0]["id"], str)
+        assert node["format"]["feature"] == "Munic"
+        assert set(node["values"]["objects"]) == {"Munic"}
 
 
 class TestResolveNamedData:
     def test_resolves_query_result_to_rows(self):
         rows = [{"sigla_uf": "SP", "valor": 1}]
 
-        assert _resolve_named_data({"name": "query_result"}, rows) == {"values": rows}
+        assert _resolve_named_data({"name": "query_result"}, rows, _geo_url_node) == {
+            "values": rows
+        }
 
-    def test_resolves_a_geo_name_to_its_topojson_node(self):
-        node = _resolve_named_data({"name": "brazil_states"}, [])
+    def test_resolves_a_geo_name_via_the_given_resolver(self):
+        node = _resolve_named_data({"name": "brazil_states"}, [], _geo_url_node)
 
-        assert node["format"] == {"type": "topojson", "feature": "uf"}
-        assert node["values"]["type"] == "Topology"
+        assert node == _geo_url_node("brazil_states")
 
     def test_resolves_references_nested_anywhere(self):
         rows = [{"sigla_uf": "SP", "valor": 1}]
         spec = {"transform": [{"from": {"data": {"name": "query_result"}}}]}
 
-        resolved = _resolve_named_data(spec, rows)
+        resolved = _resolve_named_data(spec, rows, _geo_url_node)
 
         assert resolved["transform"][0]["from"]["data"] == {"values": rows}
 
     def test_leaves_unknown_names_and_plain_nodes_untouched(self):
         # An unknown name is not resolved here (sanitize drops it earlier).
-        assert _resolve_named_data({"name": "secret"}, []) == {"name": "secret"}
+        assert _resolve_named_data({"name": "secret"}, [], _geo_url_node) == {
+            "name": "secret"
+        }
         # A node with no named source passes through unchanged.
-        assert _resolve_named_data({"mark": "bar"}, []) == {"mark": "bar"}
+        assert _resolve_named_data({"mark": "bar"}, [], _geo_url_node) == {
+            "mark": "bar"
+        }
 
 
 class TestInjectChartData:
@@ -231,9 +259,9 @@ class TestInjectChartData:
 
         chart = inject_chart_data(_choropleth_spec(), rows)
 
-        # Top-level geometry becomes inline TopoJSON; the rows fill the lookup source.
-        assert chart["data"]["format"] == {"type": "topojson", "feature": "uf"}
-        assert chart["data"]["values"]["type"] == "Topology"
+        # Top-level geometry becomes a URL node (fetched client-side); the rows fill the
+        # lookup source inline.
+        assert chart["data"] == _geo_url_node("brazil_states")
         assert chart["transform"][0]["from"]["data"] == {"values": rows}
 
 
