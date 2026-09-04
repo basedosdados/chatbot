@@ -106,6 +106,23 @@ class TestSanitizeChartSpec:
         assert "data" not in _sanitize_chart_spec({"data": {"values": [{"x": 1}]}})
         assert "data" not in _sanitize_chart_spec({"data": {"url": "http://x"}})
 
+    def test_strips_href_click_link_but_keeps_a_field_named_href(self):
+        raw = {
+            "mark": {"type": "point", "href": "javascript:alert(1)"},
+            "encoding": {
+                "href": {"field": "link"},  # the href channel is dropped
+                "x": {"field": "href"},  # a column named "href" is a value, not a key
+            },
+        }
+
+        clean = _sanitize_chart_spec(raw)
+
+        assert "href" not in clean["mark"]
+        assert "href" not in clean["encoding"]
+        assert clean["encoding"]["x"] == {"field": "href"}
+        # No clickable-link href survives anywhere (click-XSS vector).
+        assert "javascript:" not in json.dumps(clean)
+
 
 class TestFetchRows:
     def _client(self, rows, columns=("col1",)):

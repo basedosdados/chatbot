@@ -26,8 +26,10 @@ CHART_SPEC_SAMPLE_ROWS = 10
 # How many times the generator may retry after a spec fails validation before giving up.
 MAX_CHART_SPEC_ATTEMPTS = 3
 
-# Keys that are always stripped anywhere in a model-generated spec for security.
-_UNTRUSTED_KEYS = frozenset({"datasets", "url"})
+# Keys always stripped anywhere in a model-generated spec for security: `url`/`datasets`
+# are external/inline data (SSRF, provenance); `href` makes a mark a clickable link,
+# whose `javascript:` URI would be a click-XSS in the viewer's browser.
+_UNTRUSTED_KEYS = frozenset({"datasets", "url", "href"})
 
 # Geographic assets a spec may inject by name for choropleth maps. The TopoJSON
 # files are served as static assets by the website (see settings.GEO_ASSET_URL_BASE).
@@ -411,10 +413,11 @@ def _chart_spec_user_prompt(
 
 
 def _sanitize_chart_spec(node: JsonValue) -> JsonValue:
-    """Sanitize a model spec: drop external/inline data, keep only allowlisted named sources.
+    """Sanitize a model spec: drop untrusted keys, keep only allowlisted named sources.
 
-    `datasets` and any `url` are removed outright; a `data` node survives only when it is
-    exactly `{"name": <allowlisted source>}`, so the model can never supply its own data.
+    Every `_UNTRUSTED_KEYS` key (`datasets`, `url`, `href`) is removed outright, and a `data`
+    node survives only when it is exactly `{"name": <allowlisted source>}`, so the model can
+    never supply its own data or a clickable link.
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.
