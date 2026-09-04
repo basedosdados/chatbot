@@ -71,6 +71,14 @@ For a numeric value mapped to color (any mark colored by a number), set the colo
 
 When you do name a scheme, use a real Vega scheme name — never one from another library. Prefer colorblind-safe schemes.
 
+## Number formatting
+
+Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the response's language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
+
+## Log scales
+
+A log scale is undefined at zero and below, so a single non-positive value in the encoded field collapses the whole axis — no ticks, every point crushed into a corner. Real-world columns routinely carry zeros, nulls, and occasional negatives. So whenever you set `"scale": {"type": "log"}`, first drop the non-positive rows with a `filter` transform over every log-scaled field. If a field genuinely spans zero and cannot be filtered, use a linear scale instead.
+
 ## Size
 
 The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis, set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
