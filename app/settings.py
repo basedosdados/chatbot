@@ -120,7 +120,7 @@ class Settings(BaseSettings):
         ),
     )
     CHART_MAX_BYTES: int = Field(
-        default=5 * 1024 * 1024,
+        default=1 * 1024 * 1024,
         gt=0,
         le=10 * 1024 * 1024,
         description=(
