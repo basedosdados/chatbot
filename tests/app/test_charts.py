@@ -198,7 +198,7 @@ class TestGeoUrlNode:
         node = _geo_url_node("brazil_states")
 
         assert node == {
-            "url": f"{settings.GEO_ASSET_URL_BASE}/brazil_states.topojson",
+            "url": f"{settings.GEO_ASSET_URL_BASE}/brasil_estados.topojson",
             "format": {"type": "topojson", "feature": "uf"},
         }
 
@@ -207,7 +207,7 @@ class TestGeoUrlNode:
         node = _geo_url_node("brazil_municipalities")
 
         assert "values" not in node
-        assert node["url"].endswith("/brazil_municipalities.topojson")
+        assert node["url"].endswith("/brasil_municipios.topojson")
 
 
 class TestGeoStubNode:
