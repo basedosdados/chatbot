@@ -12,6 +12,8 @@ from app.db.models import (
     FeedbackSyncStatus,
     Message,
     MessageCreate,
+    MessageRole,
+    MessageStatus,
     QueryHandle,
     Thread,
     ThreadCreate,
@@ -220,6 +222,70 @@ class TestAsyncDatabaseMessage:
         assert isinstance(messages, list)
         assert len(messages) == 0
 
+    async def test_get_messages_excludes_streaming_placeholders(
+        self, database: AsyncDatabase, messages_factory: MessagesFactory
+    ):
+        """In-flight STREAMING placeholders are hidden from the thread listing."""
+        user_message, _ = await messages_factory()
+
+        placeholder = MessageCreate(
+            thread_id=user_message.thread_id,
+            user_message_id=user_message.id,
+            model_uri="mock-model",
+            role=MessageRole.ASSISTANT,
+            content="",
+            status=MessageStatus.STREAMING,
+        )
+        await database.create_message(placeholder)
+
+        messages = await database.get_messages(user_message.thread_id)
+
+        # Only the two completed messages surface; the placeholder is excluded.
+        assert len(messages) == 2
+        assert all(message.status != MessageStatus.STREAMING for message in messages)
+
+    async def test_update_message_writes_terminal_fields(
+        self, database: AsyncDatabase, user_message: Message
+    ):
+        """update_message overwrites the terminal fields of an existing row."""
+        placeholder = MessageCreate(
+            id=uuid.uuid4(),
+            thread_id=user_message.thread_id,
+            user_message_id=user_message.id,
+            model_uri="mock-model",
+            role=MessageRole.ASSISTANT,
+            content="",
+            status=MessageStatus.STREAMING,
+        )
+        created = await database.create_message(placeholder)
+
+        updated = await database.update_message(
+            created.id,
+            content="Final answer",
+            events=[{"type": "final_answer"}],
+            structured_response={"response": "Final answer"},
+            status=MessageStatus.SUCCESS,
+        )
+
+        assert updated is not None
+        assert updated.id == created.id
+        assert updated.content == "Final answer"
+        assert updated.status == MessageStatus.SUCCESS
+        assert updated.events == [{"type": "final_answer"}]
+        assert updated.structured_response == {"response": "Final answer"}
+
+    async def test_update_message_not_found_returns_none(self, database: AsyncDatabase):
+        """Updating a non-existent message returns None (finalize then falls back)."""
+        result = await database.update_message(
+            uuid.uuid4(),
+            content="x",
+            events=None,
+            structured_response=None,
+            status=MessageStatus.SUCCESS,
+        )
+
+        assert result is None
+
 
 class TestAsyncDatabaseQueryHandle:
     """Tests for QueryHandle operations."""
@@ -247,8 +313,12 @@ class TestAsyncDatabaseQueryHandle:
             ]
         )
 
-        first = await database.get_query_handle(assistant_message.id, "qr_a")
-        second = await database.get_query_handle(assistant_message.id, "qr_b")
+        first = await database.get_query_handle_from_message(
+            "qr_a", assistant_message.id
+        )
+        second = await database.get_query_handle_from_message(
+            "qr_b", assistant_message.id
+        )
 
         assert first is not None and first.destination_table == self.DESTINATION
         assert second is not None and second.message_id == assistant_message.id
@@ -257,20 +327,68 @@ class TestAsyncDatabaseQueryHandle:
         """An empty list persists nothing and does not error."""
         await database.create_query_handles([])
 
-    async def test_get_query_handle_found(
+    async def test_get_query_handle_from_message_found(
         self, database: AsyncDatabase, query_handle: QueryHandle
     ):
-        """An existing handle is returned by its (message_id, query_ref)."""
-        found = await database.get_query_handle(
-            query_handle.message_id, query_handle.query_ref
+        """An existing handle is returned by its (query_ref, message_id)."""
+        found = await database.get_query_handle_from_message(
+            query_handle.query_ref, query_handle.message_id
         )
 
         assert found is not None
         assert found.query_ref == query_handle.query_ref
 
-    async def test_get_query_handle_not_found(self, database: AsyncDatabase):
-        """A missing (message_id, query_ref) returns None."""
-        assert await database.get_query_handle(uuid.uuid4(), "qr_missing") is None
+    async def test_get_query_handle_from_message_not_found(
+        self, database: AsyncDatabase
+    ):
+        """A missing (query_ref, message_id) returns None."""
+        assert (
+            await database.get_query_handle_from_message("qr_missing", uuid.uuid4())
+            is None
+        )
+
+    async def test_get_query_handle_from_thread_found(
+        self,
+        database: AsyncDatabase,
+        query_handle: QueryHandle,
+        assistant_message: Message,
+    ):
+        """A handle resolves by query_ref alone when scoped to its own thread."""
+        found = await database.get_query_handle_from_thread(
+            query_handle.query_ref, assistant_message.thread_id
+        )
+
+        assert found is not None
+        assert found.query_ref == query_handle.query_ref
+
+    async def test_get_query_handle_from_thread_wrong_thread_returns_none(
+        self, database: AsyncDatabase, query_handle: QueryHandle
+    ):
+        """A handle is invisible to a thread it does not belong to (authorization)."""
+        found = await database.get_query_handle_from_thread(
+            query_handle.query_ref, uuid.uuid4()
+        )
+
+        assert found is None
+
+    async def test_get_query_handles_by_thread(
+        self,
+        database: AsyncDatabase,
+        query_handle: QueryHandle,
+        assistant_message: Message,
+    ):
+        """Every handle produced in a thread is listed."""
+        handles = await database.get_query_handles_by_thread(
+            assistant_message.thread_id
+        )
+
+        assert [handle.query_ref for handle in handles] == [query_handle.query_ref]
+
+    async def test_get_query_handles_by_thread_empty(
+        self, database: AsyncDatabase, thread: Thread
+    ):
+        """A thread with no query results returns an empty list."""
+        assert await database.get_query_handles_by_thread(thread.id) == []
 
 
 class TestAsyncDatabaseFeedback:

@@ -2,6 +2,11 @@ from langchain_core.tools import BaseTool
 
 from app.agent.tools.api import get_dataset_details, get_table_details, search_datasets
 from app.agent.tools.bigquery import decode_table_values, execute_bigquery_sql
+from app.agent.tools.dataviz import (
+    chart_query_result,
+    export_query_result,
+    list_query_results,
+)
 
 
 class BDToolkit:
@@ -19,6 +24,9 @@ class BDToolkit:
                 - get_table_details: Get comprehensive table information.
                 - execute_bigquery_sql: Execute SQL queries against BigQuery tables.
                 - decode_table_values: Decode coded values using dictionary tables.
+                - list_query_results: List this conversation's exportable/chartable results.
+                - export_query_result: Offer a result as a downloadable file (AVRO/CSV/JSONL/PARQUET).
+                - chart_query_result: Render a chart from a result.
         """
         return [
             search_datasets,
@@ -26,6 +34,9 @@ class BDToolkit:
             get_table_details,
             execute_bigquery_sql,
             decode_table_values,
+            list_query_results,
+            export_query_result,
+            chart_query_result,
         ]
 
 

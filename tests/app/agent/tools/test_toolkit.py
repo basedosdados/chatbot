@@ -8,7 +8,7 @@ class TestBDToolkit:
         """Test that get_tools returns all expected tools."""
         tools = BDToolkit.get_tools()
 
-        assert len(tools) == 5
+        assert len(tools) == 8
 
         tool_names = [tool.name for tool in tools]
 
@@ -17,3 +17,6 @@ class TestBDToolkit:
         assert "get_table_details" in tool_names
         assert "execute_bigquery_sql" in tool_names
         assert "decode_table_values" in tool_names
+        assert "list_query_results" in tool_names
+        assert "export_query_result" in tool_names
+        assert "chart_query_result" in tool_names

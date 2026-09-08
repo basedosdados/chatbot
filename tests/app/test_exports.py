@@ -15,6 +15,7 @@ from app.exports import (
     collect_query_handles,
     materialize_export,
     query_result_download,
+    sanitize_export_filename,
 )
 from app.settings import settings
 
@@ -31,18 +32,18 @@ def test_export_formats_match_the_advertised_literal():
 
 
 def test_query_result_download_shape():
-    """An executed query becomes one download; only CSV is offered for now."""
+    """An executed query becomes one download offering the user-facing formats."""
     assert query_result_download("qr_1", "slug") == {
         "type": "query_result",
         "query_ref": "qr_1",
         "slug": "slug",
-        "formats": ["CSV"],
+        "formats": ["AVRO", "CSV", "JSONL", "PARQUET"],
     }
 
 
 class TestCollectQueryHandles:
-    def test_collect_query_handles_appends_only_query_result_artifacts(self):
-        """query_result artifacts are appended as handles; other artifacts are ignored."""
+    def test_collect_query_handles_returns_only_query_result_artifacts(self):
+        """query_result artifacts are returned as handles; other artifacts are ignored."""
         artifacts = [
             {
                 "type": "query_result",
@@ -54,10 +55,7 @@ class TestCollectQueryHandles:
             {"type": "file", "id": "x"},  # some other artifact kind
         ]
 
-        collected: list[CollectedQueryHandle] = []
-        collect_query_handles(artifacts, collected)
-
-        assert collected == [
+        assert collect_query_handles(artifacts) == [
             CollectedQueryHandle(
                 query_ref="qr_1", slug="slug", destination_table=DESTINATION
             )
@@ -66,7 +64,7 @@ class TestCollectQueryHandles:
     def test_collect_query_handles_raises_on_malformed_query_result(self):
         """A query_result artifact missing a field is a producer bug — fail loud, don't skip."""
         with pytest.raises(KeyError):
-            collect_query_handles([{"type": "query_result", "query_ref": "qr_1"}], [])
+            collect_query_handles([{"type": "query_result", "query_ref": "qr_1"}])
 
 
 class TestMaterializeExport:
@@ -216,3 +214,38 @@ class TestMaterializeExport:
 
         with pytest.raises(RuntimeError, match="no file was written"):
             self._materialize()
+
+
+class TestSanitizeExportFilename:
+    """The download filename guard, shared by the export tool and the endpoint."""
+
+    @pytest.mark.parametrize(
+        ("slug", "expected"),
+        [
+            # A clean slug (what the model is asked to produce) passes through unchanged.
+            ("vendas_por_ano", "vendas_por_ano"),
+            # Hyphens and digits are allowed.
+            ("ideb-2021", "ideb-2021"),
+            # Spaces and punctuation collapse to a single underscore.
+            ("Vendas por ano", "Vendas_por_ano"),
+            ("a   b", "a_b"),
+            ("café & leite!", "café_leite"),
+            # Leading/trailing separators are stripped, not left dangling.
+            ("_vendas_", "vendas"),
+            ("  vendas  ", "vendas"),
+            # Path separators and traversal are neutralized (no slashes or dots survive).
+            ("../../etc/passwd", "etc_passwd"),
+            ("relatorio/2021", "relatorio_2021"),
+            # File extensions are neutralized.
+            ("vendas_por_ano.csv", "vendas_por_ano_csv"),
+            # Accented word characters are preserved (\w is unicode).
+            ("população", "população"),
+        ],
+    )
+    def test_sanitizes_slug(self, slug: str, expected: str):
+        assert sanitize_export_filename(slug, "resultados") == expected
+
+    @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
+    def test_falls_back_when_nothing_usable_remains(self, slug: str):
+        """A slug that sanitizes to empty falls back to the provided fallback, never ''."""
+        assert sanitize_export_filename(slug, "resultados") == "resultados"
