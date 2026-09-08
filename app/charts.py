@@ -35,11 +35,11 @@ _UNTRUSTED_KEYS = frozenset({"datasets", "url", "href"})
 # files are served as static assets by the website (see settings.GEO_ASSET_URL_BASE).
 _GEO_ASSETS: dict[str, dict[str, str]] = {
     "brazil_states": {
-        "file": "brazil_states.topojson",
+        "file": "brasil_estados.topojson",
         "feature": "uf",
     },
     "brazil_municipalities": {
-        "file": "brazil_municipalities.topojson",
+        "file": "brasil_municipios.topojson",
         "feature": "Munic",
     },
 }
