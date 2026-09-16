@@ -79,9 +79,17 @@ Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` fo
 
 A log scale is undefined at zero and below, so a single non-positive value in the encoded field collapses the whole axis — no ticks, every point crushed into a corner. Real-world columns routinely carry zeros, nulls, and occasional negatives. So whenever you set `"scale": {"type": "log"}`, first drop the non-positive rows with a `filter` transform over every log-scaled field. If a field genuinely spans zero and cannot be filtered, use a linear scale instead.
 
+## Scale domains
+
+Never write `null` inside a literal `scale.domain` array (e.g. `{"domain": [0, null]}`) — Vega-Lite treats a literal domain as authoritative and does not fill a `null` entry in from the data, so the scale silently collapses to a zero-width range and the chart renders empty (no bars, no marks) with no error. To pin one end while leaving the other data-driven, use `domainMin`/`domainMax` instead (e.g. `{"domainMin": 0}`). Quantitative scales already default to including zero, so most of the time no domain override is needed at all.
+
 ## Size
 
 The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis, set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
+
+## Long labels
+
+The chart renders inside a chat panel a few hundred pixels wide, not a full-page dashboard. Never set `labelLimit` on an axis or legend — leave it to Vega-Lite's default (180px), which already ellipsis-truncates an overly long label and keeps the full text on hover. An axis's label column shares the container's width with the plot itself, so a large override (e.g. several hundred pixels) steals space directly from the marks, leaving them cramped or invisible.
 
 ## Choropleth maps
 
@@ -382,7 +390,7 @@ def _chart_spec_model():  # pragma: no cover
 
 def _chart_spec_user_prompt(
     columns: list[str],
-    sample: list[dict[str, Any]],
+    sample_rows: list[dict[str, Any]],
     instructions: str,
     previous_spec: dict[str, Any] | None,
     errors: list[str],
@@ -394,7 +402,7 @@ def _chart_spec_user_prompt(
 
     Args:
         columns (list[str]): The result's column names.
-        sample (list[dict[str, Any]]): A few example rows, for shape only.
+        sample_rows (list[dict[str, Any]]): A few example rows, for shape only.
         instructions (str): The natural-language description of the chart to produce.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
@@ -405,7 +413,7 @@ def _chart_spec_user_prompt(
     prompt = (
         f"What to chart: {instructions}\n\n"
         f"Columns: {json.dumps(columns, ensure_ascii=False)}\n\n"
-        f"Sample rows: {json.dumps(sample, ensure_ascii=False, default=str)}"
+        f"Sample rows: {json.dumps(sample_rows, ensure_ascii=False, default=str)}"
     )
 
     if errors:
@@ -536,7 +544,7 @@ async def generate_chart_spec(
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
-    sample = rows[:CHART_SPEC_SAMPLE_ROWS]
+    sample_rows = rows[:CHART_SPEC_SAMPLE_ROWS]
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -546,7 +554,7 @@ async def generate_chart_spec(
                 SystemMessage(_CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     _chart_spec_user_prompt(
-                        columns, sample, instructions, previous_spec, errors
+                        columns, sample_rows, instructions, previous_spec, errors
                     )
                 ),
             ]
