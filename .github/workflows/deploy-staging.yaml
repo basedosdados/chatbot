@@ -72,6 +72,8 @@ jobs:
             envConfigMap: chatbot-api-staging-config
             envSecret: chatbot-api-staging-secrets
             envSharedSecret: api-staging-secrets
+            analytics:
+              enabled: false
           EOF
 
       # NOTE: --server-side=false disables Helm v4's Server-Side Apply (SSA) and uses

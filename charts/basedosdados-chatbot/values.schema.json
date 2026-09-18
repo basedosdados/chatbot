@@ -53,6 +53,63 @@
           "type": "string",
           "minLength": 1,
           "description": "Name of the basedosdados api kubernetes secret"
+        },
+        "analytics": {
+          "type": "object",
+          "description": "Daily usage export to BigQuery",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether to install the analytics CronJob"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Cron schedule for the export"
+            },
+            "timezone": {
+              "type": "string",
+              "minLength": 1,
+              "description": "IANA time zone the schedule is read in"
+            },
+            "bigqueryDataset": {
+              "type": "string",
+              "description": "BigQuery dataset receiving the tables; required when enabled"
+            },
+            "backendDb": {
+              "type": "object",
+              "description": "Backend database read for the account uuid -> email map",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Backend database name; required when enabled"
+                },
+                "user": {
+                  "type": "string",
+                  "description": "Backend database user; required when enabled"
+                }
+              },
+              "required": ["name", "user"],
+              "additionalProperties": false
+            },
+            "envSharedDatabaseSecret": {
+              "type": "string",
+              "description": "Name of the basedosdados api kubernetes secret holding the backend database password"
+            },
+            "resources": {
+              "type": "object",
+              "description": "Kubernetes resource requests and limits for the job"
+            }
+          },
+          "required": [
+            "enabled",
+            "schedule",
+            "timezone",
+            "bigqueryDataset",
+            "backendDb",
+            "envSharedDatabaseSecret"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

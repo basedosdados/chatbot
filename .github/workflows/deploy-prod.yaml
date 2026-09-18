@@ -72,6 +72,22 @@ jobs:
             envConfigMap: chatbot-api-prod-config
             envSecret: chatbot-api-prod-secrets
             envSharedSecret: api-prod-secrets
+            analytics:
+              enabled: true
+              schedule: "0 3 * * *"
+              timezone: America/Sao_Paulo
+              bigqueryDataset: chatbot_analytics
+              backendDb:
+                name: api
+                user: api
+              envSharedDatabaseSecret: api-prod-database-password
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 500Mi
+                limits:
+                  cpu: 500m
+                  memory: 1Gi
           EOF
 
       # NOTE: --server-side=false disables Helm v4's Server-Side Apply (SSA) and uses

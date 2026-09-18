@@ -1,17 +1,13 @@
 chatbot:
-  # Deployment name
   name: chatbot-api
 
-  # Deployment image
   image:
     name: ghcr.io/basedosdados/chatbot
     tag: ""
     pullPolicy: Always
 
-  # Number of replicas
   replicas: 1
 
-  # Resource specification
   resources:
     requests:
       cpu: 250m
@@ -21,13 +17,44 @@ chatbot:
       memory: 2Gi
 
   # Required: name of the ConfigMap containing non-sensitive
-  # environment variables (e.g., chatbot-api-prod-config)
+  # environment variables (e.g., chatbot-api-prod-config).
   envConfigMap: ""
 
   # Required: name of the Secret containing chatbot-specific
-  # environment variables (e.g., chatbot-api-prod-secrets)
+  # environment variables (e.g., chatbot-api-prod-secrets).
   envSecret: ""
 
   # Required: name of the shared Secret from basedosdados-api
-  # containing Django Secret Key (e.g., api-prod-secrets)
+  # containing Django Secret Key (e.g., api-prod-secrets).
   envSharedSecret: ""
+
+  # Daily usage export to BigQuery (analytics/cli.py)
+  analytics:
+    enabled: false
+
+    # Cron schedule, and the IANA time zone it is read in (Kubernetes 1.27+).
+    schedule: "0 3 * * *"
+    timezone: America/Sao_Paulo
+
+    # Dataset receiving the `questions` and `threads` tables, both replaced in
+    # full each run. It must already exist, in the analytics GCP project.
+    bigqueryDataset: ""
+
+    # Backend (Django) database, read to map account uuids to emails. It shares
+    # the Cloud SQL instance and proxy with the chatbot DB, so its host and port
+    # come from envConfigMap; only the database, user and password differ.
+    backendDb:
+      name: ""
+      user: ""
+
+    # Name of the shared Secret from basedosdados-api holding the backend
+    # database password under `password` (e.g., api-prod-database-password).
+    envSharedDatabaseSecret: ""
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 500Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi

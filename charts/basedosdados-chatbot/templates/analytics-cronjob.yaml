@@ -1,0 +1,105 @@
+{{- if .Values.chatbot.analytics.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: "{{ .Values.chatbot.name }}-analytics"
+  labels:
+    app.kubernetes.io/component: basedosdados-chatbot
+    app.kubernetes.io/name: "{{ .Values.chatbot.name }}-analytics"
+spec:
+  schedule: {{ .Values.chatbot.analytics.schedule | quote }}
+  timeZone: {{ .Values.chatbot.analytics.timezone | quote }}
+  # The load replaces both tables in full, so two overlapping runs
+  # would fight over the same rows; a slow run simply delays the next.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: basedosdados-chatbot
+            app.kubernetes.io/name: "{{ .Values.chatbot.name }}-analytics"
+        spec:
+          containers:
+            - name: basedosdados-chatbot-analytics
+              image: "{{ .Values.chatbot.image.name }}:{{ .Values.chatbot.image.tag }}"
+              imagePullPolicy: {{ .Values.chatbot.image.pullPolicy }}
+              command:
+                - python
+                - -m
+                - analytics.cli
+                - --bigquery-dataset
+                - {{ required "chatbot.analytics.bigqueryDataset is required when chatbot.analytics.enabled is true" .Values.chatbot.analytics.bigqueryDataset | quote }}
+              volumeMounts:
+                - name: chatbot-sa
+                  mountPath: /var/secrets/
+                  readOnly: true
+              env:
+                # analytics/ authenticates with Application Default Credentials,
+                - name: GOOGLE_APPLICATION_CREDENTIALS
+                  value: /var/secrets/chatbot-sa.json
+                # Chatbot database: the same ConfigMap and Secret the API uses,
+                # renamed to the CHATBOT_DB_* names analytics/settings.py expects.
+                - name: CHATBOT_DB_HOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_HOST
+                - name: CHATBOT_DB_PORT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_PORT
+                - name: CHATBOT_DB_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_NAME
+                - name: CHATBOT_DB_USER
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_USER
+                - name: CHATBOT_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.chatbot.envSecret | quote }}
+                      key: DB_PASSWORD
+                # Backend database (read-only, for the account -> email map). Same
+                # Cloud SQL instance behind the same proxy, so host and port are reused;
+                # the password comes from the backend's own Sealed Secret, the same one
+                # the API deployment reads (its chart hardcodes the `password` key too).
+                - name: BACKEND_DB_HOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_HOST
+                - name: BACKEND_DB_PORT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ .Values.chatbot.envConfigMap | quote }}
+                      key: DB_PORT
+                - name: BACKEND_DB_NAME
+                  value: {{ required "chatbot.analytics.backendDb.name is required when chatbot.analytics.enabled is true" .Values.chatbot.analytics.backendDb.name | quote }}
+                - name: BACKEND_DB_USER
+                  value: {{ required "chatbot.analytics.backendDb.user is required when chatbot.analytics.enabled is true" .Values.chatbot.analytics.backendDb.user | quote }}
+                - name: BACKEND_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "chatbot.analytics.envSharedDatabaseSecret is required when chatbot.analytics.enabled is true" .Values.chatbot.analytics.envSharedDatabaseSecret | quote }}
+                      key: password
+              resources:
+                {{- toYaml .Values.chatbot.analytics.resources | nindent 16 }}
+          volumes:
+            - name: chatbot-sa
+              secret:
+                secretName: {{ .Values.chatbot.envSecret | quote }}
+                items:
+                  - key: CHATBOT_SA
+                    path: chatbot-sa.json
+          restartPolicy: Never
+{{- end }}
