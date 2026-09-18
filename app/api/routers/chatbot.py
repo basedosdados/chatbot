@@ -1,5 +1,4 @@
 import asyncio
-import re
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
@@ -26,10 +25,10 @@ from app.db.models import (
 )
 from app.exports import (
     OFFERED_EXPORT_FORMATS,
-    ExportFormat,
     ResultTableExpired,
     ResultTooLarge,
     materialize_export,
+    sanitize_export_filename,
 )
 from app.i18n import MessageKey, translate
 from app.settings import settings
@@ -239,28 +238,16 @@ async def send_message(
     )
 
 
-def _sanitize_filename(slug: str, fallback: str) -> str:
-    """Sanitize a query's slug into a safe base filename.
-
-    Args:
-        slug (str): The query's slug.
-        fallback (str): Base name to use when the slug yields nothing filesystem-safe.
-
-    Returns:
-        str: A filesystem-safe base filename, without extension.
-    """
-    filename = re.sub(r"[^\w-]+", "_", slug).strip("_")
-    return filename or fallback
-
-
 @router.post("/messages/{message_id}/exports")
-async def export_message_results(
+async def export_message_result(
     message_id: str,
     database: AsyncDB,
     user_id: UserID,
     query_ref: str,
-    file_format: ExportFormat = Query("CSV", alias="format"),
+    file_format: str = Query("CSV", alias="format"),
 ):
+    file_format = file_format.upper()
+
     if file_format not in OFFERED_EXPORT_FORMATS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -272,7 +259,7 @@ async def export_message_results(
 
     message, thread = await _authorize_message(database, message_id, user_id)
 
-    query_handle = await database.get_query_handle(message.id, query_ref)
+    query_handle = await database.get_query_handle_from_message(query_ref, message.id)
 
     if query_handle is None:
         raise HTTPException(
@@ -286,7 +273,7 @@ async def export_message_results(
             query_ref=query_handle.query_ref,
             destination_table=query_handle.destination_table,
             file_format=file_format,
-            filename=_sanitize_filename(
+            filename=sanitize_export_filename(
                 query_handle.slug,
                 translate(MessageKey.DEFAULT_EXPORT_FILENAME, thread.language),
             ),

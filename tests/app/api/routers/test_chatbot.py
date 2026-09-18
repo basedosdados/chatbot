@@ -12,7 +12,6 @@ from langchain_core.messages import AIMessage
 from pytest_mock import MockerFixture
 
 from app.api.dependencies import get_database, get_feedback_sender
-from app.api.routers.chatbot import _sanitize_filename
 from app.api.streaming.schemas import StreamEvent
 from app.db.database import AsyncDatabase
 from app.db.models import (
@@ -400,7 +399,7 @@ class TestListMessagesEndpoint:
         assert download["type"] == "query_result"
         assert download["query_ref"] == "qr_test"
         assert download["slug"] == "slug"
-        assert download["formats"] == ["CSV"]
+        assert download["formats"] == ["AVRO", "CSV", "JSONL", "PARQUET"]
         # The internal handles (and their destination tables) never reach the client.
         assert "query_handles" not in message_json
 
@@ -836,7 +835,7 @@ class TestExportMessageResultsEndpoint:
         downloadable_message: Message,
         mocker: MockerFixture,
     ):
-        """A not-offered format (valid for BigQuery, but not offered) is rejected, not downgraded."""
+        """An unsupported format is rejected outright, not downgraded to a default."""
         materialize = mocker.patch(
             "app.api.routers.chatbot.materialize_export",
             return_value=self._exported(),
@@ -844,11 +843,12 @@ class TestExportMessageResultsEndpoint:
 
         response = client.post(
             url=f"/api/v1/chatbot/messages/{downloadable_message.id}/exports"
-            "?query_ref=qr_test&format=PARQUET",
+            "?query_ref=qr_test&format=XLSX",
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Unsupported format" in response.json()["detail"]
         # The request is rejected outright — no CSV is silently produced.
         materialize.assert_not_called()
 
@@ -1023,38 +1023,3 @@ class TestExportMessageResultsEndpoint:
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
-
-class TestSanitizeFilename:
-    """Tests for _sanitize_filename — the download filename guard."""
-
-    @pytest.mark.parametrize(
-        ("slug", "expected"),
-        [
-            # A clean slug (what the model is asked to produce) passes through unchanged.
-            ("vendas_por_ano", "vendas_por_ano"),
-            # Hyphens and digits are allowed.
-            ("ideb-2021", "ideb-2021"),
-            # Spaces and punctuation collapse to a single underscore.
-            ("Vendas por ano", "Vendas_por_ano"),
-            ("a   b", "a_b"),
-            ("café & leite!", "café_leite"),
-            # Leading/trailing separators are stripped, not left dangling.
-            ("_vendas_", "vendas"),
-            ("  vendas  ", "vendas"),
-            # Path separators and traversal are neutralized (no slashes or dots survive).
-            ("../../etc/passwd", "etc_passwd"),
-            ("relatorio/2021", "relatorio_2021"),
-            # File extensions are neutralized.
-            ("vendas_por_ano.csv", "vendas_por_ano_csv"),
-            # Accented word characters are preserved (\\w is unicode).
-            ("população", "população"),
-        ],
-    )
-    def test_sanitizes_slug(self, slug: str, expected: str):
-        assert _sanitize_filename(slug, "resultados") == expected
-
-    @pytest.mark.parametrize("slug", ["", "   ", "!!!", "/", "..."])
-    def test_falls_back_when_nothing_usable_remains(self, slug: str):
-        """A slug that sanitizes to empty falls back to the provided fallback, never ''."""
-        assert _sanitize_filename(slug, "resultados") == "resultados"

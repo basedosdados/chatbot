@@ -44,7 +44,7 @@ def execute_bigquery_sql(
             current request — each slug names a separate download.
 
     Returns:
-        JSON object with `row_count` and `rows`.
+        JSON object with `row_count`, `rows` and `query_ref` (a reference to the query results).
     """
     client = _bq_client()
 
@@ -93,15 +93,18 @@ def execute_bigquery_sql(
             "the context small. The full result can still be downloaded from the interface."
         )
 
-    content = json.dumps(payload, ensure_ascii=False, default=str)
-
     # No rows -> nothing to download
     if not rows:
-        return content, None
+        return json.dumps(payload, ensure_ascii=False, default=str), None
 
     # Server-minted handle for the anonymous result table BigQuery already materialized
     # (~24h TTL), so a later export hands back exactly these rows without re-running.
     query_ref = f"qr_{uuid.uuid4().hex}"
+
+    # Surface the handle to the model so it can pass it to export_query_result /
+    # chart_query_result. The full destination table stays server-side in the artifact.
+    payload["query_ref"] = query_ref
+    content = json.dumps(payload, ensure_ascii=False, default=str)
 
     artifact = {
         "type": "query_result",
