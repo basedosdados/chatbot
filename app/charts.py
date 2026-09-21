@@ -50,6 +50,89 @@ _RESULT_SOURCE = "query_result"
 # Every data-source name a spec may reference; anything else in a `data` node is dropped.
 _ALLOWED_SOURCES = frozenset({_RESULT_SOURCE, *_GEO_ASSETS})
 
+# Vega's built-in color scheme names (https://vega.github.io/vega/docs/schemes/). A scheme
+# name outside this set is rejected. Includes the dark-/light-background ramp variants for
+# completeness, though the prompt steers away from them. Keep in sync with the scheme list
+# in _CHART_SPEC_INSTRUCTIONS.
+_VEGA_COLOR_SCHEMES = frozenset(
+    {
+        # Categorical
+        "accent",
+        "category10",
+        "category20",
+        "category20b",
+        "category20c",
+        "observable10",
+        "dark2",
+        "paired",
+        "pastel1",
+        "pastel2",
+        "set1",
+        "set2",
+        "set3",
+        "tableau10",
+        "tableau20",
+        # Sequential single-hue
+        "blues",
+        "tealblues",
+        "teals",
+        "greens",
+        "browns",
+        "oranges",
+        "reds",
+        "purples",
+        "warmgreys",
+        "greys",
+        # Sequential multi-hue
+        "viridis",
+        "magma",
+        "inferno",
+        "plasma",
+        "cividis",
+        "turbo",
+        "bluegreen",
+        "bluepurple",
+        "goldgreen",
+        "goldorange",
+        "goldred",
+        "greenblue",
+        "orangered",
+        "purplebluegreen",
+        "purpleblue",
+        "purplered",
+        "redpurple",
+        "yellowgreenblue",
+        "yellowgreen",
+        "yelloworangebrown",
+        "yelloworangered",
+        # Sequential multi-hue for dark / light backgrounds
+        "darkblue",
+        "darkgold",
+        "darkgreen",
+        "darkmulti",
+        "darkred",
+        "lightgreyred",
+        "lightgreyteal",
+        "lightmulti",
+        "lightorange",
+        "lighttealblue",
+        # Diverging
+        "blueorange",
+        "brownbluegreen",
+        "purplegreen",
+        "pinkyellowgreen",
+        "purpleorange",
+        "redblue",
+        "redgrey",
+        "redyellowblue",
+        "redyellowgreen",
+        "spectral",
+        # Cyclical
+        "rainbow",
+        "sinebow",
+    }
+)
+
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
 You are a data visualization specialist. Given a small, already-aggregated query result and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
@@ -62,7 +145,19 @@ You are a data visualization specialist. Given a small, already-aggregated query
 
 ## Color
 
-Never set any color-related property — no `scale`, `scheme`, `sort`, `range`, or explicit color value — on any encoding, mark, or config, whether the field is categorical, quantitative, or there's only one series. Just map the field to the color channel and leave everything else about its color to the frontend's defaults.
+By default, set no color-related property — no `scale`, `scheme`, `sort`, `range`, or explicit color value — on any encoding, mark, or config, whether the field is categorical, quantitative, or there's only one series. Just map the field to the color channel and leave everything else about its color to the frontend's brand palette.
+
+The one exception is when the description explicitly asks for a specific color. Then honor exactly what was asked, choosing the encoding that fits the chart and the number of series being colored, and set only that — leave every other color to the frontend. Do not invent a color, scheme, or palette the description did not ask for.
+
+Give the color as explicit CSS colors (a hex string or a standard color keyword) whenever the request names a color rather than a palette: a single fixed color as a constant color `value`, and specific per-category colors as a `range` on the color encoding's `scale`. For a gradient over a quantitative or ordinal field, give a `range` of two or more explicit colors, e.g. light-to-dark for low-to-high.
+
+Use a named `scheme` only when the request names or clearly maps to one of the built-in Vega schemes below, and then use its name exactly. Never guess or invent a scheme name. If no built-in scheme matches the requested color, use an explicit `range` instead.
+
+- Categorical: `accent`, `category10`, `category20`, `category20b`, `category20c`, `observable10`, `dark2`, `paired`, `pastel1`, `pastel2`, `set1`, `set2`, `set3`, `tableau10`, `tableau20`.
+- Sequential single-hue: `blues`, `tealblues`, `teals`, `greens`, `browns`, `oranges`, `reds`, `purples`, `warmgreys`, `greys`.
+- Sequential multi-hue: `viridis`, `magma`, `inferno`, `plasma`, `cividis`, `turbo`, `bluegreen`, `bluepurple`, `goldgreen`, `goldorange`, `goldred`, `greenblue`, `orangered`, `purplebluegreen`, `purpleblue`, `purplered`, `redpurple`, `yellowgreenblue`, `yellowgreen`, `yelloworangebrown`, `yelloworangered`.
+- Diverging: `blueorange`, `brownbluegreen`, `purplegreen`, `pinkyellowgreen`, `purpleorange`, `redblue`, `redgrey`, `redyellowblue`, `redyellowgreen`, `spectral`.
+- Cyclical: `rainbow`, `sinebow`.
 
 ## Number formatting
 
@@ -480,6 +575,34 @@ def _collect(node: JsonValue, key: str) -> set[str]:
     return found
 
 
+def _collect_scheme_names(node: JsonValue) -> set[str]:
+    """Collect every color-scheme name a spec references, anywhere within it.
+
+    A `scheme` is either a string (`"scheme": "reds"`) or a `SchemeParams` object whose
+    `name` holds the scheme (`"scheme": {"name": "reds", "extent": [...]}`); this collects
+    the name from both forms so `_validate_chart_spec` can reject an unknown one.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every scheme name found under a `scheme` key.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "scheme":
+                if isinstance(value, str):
+                    found.add(value)
+                elif isinstance(value, dict) and isinstance(value.get("name"), str):
+                    found.add(value["name"])
+            found |= _collect_scheme_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_scheme_names(item)
+    return found
+
+
 def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
@@ -503,6 +626,16 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
         errors.append(
             f"Encoding references column(s) not in the result: {missing}. "
             f"Available columns: {sorted(columns)}."
+        )
+
+    # A `scheme` name outside Vega's built-in set errors only once real data instantiates the
+    # scale — which vl_convert swallows below (it logs to stderr but still returns an SVG), so
+    # the render check never catches it and the chart ships blank. Reject unknown names here.
+    unknown_schemes = sorted(_collect_scheme_names(spec) - _VEGA_COLOR_SCHEMES)
+    if unknown_schemes:
+        errors.append(
+            f"Unknown color scheme(s): {unknown_schemes}. Use an exact Vega scheme name, "
+            "or set explicit colors via a `range` instead."
         )
 
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
