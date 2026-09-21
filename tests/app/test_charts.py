@@ -21,6 +21,7 @@ from app.charts import (
     ChartSpecInvalid,
     _chart_spec_user_prompt,
     _collect,
+    _collect_scheme_names,
     _fetch_rows,
     _geo_stub_node,
     _geo_url_node,
@@ -334,6 +335,50 @@ class TestCollect:
         assert _collect({"field": 5, "x": {"field": "ano"}}, "field") == {"ano"}
 
 
+class TestCollectSchemeNames:
+    def test_collects_a_string_scheme(self):
+        spec = {"encoding": {"color": {"field": "v", "scale": {"scheme": "reds"}}}}
+
+        assert _collect_scheme_names(spec) == {"reds"}
+
+    def test_collects_a_scheme_params_object_by_name(self):
+        # `scale.scheme` may be a SchemeParams object; the name lives under `name`.
+        spec = {
+            "encoding": {
+                "color": {
+                    "field": "v",
+                    "scale": {"scheme": {"name": "viridis", "extent": [0.2, 1]}},
+                }
+            }
+        }
+
+        assert _collect_scheme_names(spec) == {"viridis"}
+
+    def test_collects_every_scheme_across_layers(self):
+        spec = {
+            "layer": [
+                {"encoding": {"color": {"scale": {"scheme": "reds"}}}},
+                {"encoding": {"color": {"scale": {"scheme": {"name": "blues"}}}}},
+            ]
+        }
+
+        assert _collect_scheme_names(spec) == {"reds", "blues"}
+
+    def test_returns_empty_when_no_scheme(self):
+        spec = {
+            "mark": "bar",
+            "encoding": {"color": {"scale": {"range": ["red", "blue"]}}},
+        }
+
+        assert _collect_scheme_names(spec) == set()
+
+    def test_ignores_a_scheme_object_without_a_string_name(self):
+        # A malformed scheme object (no usable name) yields nothing, not a crash.
+        spec = {"encoding": {"color": {"scale": {"scheme": {"extent": [0, 1]}}}}}
+
+        assert _collect_scheme_names(spec) == set()
+
+
 class TestValidateChartSpec:
     """Uses the real vl-convert compiler (in-process)."""
 
@@ -390,8 +435,8 @@ class TestValidateChartSpec:
 
         assert any("compile" in error for error in errors)
 
-    def test_unknown_color_scheme_fails_to_compile(self):
-        """An invalid scheme (d3's RdBu) is rejected by the compile step, like any bad value."""
+    def test_unknown_color_scheme_is_rejected(self):
+        """A scheme name outside Vega's built-in set (here d3's `RdBu`) is flagged."""
         spec = {
             "mark": "rect",
             "encoding": {
@@ -407,7 +452,92 @@ class TestValidateChartSpec:
 
         errors = _validate_chart_spec(spec, ["ano", "mes", "temp"])
 
-        assert any("compile" in error for error in errors)
+        assert any("RdBu" in error and "scheme" in error for error in errors)
+
+    def test_unknown_scheme_in_choropleth_is_caught_by_the_allowlist(self):
+        """The regression that shipped a blank chart.
+
+        A geoshape's bad scheme does not raise in vl-convert (it logs to stderr but still
+        returns an SVG), so the compile step alone never catches it — the allowlist does.
+        """
+        spec = _choropleth_spec()
+        spec["encoding"]["color"]["scale"] = {"scheme": "lightpinkdark"}
+
+        errors = _validate_chart_spec(spec, ["sigla_uf", "valor"])
+
+        assert any("lightpinkdark" in error for error in errors)
+        # The compile step swallows this one, so it is not what caught it.
+        assert not any("compile" in error for error in errors)
+
+    def test_unknown_scheme_params_object_is_rejected(self):
+        """A bad scheme given as a SchemeParams object is caught too."""
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "color": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "scale": {"scheme": {"name": "notarealscheme"}},
+                },
+            },
+        }
+
+        errors = _validate_chart_spec(spec, ["ano", "total"])
+
+        assert any("notarealscheme" in error for error in errors)
+
+    def test_valid_scheme_passes(self):
+        """A real Vega scheme (`reds`) is accepted."""
+        spec = {
+            "mark": "rect",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "mes", "type": "ordinal"},
+                "color": {
+                    "field": "temp",
+                    "type": "quantitative",
+                    "scale": {"scheme": "reds"},
+                },
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["ano", "mes", "temp"]) == []
+
+    def test_valid_scheme_params_object_passes(self):
+        """A real scheme given as a SchemeParams object is accepted."""
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "color": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "scale": {"scheme": {"name": "viridis"}},
+                },
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["ano", "total"]) == []
+
+    def test_explicit_color_range_needs_no_scheme(self):
+        """Explicit `range` colors (no scheme) pass the scheme check."""
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "nominal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "color": {
+                    "field": "ano",
+                    "type": "nominal",
+                    "scale": {"domain": ["2023", "2024"], "range": ["red", "blue"]},
+                },
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["ano", "total"]) == []
 
     def test_choropleth_spec_is_valid(self):
         """A choropleth compiles (real geometry) and its geo properties are allowed."""
