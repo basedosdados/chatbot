@@ -1,0 +1,159 @@
+# ==================================================
+# Broad Topics
+# ==================================================
+- id: broad-topic-economics
+  turns:
+    - user: Economia
+      action: ask
+
+- id: broad-topic-education
+  turns:
+    - user: Dados sobre educação
+      action: ask
+
+# ==================================================
+# General capabilities
+# ==================================================
+- id: capacidades
+  turns:
+    - user: O que é a Base dos Dados e como você pode me ajudar nas minhas análises?
+      action: ask
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+
+- id: capacidades
+  turns:
+    - user: Plote um gráfico...
+      action: ask
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+
+- id: capacidades
+  turns:
+    - user: Gere um arquivo csv ...
+      action: ask
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+
+# ==================================================
+# Non-available data
+# ==================================================
+- id: netflix-dado-inexistente
+  turns:
+    - user: Quantos assinantes a Netflix tem no Brasil atualmente?
+      action: ask
+      notes: Deve buscar por dados de assinantes da Netflix e responder que não temos esses dados disponíveis.
+
+- id: periodo-fora-do-intervalo
+  turns:
+    - user: Quais foram os principais produtos exportados pelo Brasil em 1980?
+      action: ask
+      notes: Deve buscar por dados de exportação e responder que o período solicitado não está disponível.
+
+# ==================================================
+# Concrete questions
+# ==================================================
+- id: comex-stat-exports
+  turns:
+    - user: Quais os principais produtos exportados pelo Brasil?
+      action: query
+      sources:
+        - basedosdados.br_me_comex_stat.ncm_exportacao
+        - basedosdados.br_bd_diretorios_mundo.nomenclatura_comum_mercosul
+      period:
+        last_years: 1
+      notes: Deve consultar o último ano completo e fazer JOIN para obter os nomes dos produtos.
+
+    - user: Quais os principais destinos desses produtos?
+      action: query
+      sources:
+        - basedosdados.br_me_comex_stat.ncm_exportacao
+        - basedosdados.br_bd_diretorios_mundo.pais
+      period:
+        last_years: 1
+      notes: Deve consultar o último ano completo e fazer JOIN para obter os nomes dos países.
+
+    - user: Faça essa mesma análise, mas para as importações agora
+      action: query
+      sources:
+        - basedosdados.br_me_comex_stat.ncm_importacao
+        - basedosdados.br_bd_diretorios_mundo.pais
+        - basedosdados.br_bd_diretorios_mundo.nomenclatura_comum_mercosul
+      period:
+        last_years: 1
+      notes:
+
+- id: ideb-missing-entity
+  turns:
+    - user: Como evoluiu a nota do IDEB no meu município entre 2010 e 2020?
+      action: ask
+      notes: Nenhum município informado -> deve perguntar qual.
+
+    - user: Sou de Piracicaba, SP.
+      action: query
+      sources:
+        - basedosdados.br_inep_ideb.municipio
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      period:
+        start: 2010
+        end: 2020
+      notes: Período explícito 2010-2020 (do turno anterior); município resolvido via diretório.
+
+- id: rais-wage-difference
+  turns:
+    - user: Qual é a diferença salarial média entre homens e mulheres no estado de São Paulo ao longo dos últimos cinco anos?
+      action: query
+      sources:
+        - basedosdados.br_me_rais.microdados_vinculos
+        - basedosdados.br_bd_diretorios_brasil.uf
+      period:
+        last_years: 5
+      notes: Deve consultar os últimos 5 anos em relação ao ano corrente e decodificar a coluna 'sexo'.
+
+- id: mapbiomas-solo
+  turns:
+    - user: Preciso entender a trajetória na mudança do uso do solo no Pará, entre 2015 e 2020
+      action: query
+      sources:
+        - basedosdados.br_mapbiomas_estatisticas.cobertura_uf_classe
+        - basedosdados.br_mapbiomas_estatisticas.classe
+      period:
+        start: 2015
+        end: 2020
+
+    - user: Quero as 5 maiores transições para cada ano nesse mesmo período
+      action: query
+      sources:
+        - basedosdados.br_mapbiomas_estatisticas.transicao_uf_de_para_anual
+        - basedosdados.br_mapbiomas_estatisticas.classe
+      period: match_previous
+
+- id: cnpj-academias
+  turns:
+    - user: Qual o número de academias abertas em 2025 em Piracicaba?
+      action: query
+      sources:
+        - basedosdados.br_me_cnpj.estabelecimentos
+        - basedosdados.br_bd_diretorios_brasil.cnae_2
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      period: latest
+      notes: Deve usar a fotografia mais recente da base, mas filtrando pelo início da atividade em 2025; código CNAE resolvido via tabela de referência e município resolvido via diretório.
+
+- id: cnpj-farmacias
+  turns:
+    - user: Quantas farmácias existem em Campinas?
+      action: query
+      sources:
+        - basedosdados.br_me_cnpj.estabelecimentos
+        - basedosdados.br_bd_diretorios_brasil.cnae_2
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      period: latest
+      notes: Deve usar a fotografia mais recente da base e decodificar a situação cadastral; código CNAE resolvido via tabela de referência e município resolvido via diretório.
+
+- id: gasolina-pib
+  turns:
+    - user: Cruze os dados de preço médio da gasolina comum com o PIB dos 10 municípios com o maior PIB do Brasil
+      action: query
+      sources:
+        - basedosdados.br_ibge_pib.municipio
+        - basedosdados.br_anp_precos_combustiveis.microdados
+        - basedosdados.br_bd_diretorios_brasil.municipio
+      period: latest
+      notes: Deve cruzar os dados utilizando o período mais recente disponível em ambas as tabelas, que é 2023.
