@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.agent.context import AgentContext
+from app.agent.observability import build_observability_metadata
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
@@ -185,6 +186,7 @@ async def send_message(
             "thread_id": thread_id,
             "user_id": user_id,
             "language": thread.language,
+            **build_observability_metadata(thread.language),
         },
     )
 

@@ -547,11 +547,18 @@ class TestSendMessageEndpoint:
         for _ in response.iter_lines():
             pass
 
-        assert app.state.agent.captured_config["metadata"] == {
-            "thread_id": str(thread.id),
-            "user_id": user_id,
-            "language": "es",
-        }
+        metadata = app.state.agent.captured_config["metadata"]
+        assert metadata["thread_id"] == str(thread.id)
+        assert metadata["user_id"] == user_id
+        assert metadata["language"] == "es"
+        assert metadata["environment"]
+        assert metadata["provider"] == "openai"
+        assert metadata["model"]
+        assert metadata["reasoning_effort"]
+        assert metadata["prompt_hash"]
+        assert metadata["prompt_rendering_id"]
+        assert metadata["tool_set_hash"]
+        assert metadata["agent_config_id"]
 
     def test_send_message_missing_content(
         self, client: TestClient, access_token: str, thread: Thread
