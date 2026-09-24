@@ -40,6 +40,12 @@ def _hash_code_identity(agent_dir: Path, main_file: Path) -> str:
 
 _CODE_HASH = _hash_code_identity(_AGENT_DIR, _MAIN_FILE)
 
+# Process start, computed once. `model`/`reasoning_effort`/`provider` come from
+# env vars fixed for the process lifetime, so this timestamp approximates
+# "since when has this configuration been in effect" — a restart is how a new
+# value takes effect. No CI/build injection needed, same as `_CODE_HASH`.
+_CONFIG_EFFECTIVE_SINCE = datetime.now(timezone.utc).isoformat()
+
 
 def _tool_identity(tool: Any) -> dict[str, str]:
     # LangChain's `args` is already the JSON-schema-shaped tool input exposed
@@ -94,6 +100,9 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
         # `code_hash` identifies the code, not the configuration, so it stays
         # out of `agent_config_id`.
         "code_hash": _CODE_HASH,
+        # Unlike `model_config_recorded_at` (recomputed per trace), this is
+        # fixed once at process start — it identifies the deploy, not the trace.
+        "config_effective_since": _CONFIG_EFFECTIVE_SINCE,
         "model_config_recorded_at": datetime.now(timezone.utc).isoformat(),
         **config,
         "tools": tool_snapshots,

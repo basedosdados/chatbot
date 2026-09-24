@@ -54,6 +54,7 @@ def test_tools_have_exact_redacted_fields_and_shared_utc_snapshot(monkeypatch):
     assert set(metadata) == {
         "environment",
         "code_hash",
+        "config_effective_since",
         "model_config_recorded_at",
         "provider",
         "model",
@@ -193,3 +194,22 @@ def test_code_hash_changes_with_source_content(tmp_path):
 
     (agent_dir / "observability.py").write_text("VALUE = 2\n")
     assert observability._hash_code_identity(agent_dir, main_file) != first
+
+
+def test_config_effective_since_is_present_and_stable():
+    metadata = build_observability_metadata("pt")
+    assert metadata["config_effective_since"].endswith("+00:00")
+    assert (
+        build_observability_metadata("pt")["config_effective_since"]
+        == metadata["config_effective_since"]
+    )
+
+
+def test_config_effective_since_is_excluded_from_agent_config_id(monkeypatch):
+    first = build_observability_metadata("pt")
+    monkeypatch.setattr(
+        observability, "_CONFIG_EFFECTIVE_SINCE", "2020-01-01T00:00:00+00:00"
+    )
+    changed = build_observability_metadata("pt")
+    assert changed["config_effective_since"] == "2020-01-01T00:00:00+00:00"
+    assert changed["agent_config_id"] == first["agent_config_id"]
