@@ -106,7 +106,11 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
         "model_config_recorded_at": datetime.now(timezone.utc).isoformat(),
         **config,
         "tools": tool_snapshots,
-        "agent_config_id": _hash(config),
+        "agent_config_id": (agent_config_id := _hash(config)),
+        # Chart label only; derived from `config`, so it stays out of
+        # `agent_config_id` itself. Lets a LangSmith chart grouped by this key
+        # show the model name instead of a bare hash.
+        "agent_config_label": f"{config['model']} · {agent_config_id[:8]}",
     }
 
 

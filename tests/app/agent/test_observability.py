@@ -68,6 +68,7 @@ def test_tools_have_exact_redacted_fields_and_shared_utc_snapshot(monkeypatch):
         "model_call_limit",
         "tools",
         "agent_config_id",
+        "agent_config_label",
     }
     assert len(metadata["tools"]) == 2
     timestamps = {tool["created_at"] for tool in metadata["tools"]}
@@ -156,6 +157,13 @@ def test_agent_config_id_ignores_environment(monkeypatch):
     changed = build_observability_metadata("pt")
     assert changed["environment"] == other_environment
     assert changed["agent_config_id"] == first["agent_config_id"]
+
+
+def test_agent_config_label_embeds_model_and_config_id_prefix():
+    metadata = build_observability_metadata("pt")
+    assert metadata["agent_config_label"] == (
+        f"{metadata['model']} · {metadata['agent_config_id'][:8]}"
+    )
 
 
 def test_metadata_exposes_runtime_settings_without_response_schema():
