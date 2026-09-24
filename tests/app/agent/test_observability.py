@@ -68,7 +68,7 @@ def test_tools_have_exact_redacted_fields_and_shared_utc_snapshot(monkeypatch):
             "name",
             "docstring_hash",
             "input_schema_hash",
-            "output_schema_hash",
+            "response_format_hash",
             "id_tool",
             "docstring",
             "created_at",
@@ -98,3 +98,13 @@ def test_tool_identity_is_stable_and_changes_with_definition(monkeypatch):
     tools[0].description = "alpha tool"
     tools[0].name = "renamed"
     assert build_observability_metadata("pt")["tools"][0]["id_tool"] != first["tools"][0]["id_tool"]
+
+
+def test_response_format_changes_tool_identity(monkeypatch):
+    tools = _tools()
+    monkeypatch.setattr(BDToolkit, "get_tools", staticmethod(lambda: tools))
+    first = build_observability_metadata("pt")["tools"][0]
+    tools[0].response_format = "content_and_artifact"
+    changed = build_observability_metadata("pt")["tools"][0]
+    assert changed["response_format_hash"] != first["response_format_hash"]
+    assert changed["id_tool"] != first["id_tool"]

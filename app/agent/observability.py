@@ -23,7 +23,7 @@ def _tool_identity(tool: Any) -> dict[str, str]:
         "name": tool.name,
         "docstring_hash": _hash(tool.description or ""),
         "input_schema_hash": _hash(schema_json),
-        "output_schema_hash": _hash(getattr(tool, "response_format", "content")),
+        "response_format_hash": _hash(getattr(tool, "response_format", "content")),
     }
     identity["id_tool"] = _hash(identity)
     return identity
