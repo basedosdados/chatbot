@@ -1,6 +1,10 @@
 from datetime import datetime
 from types import SimpleNamespace
 
+import pytest
+from pydantic import BaseModel
+
+from app.agent import observability, runtime_config
 from app.agent.observability import build_observability_metadata
 from app.agent.tools import BDToolkit
 
@@ -53,9 +57,13 @@ def test_tools_have_exact_redacted_fields_and_shared_utc_snapshot(monkeypatch):
         "provider",
         "model",
         "reasoning_effort",
+        "reasoning_summary",
         "prompt_hash",
         "prompt_rendering_id",
         "tool_set_hash",
+        "response_schema_hash",
+        "summarization",
+        "model_call_limit",
         "tools",
         "agent_config_id",
     }
@@ -108,3 +116,51 @@ def test_response_format_changes_tool_identity(monkeypatch):
     changed = build_observability_metadata("pt")["tools"][0]
     assert changed["response_format_hash"] != first["response_format_hash"]
     assert changed["id_tool"] != first["id_tool"]
+
+
+class _OtherResponse(BaseModel):
+    answer: str
+
+
+@pytest.mark.parametrize(
+    ("target", "name", "value"),
+    [
+        (runtime_config, "REASONING_SUMMARY", "detailed"),
+        (runtime_config, "SUMMARIZATION_TRIGGER", ("tokens", 400_000)),
+        (runtime_config, "SUMMARIZATION_KEEP", ("tokens", 50_000)),
+        (runtime_config, "SUMMARIZATION_TRIM_TOKENS", 4_000),
+        (runtime_config, "MODEL_CALL_RUN_LIMIT", 10),
+        (runtime_config, "MODEL_CALL_EXIT_BEHAVIOR", "error"),
+        (observability, "StructuredResponse", _OtherResponse),
+    ],
+)
+def test_agent_config_id_changes_with_covered_runtime_setting(
+    monkeypatch, target, name, value
+):
+    first_id = build_observability_metadata("pt")["agent_config_id"]
+    assert build_observability_metadata("pt")["agent_config_id"] == first_id
+    monkeypatch.setattr(target, name, value)
+    assert build_observability_metadata("pt")["agent_config_id"] != first_id
+
+
+def test_agent_config_id_ignores_environment(monkeypatch):
+    first = build_observability_metadata("pt")
+    other_environment = "staging" if first["environment"] != "staging" else "production"
+    monkeypatch.setattr(
+        observability,
+        "settings",
+        observability.settings.model_copy(update={"ENVIRONMENT": other_environment}),
+    )
+    changed = build_observability_metadata("pt")
+    assert changed["environment"] == other_environment
+    assert changed["agent_config_id"] == first["agent_config_id"]
+
+
+def test_metadata_exposes_runtime_settings_without_response_schema():
+    metadata = build_observability_metadata("pt")
+    assert metadata["reasoning_summary"] == runtime_config.REASONING_SUMMARY
+    assert metadata["summarization"]["trigger"] == runtime_config.SUMMARIZATION_TRIGGER
+    limit = metadata["model_call_limit"]
+    assert limit["run_limit"] == runtime_config.MODEL_CALL_RUN_LIMIT
+    assert len(metadata["response_schema_hash"]) == 64
+    assert "follow_up_prompts" not in str(metadata)

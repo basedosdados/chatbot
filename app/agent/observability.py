@@ -4,7 +4,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from app.agent import runtime_config
 from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.schemas import StructuredResponse
 from app.agent.tools import BDToolkit
 from app.settings import settings
 
@@ -47,19 +49,25 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
         "provider": "openai",
         "model": settings.MODEL_URI,
         "reasoning_effort": settings.REASONING_EFFORT,
+        "reasoning_summary": runtime_config.REASONING_SUMMARY,
         "prompt_hash": prompt_hash,
         "prompt_rendering_id": _hash({"prompt_hash": prompt_hash, "language": language}),
         "tool_set_hash": tool_set_hash,
+        "response_schema_hash": _hash(StructuredResponse.model_json_schema()),
+        "summarization": {
+            "trigger": runtime_config.SUMMARIZATION_TRIGGER,
+            "keep": runtime_config.SUMMARIZATION_KEEP,
+            "trim_tokens_to_summarize": runtime_config.SUMMARIZATION_TRIM_TOKENS,
+        },
+        "model_call_limit": {
+            "run_limit": runtime_config.MODEL_CALL_RUN_LIMIT,
+            "exit_behavior": runtime_config.MODEL_CALL_EXIT_BEHAVIOR,
+        },
     }
     return {
         "environment": settings.ENVIRONMENT,
         "model_config_recorded_at": datetime.now(timezone.utc).isoformat(),
-        "provider": config["provider"],
-        "model": config["model"],
-        "reasoning_effort": config["reasoning_effort"],
-        "prompt_hash": prompt_hash,
-        "prompt_rendering_id": config["prompt_rendering_id"],
-        "tool_set_hash": tool_set_hash,
+        **config,
         "tools": tool_snapshots,
         "agent_config_id": _hash(config),
     }
