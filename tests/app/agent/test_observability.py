@@ -53,6 +53,7 @@ def test_tools_have_exact_redacted_fields_and_shared_utc_snapshot(monkeypatch):
 
     assert set(metadata) == {
         "environment",
+        "code_hash",
         "model_config_recorded_at",
         "provider",
         "model",
@@ -164,3 +165,31 @@ def test_metadata_exposes_runtime_settings_without_response_schema():
     assert limit["run_limit"] == runtime_config.MODEL_CALL_RUN_LIMIT
     assert len(metadata["response_schema_hash"]) == 64
     assert "follow_up_prompts" not in str(metadata)
+
+
+def test_code_hash_is_present_and_stable():
+    metadata = build_observability_metadata("pt")
+    assert len(metadata["code_hash"]) == 64
+    assert build_observability_metadata("pt")["code_hash"] == metadata["code_hash"]
+
+
+def test_code_hash_is_excluded_from_agent_config_id(monkeypatch):
+    first = build_observability_metadata("pt")
+    monkeypatch.setattr(observability, "_CODE_HASH", "0" * 64)
+    changed = build_observability_metadata("pt")
+    assert changed["code_hash"] == "0" * 64
+    assert changed["agent_config_id"] == first["agent_config_id"]
+
+
+def test_code_hash_changes_with_source_content(tmp_path):
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    main_file = tmp_path / "main.py"
+    (agent_dir / "observability.py").write_text("VALUE = 1\n")
+    main_file.write_text("VALUE = 1\n")
+
+    first = observability._hash_code_identity(agent_dir, main_file)
+    assert first == observability._hash_code_identity(agent_dir, main_file)
+
+    (agent_dir / "observability.py").write_text("VALUE = 2\n")
+    assert observability._hash_code_identity(agent_dir, main_file) != first

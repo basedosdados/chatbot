@@ -2,6 +2,7 @@
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.agent import runtime_config
@@ -10,10 +11,34 @@ from app.agent.schemas import StructuredResponse
 from app.agent.tools import BDToolkit
 from app.settings import settings
 
+# The two source locations that define agent behavior. Hashed once at import
+# time: the container never changes these files while the process is running.
+_AGENT_DIR = Path(__file__).resolve().parent
+_MAIN_FILE = _AGENT_DIR.parent / "main.py"
+
 
 def _hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _hash_code_identity(agent_dir: Path, main_file: Path) -> str:
+    """Content hash of the agent's own source, computed in Python.
+
+    Unlike a Git SHA, this needs no value injected from outside the running
+    process — `.dockerignore` excludes `.git/`, so nothing inside the container
+    can read the real commit SHA. Hashing the source content that is already
+    here gives an equivalent identity: it changes whenever this code changes,
+    computed the same way `prompt_hash`/`tool_set_hash` already are.
+    """
+    files = sorted(agent_dir.rglob("*.py")) + [main_file]
+    payload = {
+        str(path.relative_to(agent_dir.parent)): path.read_text() for path in files
+    }
+    return _hash(payload)
+
+
+_CODE_HASH = _hash_code_identity(_AGENT_DIR, _MAIN_FILE)
 
 
 def _tool_identity(tool: Any) -> dict[str, str]:
@@ -66,6 +91,9 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
     }
     return {
         "environment": settings.ENVIRONMENT,
+        # `code_hash` identifies the code, not the configuration, so it stays
+        # out of `agent_config_id`.
+        "code_hash": _CODE_HASH,
         "model_config_recorded_at": datetime.now(timezone.utc).isoformat(),
         **config,
         "tools": tool_snapshots,
