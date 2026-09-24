@@ -559,6 +559,8 @@ class TestSendMessageEndpoint:
         assert metadata["prompt_rendering_id"]
         assert metadata["tool_set_hash"]
         assert metadata["agent_config_id"]
+        assert metadata["tools"]
+        assert all("created_at" in tool for tool in metadata["tools"])
 
     def test_send_message_missing_content(
         self, client: TestClient, access_token: str, thread: Thread
