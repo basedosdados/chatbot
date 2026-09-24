@@ -6,7 +6,10 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.agent.context import AgentContext
-from app.agent.observability import build_observability_metadata
+from app.agent.observability import (
+    build_observability_metadata,
+    build_observability_tags,
+)
 from app.api.dependencies import Agent, AsyncDB, FeedbackSender, RunningRuns, UserID
 from app.api.schemas import ConfigDict, UserMessage
 from app.api.streaming import run_agent, stream_events
@@ -179,6 +182,7 @@ async def send_message(
 
     # `configurable` carries only what the langgraph checkpointer needs (thread_id).
     # `metadata` is what LangSmith surfaces as trace attributes, declared explicitly.
+    observability_metadata = build_observability_metadata(thread.language)
     config = ConfigDict(
         run_id=run_id,
         configurable={"thread_id": thread_id},
@@ -186,8 +190,9 @@ async def send_message(
             "thread_id": thread_id,
             "user_id": user_id,
             "language": thread.language,
-            **build_observability_metadata(thread.language),
+            **observability_metadata,
         },
+        tags=build_observability_tags(observability_metadata),
     )
 
     # Application data the tools and middleware read at run time rides on the context.

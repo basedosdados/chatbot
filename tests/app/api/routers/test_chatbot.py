@@ -562,6 +562,12 @@ class TestSendMessageEndpoint:
         assert metadata["tools"]
         assert all("created_at" in tool for tool in metadata["tools"])
 
+        tags = app.state.agent.captured_config["tags"]
+        assert f"provider:{metadata['provider']}" in tags
+        assert f"model:{metadata['model']}" in tags
+        assert f"toolset:{metadata['tool_set_hash'][:8]}" in tags
+        assert any(tag.startswith("release_date:") for tag in tags)
+
     def test_send_message_missing_content(
         self, client: TestClient, access_token: str, thread: Thread
     ):

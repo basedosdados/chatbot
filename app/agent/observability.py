@@ -108,3 +108,20 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
         "tools": tool_snapshots,
         "agent_config_id": _hash(config),
     }
+
+
+def build_observability_tags(metadata: dict[str, Any]) -> list[str]:
+    """LangSmith native run tags, derived from an already-built metadata dict.
+
+    Tags are a true multi-value list (unlike a Git tag name), so each fact gets
+    its own `key:value` entry — searchable and filterable independently in the
+    LangSmith UI, without writing `metadata.<field>:<value>` queries.
+    """
+    return [
+        f"provider:{metadata['provider']}",
+        f"model:{metadata['model']}",
+        # Day granularity: process restarts within the same day (e.g. replica
+        # rollout) still land in one release group.
+        f"release_date:{metadata['config_effective_since'][:10]}",
+        f"toolset:{metadata['tool_set_hash'][:8]}",
+    ]

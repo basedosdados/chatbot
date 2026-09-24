@@ -213,3 +213,24 @@ def test_config_effective_since_is_excluded_from_agent_config_id(monkeypatch):
     changed = build_observability_metadata("pt")
     assert changed["config_effective_since"] == "2020-01-01T00:00:00+00:00"
     assert changed["agent_config_id"] == first["agent_config_id"]
+
+
+def test_build_observability_tags_covers_provider_model_release_and_toolset():
+    metadata = build_observability_metadata("pt")
+    tags = observability.build_observability_tags(metadata)
+
+    assert tags == [
+        f"provider:{metadata['provider']}",
+        f"model:{metadata['model']}",
+        f"release_date:{metadata['config_effective_since'][:10]}",
+        f"toolset:{metadata['tool_set_hash'][:8]}",
+    ]
+
+
+def test_build_observability_tags_uses_day_granularity_for_release_date():
+    metadata = build_observability_metadata("pt")
+    metadata["config_effective_since"] = "2026-09-24T11:06:00.123456+00:00"
+
+    tags = observability.build_observability_tags(metadata)
+
+    assert "release_date:2026-09-24" in tags
