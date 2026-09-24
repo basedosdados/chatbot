@@ -14,6 +14,7 @@ from loguru import logger
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from app.agent import runtime_config
 from app.agent.context import AgentContext
 from app.agent.middleware import system_prompt_middleware
 from app.agent.prompts import SYSTEM_PROMPT
@@ -58,23 +59,20 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             model=settings.MODEL_URI,
             reasoning={
                 "effort": settings.REASONING_EFFORT,
-                "summary": "auto",
+                "summary": runtime_config.REASONING_SUMMARY,
             },
         )
 
-        # Once the running context passes the trigger, summarize: older turns
-        # collapse into one summary while the most recent tokens are kept verbatim,
-        # and the summary is built from the full discarded history (no trimming).
         summ_middleware = SummarizationMiddleware(
             model=model,
-            trigger=("tokens", 500_000),
-            keep=("tokens", 100_000),
-            trim_tokens_to_summarize=None,
+            trigger=runtime_config.SUMMARIZATION_TRIGGER,
+            keep=runtime_config.SUMMARIZATION_KEEP,
+            trim_tokens_to_summarize=runtime_config.SUMMARIZATION_TRIM_TOKENS,
         )
 
         limit_middleware = ModelCallLimitMiddleware(
-            run_limit=20,
-            exit_behavior="end",
+            run_limit=runtime_config.MODEL_CALL_RUN_LIMIT,
+            exit_behavior=runtime_config.MODEL_CALL_EXIT_BEHAVIOR,
         )
 
         async with AsyncConnectionPool(
