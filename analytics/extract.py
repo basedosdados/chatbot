@@ -120,13 +120,16 @@ def fetch_rows(
     include_deleted: bool,
     since: date | None,
     until: date | None,
+    include_emails: bool = False,
 ):
     """Return (question_rows, thread_rows, empty_conversations) from the database.
 
     A question row is one USER message joined to the ASSISTANT message that
     answered it (linked via Message.user_message_id) plus that answer's feedback
     and query-handle count. Every row carries an `is_team` flag, derived from
-    `email_by_user` (the backend account uuid -> email map).
+    `email_by_user` (the backend account uuid -> email map). The raw `email` is
+    added next to `user_id` only when `include_emails` is set — it's personal data,
+    kept out of the export by default.
 
     Messages stream ordered by thread, so only one conversation is held at a time
     on the read side; the small per-message aggregates are queried up front.
@@ -218,6 +221,11 @@ def fetch_rows(
             question_rows.append(
                 {
                     "user_id": str(thread.user_id),
+                    **(
+                        {"email": email_by_user.get(str(thread.user_id))}
+                        if include_emails
+                        else {}
+                    ),
                     "is_team": _is_team(str(thread.user_id)),
                     "thread_id": str(thread_id),
                     "thread_title": thread.title,
@@ -247,6 +255,11 @@ def fetch_rows(
         if counted_for_thread:
             thread_stats[thread_id] = {
                 "user_id": str(thread.user_id),
+                **(
+                    {"email": email_by_user.get(str(thread.user_id))}
+                    if include_emails
+                    else {}
+                ),
                 "is_team": _is_team(str(thread.user_id)),
                 "thread_id": str(thread_id),
                 "thread_title": thread.title,

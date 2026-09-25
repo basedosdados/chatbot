@@ -87,6 +87,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip conversations the user soft-deleted (default: include them)",
     )
     parser.add_argument(
+        "--include-emails",
+        action="store_true",
+        help=(
+            "add each account's email next to user_id (personal data; off by "
+            "default, only the derived is_team flag is exported otherwise)"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -209,6 +217,7 @@ def main() -> None:
             include_deleted=not args.exclude_deleted,
             since=args.since,
             until=args.until,
+            include_emails=args.include_emails,
         )
 
     if not question_rows:

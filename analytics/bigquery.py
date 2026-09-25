@@ -95,6 +95,11 @@ def load_to_bigquery(
         (QUESTIONS_TABLE, _QUESTIONS_SCHEMA, question_rows),
         (THREADS_TABLE, _THREADS_SCHEMA, thread_rows),
     ):
+        # The optional `email` column (see fetch_rows --include-emails) sits right
+        # after user_id; add it to the schema only when the rows actually carry it.
+        if rows and "email" in rows[0]:
+            schema = [schema[0], bq.SchemaField("email", "STRING"), *schema[1:]]
+
         table_ref = dataset_ref.table(table_name)
         job_config = bq.LoadJobConfig(
             schema=schema,
