@@ -32,6 +32,12 @@ from eval.lib.judge import (
 
 Results = dict[str, list[dict[str, Any]]]
 
+# Feedback keys where a lower score is better. Every other key is better when higher.
+LOWER_IS_BETTER = frozenset({"tool_error_rate", "model_calls", "judge_errors"})
+
+# Feedback keys that hold a count, not a 0-1 rate.
+COUNT_KEYS = frozenset({"model_calls", "judge_errors"})
+
 # Reference SQL result rows, by SQL text, shared by every judge call in the process so
 # each distinct `reference_sql` runs once per experiment.
 _REFERENCE_CACHE: dict[str, list] = {}
