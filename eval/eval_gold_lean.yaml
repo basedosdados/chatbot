@@ -14,23 +14,23 @@
 # ==================================================
 # General capabilities
 # ==================================================
-- id: capacidades
+- id: capacidades-plataforma
   turns:
     - user: O que é a Base dos Dados e como você pode me ajudar nas minhas análises?
       action: ask
-      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente.
 
-- id: capacidades
+- id: capacidades-grafico
   turns:
     - user: Plote um gráfico...
       action: ask
-      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente.
 
-- id: capacidades
+- id: capacidades-csv
   turns:
     - user: Gere um arquivo csv ...
       action: ask
-      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente."
+      notes: Pergunta sobre a plataforma/capacidades — não é um pedido de dados. Deve responder diretamente.
 
 # ==================================================
 # Non-available data
@@ -123,7 +123,9 @@
       sources:
         - basedosdados.br_mapbiomas_estatisticas.transicao_uf_de_para_anual
         - basedosdados.br_mapbiomas_estatisticas.classe
-      period: match_previous
+      period:
+        start: 2015
+        end: 2020
 
 - id: cnpj-academias
   turns:

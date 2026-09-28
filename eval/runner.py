@@ -390,7 +390,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--gold", default=str(EVAL_DIR / "eval_gold.yaml"))
+    parser.add_argument("--gold", default=str(EVAL_DIR / "eval_gold_lean.yaml"))
     parser.add_argument("--repeats", type=int, default=5, help="Replays per thread")
     parser.add_argument(
         "--effort",
@@ -441,7 +441,7 @@ async def main() -> None:
     effort = args.effort
     threads = [
         thread
-        for thread in gold.load_threads(args.gold)
+        for thread in gold.validate(gold.load_threads(args.gold))
         if not args.thread or thread["id"] in args.thread
     ]
 

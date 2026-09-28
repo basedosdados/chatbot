@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from eval.lib import period
+
 # ---- action vocabulary -------------------------------------------------------
 # The trace only proves query-vs-not, so that's the whole taxonomy: `query` ran
 # execute_bigquery_sql; `ask` ran none (whether it explored the catalog first, asked
@@ -55,6 +57,63 @@ def load_threads(path: str | Path) -> list[dict]:
     """
     with open(path) as file:
         return yaml.safe_load(file)
+
+
+def validate(threads: list[dict]) -> list[dict]:
+    """Reject a malformed gold set before any agent call spends money on it.
+
+    Checks that thread ids are unique (a dataset example and the turn index key on
+    them), that every `action` is in :data:`ACTIONS`, and that every `period` is a rule
+    the scorer knows (see the period vocabulary above).
+
+    Args:
+        threads: The threads from :func:`load_threads`.
+
+    Returns:
+        The same threads, unchanged, so a caller can chain it.
+
+    Raises:
+        ValueError: One message per problem, all problems in one error.
+    """
+    problems = []
+    seen: set[str] = set()
+    for thread in threads:
+        thread_id = thread["id"]
+        if thread_id in seen:
+            problems.append(f"{thread_id}: duplicate thread id")
+        seen.add(thread_id)
+        for turn_index, turn in enumerate(thread["turns"]):
+            where = f"{thread_id}[{turn_index}]"
+            if turn.get("action") not in ACTIONS:
+                problems.append(f"{where}: unknown action {turn.get('action')!r}")
+            if not _is_known_period(turn.get("period")):
+                problems.append(f"{where}: unknown period {turn.get('period')!r}")
+    if problems:
+        raise ValueError("invalid gold set:\n" + "\n".join(problems))
+    return threads
+
+
+def _is_known_period(rule: object) -> bool:
+    """Whether `rule` is one of the period forms the scorer reads."""
+    if rule in _UNSCORED_PERIOD or rule == PERIOD_LATEST:
+        return True
+    if isinstance(rule, dict):
+        if rule.keys() == {"last_years"}:
+            years = rule["last_years"]
+            return isinstance(years, int) and not isinstance(years, bool) and years > 0
+        if rule.keys() == {"start", "end"}:
+            return all(_is_point(rule[key]) for key in ("start", "end"))
+        return False
+    return _is_point(rule)
+
+
+def _is_point(value: object) -> bool:
+    """Whether `value` is a concrete year / month / day (`2025`, `"2026-05[-01]"`)."""
+    return (
+        isinstance(value, (int, str))
+        and not isinstance(value, bool)
+        and (period.parse_period(value) is not None)
+    )
 
 
 def index_turns(threads: list[dict]) -> dict[ThreadKey, GoldTurn]:
