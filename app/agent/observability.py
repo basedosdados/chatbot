@@ -62,8 +62,17 @@ def _tool_identity(tool: Any) -> dict[str, str]:
     return identity
 
 
-def build_observability_metadata(language: str) -> dict[str, Any]:
-    """Build trace-safe identities; never includes prompt or tool content."""
+def build_observability_metadata(
+    language: str, reasoning_effort: str | None = None
+) -> dict[str, Any]:
+    """Build trace-safe identities; never includes prompt or tool content.
+
+    Args:
+        language: The thread language; it changes `prompt_rendering_id`.
+        reasoning_effort: The effort of the agent under test. The eval harness
+            overrides it per run, so `agent_config_id` matches that config.
+            None means `settings.REASONING_EFFORT`.
+    """
     snapshot_created_at = datetime.now(timezone.utc).isoformat()
     tools = sorted(BDToolkit.get_tools(), key=lambda tool: tool.name)
     tool_snapshots = []
@@ -79,7 +88,7 @@ def build_observability_metadata(language: str) -> dict[str, Any]:
     config = {
         "provider": "openai",
         "model": settings.MODEL_URI,
-        "reasoning_effort": settings.REASONING_EFFORT,
+        "reasoning_effort": reasoning_effort or settings.REASONING_EFFORT,
         "reasoning_summary": runtime_config.REASONING_SUMMARY,
         "prompt_hash": prompt_hash,
         "prompt_rendering_id": _hash({"prompt_hash": prompt_hash, "language": language}),

@@ -242,3 +242,20 @@ def test_build_observability_tags_uses_day_granularity_for_release_date():
     tags = observability.build_observability_tags(metadata)
 
     assert "release_date:2026-09-24" in tags
+
+
+def test_reasoning_effort_override_changes_agent_config_id():
+    default = build_observability_metadata("pt")
+    other_effort = "low" if default["reasoning_effort"] != "low" else "high"
+    changed = build_observability_metadata("pt", reasoning_effort=other_effort)
+    assert changed["reasoning_effort"] == other_effort
+    assert changed["agent_config_id"] != default["agent_config_id"]
+
+
+def test_reasoning_effort_default_matches_settings():
+    default = build_observability_metadata("pt")
+    explicit = build_observability_metadata(
+        "pt", reasoning_effort=observability.settings.REASONING_EFFORT
+    )
+    assert default["reasoning_effort"] == observability.settings.REASONING_EFFORT
+    assert explicit["agent_config_id"] == default["agent_config_id"]
