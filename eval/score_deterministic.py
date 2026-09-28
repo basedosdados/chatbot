@@ -448,6 +448,40 @@ def score_tool_error_rate(turn: dict) -> float | None:
 # =============================================================================
 # Per-turn scoring
 # =============================================================================
+def score_answer(structured: dict | None, is_query: bool) -> dict[str, bool]:
+    """The checks on the structured answer that need no gold turn.
+
+    `eval/online/code_evaluator.py` copies this logic for production traces, and
+    `tests/eval/test_online_code_evaluator.py` checks that the copy agrees.
+
+    Args:
+        structured: The turn's structured response, or None when there is none.
+        is_query: Whether the turn executed SQL.
+
+    Returns:
+        `query_has_sources` on a query turn, and the answer-shape checks when there
+        is a structured response. A check that does not apply is left out.
+    """
+    checks: dict[str, bool] = {}
+    if is_query:
+        checks["query_has_sources"] = (
+            bool(structured["data_sources"]) if structured else False
+        )
+    if structured is not None:
+        response = structured["response"] or ""
+        checks["response_nonempty"] = bool(response.strip())
+        checks["prose_no_leak"] = not (
+            "```sql" in response.lower() or bool(sql.gcp_refs_in_text(response))
+        )
+        follow_ups = structured["follow_up_prompts"]
+        checks["followups_3"] = (
+            isinstance(follow_ups, list)
+            and len(follow_ups) == 3
+            and all((prompt or "").strip() for prompt in follow_ups)
+        )
+    return checks
+
+
 def score_turn(
     turn: dict,
     gold_turn: dict,
@@ -479,9 +513,6 @@ def score_turn(
         checks["coded_cols_translated"] = score_coded_cols_translated(
             analysis, table_meta, tools_used
         )
-        checks["query_has_sources"] = (
-            bool(turn["structured"]["data_sources"]) if turn["structured"] else False
-        )
 
     # Structured-field checks only when the agent produced a structured response.
     structured = turn["structured"]
@@ -494,17 +525,7 @@ def score_turn(
             if is_query and analysis.tables:
                 checks["sources_match_sql"] = reported_gcp <= analysis.tables
                 checks["sources_exact_match"] = reported_gcp == analysis.tables
-        response = structured["response"] or ""
-        checks["response_nonempty"] = bool(response.strip())
-        checks["prose_no_leak"] = not (
-            "```sql" in response.lower() or bool(sql.gcp_refs_in_text(response))
-        )
-        follow_ups = structured["follow_up_prompts"]
-        checks["followups_3"] = (
-            isinstance(follow_ups, list)
-            and len(follow_ups) == 3
-            and all((prompt or "").strip() for prompt in follow_ups)
-        )
+    checks.update(score_answer(structured, is_query))
     return checks
 
 
