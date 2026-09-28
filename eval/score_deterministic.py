@@ -381,6 +381,71 @@ def score_coded_cols_translated(
 
 
 # =============================================================================
+# Tool-calling and tool-correctness checks (read each turn's ordered `tool_calls`)
+# =============================================================================
+def turn_ran(turn: dict) -> bool:
+    """Whether the turn produced a trace (so its tool calls were recorded)."""
+    return turn["status"] in ("ok", "no_structured")
+
+
+def score_details_before_query(unit: dict) -> dict[int, bool | None]:
+    """Per turn: the model saw `get_table_details` for every table its SQL names.
+
+    A `get_table_details` result from an earlier turn counts. Inside a turn, a result
+    counts only for a query asked at a later model step, so a details call made in
+    parallel with the query does not count. None on a turn with no SQL that names a
+    table.
+
+    Args:
+        unit: A transcript unit (one replay of one thread).
+
+    Returns:
+        `turn_index -> bool | None` for every turn that ran.
+    """
+    detailed: set[str] = set()
+    scores: dict[int, bool | None] = {}
+    for turn in unit["turns"]:
+        if not turn_ran(turn):
+            continue
+        calls = turn["tool_calls"]
+        this_turn = [
+            (call["step"], call["gcp_id"])
+            for call in calls
+            if call["name"] == "get_table_details" and call["gcp_id"]
+        ]
+        verdict: bool | None = None
+        for call in calls:
+            if call["name"] != "execute_bigquery_sql" or not call["sql"]:
+                continue
+            tree = sql.parse(call["sql"])
+            tables = sql.referenced_tables(tree) if tree is not None else set()
+            if not tables:
+                continue
+            seen = detailed | {
+                gcp_id
+                for step, gcp_id in this_turn
+                if step is not None and call["step"] is not None and step < call["step"]
+            }
+            verdict = (verdict is not False) and tables <= seen
+        scores[turn["turn_index"]] = verdict
+        detailed |= {gcp_id for _, gcp_id in this_turn}
+    return scores
+
+
+def score_within_call_limit(turn: dict) -> bool | None:
+    """The turn finished without a ModelCallLimitMiddleware stop; None if it did not run."""
+    return not turn["call_limit_hit"] if turn_ran(turn) else None
+
+
+def score_tool_error_rate(turn: dict) -> float | None:
+    """The share of the turn's tool calls that failed; None with no tool call (lower is better)."""
+    if not turn_ran(turn) or not turn["tool_calls"]:
+        return None
+    failed = sum(call["status"] == "error" for call in turn["tool_calls"])
+    return failed / len(turn["tool_calls"])
+
+
+# =============================================================================
 # Per-turn scoring
 # =============================================================================
 def score_turn(

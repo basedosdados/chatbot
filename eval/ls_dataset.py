@@ -93,9 +93,17 @@ def plan_sync(
 
     Returns:
         `(to_create, to_update, to_delete)`. An update dict carries the stored `id`.
-        `to_delete` holds stored examples whose thread left the gold file.
+        `to_delete` holds stored examples whose thread left the gold file, and every
+        copy after the first when the dataset holds one thread more than once.
     """
-    by_thread = {(example.metadata or {}).get("thread"): example for example in stored}
+    by_thread: dict[str | None, Any] = {}
+    duplicates = []
+    for example in stored:
+        thread_id = (example.metadata or {}).get("thread")
+        if thread_id in by_thread:
+            duplicates.append(example)
+        else:
+            by_thread[thread_id] = example
     to_create, to_update = [], []
     for thread in threads:
         wanted = build_example(thread)
@@ -104,7 +112,7 @@ def plan_sync(
             to_create.append(wanted)
         elif not _is_current(example, wanted):
             to_update.append({"id": example.id, **wanted})
-    return to_create, to_update, list(by_thread.values())
+    return to_create, to_update, list(by_thread.values()) + duplicates
 
 
 def sync(

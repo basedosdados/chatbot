@@ -65,3 +65,15 @@ def test_validate_reports_every_problem_at_once():
         gold.validate([_thread("a", action="clarify", period="soon")])
     assert "unknown action" in str(error.value)
     assert "unknown period" in str(error.value)
+
+
+@pytest.mark.parametrize("turns", [[], None])
+def test_validate_rejects_a_thread_without_turns(turns):
+    with pytest.raises(ValueError, match="empty: a thread needs at least one turn"):
+        gold.validate([{"id": "empty", "turns": turns}])
+
+
+@pytest.mark.parametrize("user", [None, "", "   "])
+def test_validate_rejects_a_turn_without_a_user_message(user):
+    with pytest.raises(ValueError, match=r"t\[0\]: missing user message"):
+        gold.validate([_thread(user=user)])

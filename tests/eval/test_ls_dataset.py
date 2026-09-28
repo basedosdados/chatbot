@@ -91,3 +91,17 @@ def test_dataset_tag_follows_the_gold_file_content(tmp_path):
     assert ls_dataset.dataset_tag(gold_file) == first
     gold_file.write_text("- id: b\n")
     assert ls_dataset.dataset_tag(gold_file) != first
+
+
+def test_plan_sync_deletes_duplicate_copies_of_one_thread():
+    stored = [
+        _stored("id-1", THREADS[0]),
+        _stored("id-1-copy", THREADS[0]),
+        _stored("id-2", THREADS[1]),
+    ]
+
+    to_create, to_update, to_delete = ls_dataset.plan_sync(THREADS, stored)
+
+    assert to_create == []
+    assert to_update == []
+    assert [example.id for example in to_delete] == ["id-1-copy"]

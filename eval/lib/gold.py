@@ -63,8 +63,9 @@ def validate(threads: list[dict]) -> list[dict]:
     """Reject a malformed gold set before any agent call spends money on it.
 
     Checks that thread ids are unique (a dataset example and the turn index key on
-    them), that every `action` is in :data:`ACTIONS`, and that every `period` is a rule
-    the scorer knows (see the period vocabulary above).
+    them), that every thread has at least one turn and every turn a `user` message,
+    that every `action` is in :data:`ACTIONS`, and that every `period` is a rule the
+    scorer knows (see the period vocabulary above).
 
     Args:
         threads: The threads from :func:`load_threads`.
@@ -82,8 +83,15 @@ def validate(threads: list[dict]) -> list[dict]:
         if thread_id in seen:
             problems.append(f"{thread_id}: duplicate thread id")
         seen.add(thread_id)
-        for turn_index, turn in enumerate(thread["turns"]):
+        turns = thread.get("turns")
+        if not isinstance(turns, list) or not turns:
+            problems.append(f"{thread_id}: a thread needs at least one turn")
+            continue
+        for turn_index, turn in enumerate(turns):
             where = f"{thread_id}[{turn_index}]"
+            user = turn.get("user")
+            if not isinstance(user, str) or not user.strip():
+                problems.append(f"{where}: missing user message")
             if turn.get("action") not in ACTIONS:
                 problems.append(f"{where}: unknown action {turn.get('action')!r}")
             if not _is_known_period(turn.get("period")):

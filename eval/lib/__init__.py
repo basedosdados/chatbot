@@ -9,9 +9,10 @@ components share, one concern per module:
               targets, CTE names)
     metadata  read a `get_table_details` output into a TableMetadata (partitioned_by,
               period_start/end, coded columns) so assertions track each run's own metadata
-    gold      load and index eval_gold.yaml, plus the action / temporal vocabulary
+    gold      load, validate and index the gold YAML, plus the action / period vocabulary
+    judge     the LLM judge: verdict schema, prompt, task building, dedup, one judge call
 
-Everything here is pure and dependency-light (stdlib + PyYAML): no agent, no BigQuery,
-no LLM. Import the modules explicitly (`from eval.lib import sql, metadata`) so each
+Everything here except `judge` is pure and dependency-light (stdlib + PyYAML): no agent,
+no BigQuery, no LLM. `judge` calls the judge model and runs `reference_sql` on BigQuery. Import the modules explicitly (`from eval.lib import sql, metadata`) so each
 call site's provenance stays clear.
 """

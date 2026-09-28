@@ -110,6 +110,74 @@ def _tools_used(turn_messages: list[AnyMessage]) -> list[str]:
     return sorted(names)
 
 
+def _json_object(content: object) -> dict | None:
+    """The tool-message content as a JSON object, or None when it is not one."""
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _tool_calls(turn_messages: list[AnyMessage]) -> list[dict]:
+    """Every tool result this turn, in order, with the model step that asked for it.
+
+    `step` counts the AI messages in the turn, up to the one that made the call. A
+    result is visible to the model only from the next step on, so a scorer can tell a
+    `get_table_details` read before a query from one fetched in parallel with it.
+    `gcp_id` is set on a successful `get_table_details`, `sql` on `execute_bigquery_sql`.
+
+    Returns:
+        One `{name, status, step, gcp_id, sql}` per tool message.
+    """
+    step_by_call_id: dict[str, int] = {}
+    sql_by_call_id: dict[str, str | None] = {}
+    step = 0
+    calls = []
+    for message in turn_messages:
+        if message.type == "ai":
+            step += 1
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                step_by_call_id[tool_call["id"]] = step
+                if tool_call["name"] == "execute_bigquery_sql":
+                    sql_by_call_id[tool_call["id"]] = tool_call["args"].get("sql_query")
+        elif message.type == "tool":
+            # A tool that catches its own exception returns a serialized `ToolError`
+            # (`{"status": "error", ...}`) with the message status still "success"; a
+            # tool that raises gets `status="error"` from the tool node. Either counts.
+            payload = _json_object(message.content)
+            failed = message.status == "error" or (
+                payload is not None and payload.get("status") == "error"
+            )
+            gcp_id = None
+            if message.name == "get_table_details" and payload and not failed:
+                gcp_id = payload["gcp_id"]
+            calls.append(
+                {
+                    "name": message.name,
+                    "status": "error" if failed else "success",
+                    "step": step_by_call_id.get(message.tool_call_id),
+                    "gcp_id": gcp_id,
+                    "sql": sql_by_call_id.get(message.tool_call_id),
+                }
+            )
+    return calls
+
+
+# The text ModelCallLimitMiddleware (exit_behavior="end") puts in the AI message it adds
+# when it stops a run. Production detects the stop from the stream (`jump_to == "end"`);
+# a finished state keeps only this message.
+_CALL_LIMIT_PREFIX = "Model call limits exceeded"
+
+
+def _hit_call_limit(turn_messages: list[AnyMessage]) -> bool:
+    """Whether ModelCallLimitMiddleware ended this turn."""
+    return any(
+        message.type == "ai" and message.text.startswith(_CALL_LIMIT_PREFIX)
+        for message in turn_messages
+    )
+
+
 def _last_ai_text(messages: list[AnyMessage]) -> str | None:
     """The text of the last AI message — a debugging aid when no structured response comes back."""
     for message in reversed(messages):
@@ -242,7 +310,9 @@ def extract_turn(result: dict, uuid_to_gcp: dict[str, str]) -> dict:
         "status": "ok",
         "is_query": bool(queries),
         "tools_used": _tools_used(turn_messages),
+        "tool_calls": _tool_calls(turn_messages),
         "model_calls": result.get("run_model_call_count"),
+        "call_limit_hit": _hit_call_limit(turn_messages),
         "queries": queries,
     }
 
