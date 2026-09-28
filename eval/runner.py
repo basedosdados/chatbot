@@ -40,6 +40,10 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.agent import factory
 from app.agent.context import AgentContext
+from app.agent.observability import (
+    build_observability_metadata,
+    build_observability_tags,
+)
 from app.agent.prompts import SYSTEM_PROMPT
 from app.i18n import DEFAULT_LANGUAGE
 from app.settings import settings
@@ -69,6 +73,34 @@ def current_branch() -> str:
         ).strip()
     except Exception:
         return "unknown"
+
+
+def trace_metadata(effort: str, branch: str, eval_run: str) -> dict:
+    """The LangSmith metadata every eval trace carries, keyed like a production trace.
+
+    It is production's `build_observability_metadata` at the effort under test, so an
+    eval trace joins the production traces of the same `agent_config_id`. The tool
+    docstrings are left out: they are large, and `docstring_hash` identifies them.
+
+    Args:
+        effort: The reasoning effort under test.
+        branch: The checked-out git branch.
+        eval_run: The id shared by every trace of one eval invocation.
+
+    Returns:
+        The metadata dict, with `branch`, `eval_run`, and `models` added.
+    """
+    metadata = build_observability_metadata(DEFAULT_LANGUAGE, effort)
+    metadata["tools"] = [
+        {key: value for key, value in tool.items() if key != "docstring"}
+        for tool in metadata["tools"]
+    ]
+    return {
+        **metadata,
+        "branch": branch,
+        "eval_run": eval_run,
+        "models": f"openai:{settings.MODEL_URI}",
+    }
 
 
 def build_agent(effort: str) -> CompiledStateGraph:
@@ -174,6 +206,19 @@ def _hit_call_limit(turn_messages: list[AnyMessage]) -> bool:
     """Whether ModelCallLimitMiddleware ended this turn."""
     return any(
         message.type == "ai" and message.text.startswith(_CALL_LIMIT_PREFIX)
+        for message in turn_messages
+    )
+
+
+def _model_calls(turn_messages: list[AnyMessage]) -> int:
+    """The number of model calls this turn: one per AI message.
+
+    ModelCallLimitMiddleware keeps its own count in `run_model_call_count`, but that is
+    private state, so `ainvoke` does not return it. The AI message the middleware adds
+    when it stops a run is not a model call, so it does not count.
+    """
+    return sum(
+        message.type == "ai" and not message.text.startswith(_CALL_LIMIT_PREFIX)
         for message in turn_messages
     )
 
@@ -311,7 +356,7 @@ def extract_turn(result: dict, uuid_to_gcp: dict[str, str]) -> dict:
         "is_query": bool(queries),
         "tools_used": _tools_used(turn_messages),
         "tool_calls": _tool_calls(turn_messages),
-        "model_calls": result.get("run_model_call_count"),
+        "model_calls": _model_calls(turn_messages),
         "call_limit_hit": _hit_call_limit(turn_messages),
         "queries": queries,
     }
@@ -342,19 +387,32 @@ def extract_turn(result: dict, uuid_to_gcp: dict[str, str]) -> dict:
 # Thread replay
 # =============================================================================
 def _run_config(
-    thread_id: str, thread: dict, effort: str, repeat: int, turn_index: int, branch: str
+    thread_id: str,
+    thread: dict,
+    effort: str,
+    repeat: int,
+    turn_index: int,
+    metadata: dict,
 ) -> dict:
-    """The per-turn LangGraph config: thread id for checkpointing, plus LangSmith labels."""
+    """The per-turn LangGraph config: thread id for checkpointing, plus LangSmith labels.
+
+    `metadata` is the run's :func:`trace_metadata`; the production tags come from it.
+    """
     return {
         "configurable": {"thread_id": thread_id},
         "run_name": f"{thread['id']}#{effort}-r{repeat}-t{turn_index}",
-        "tags": [f"branch:{branch}", f"effort:{effort}", f"thread:{thread['id']}"],
+        "tags": [
+            f"branch:{metadata['branch']}",
+            f"effort:{effort}",
+            f"thread:{thread['id']}",
+            *build_observability_tags(metadata),
+        ],
         "metadata": {
+            **metadata,
             "eval_thread": thread["id"],
             "effort": effort,
             "repeat": repeat,
             "turn_index": turn_index,
-            "branch": branch,
         },
     }
 
@@ -365,7 +423,7 @@ def _skipped_turn(turn_index: int, user: str) -> dict:
 
 
 async def replay_thread(
-    agent: CompiledStateGraph, thread: dict, effort: str, repeat: int, branch: str
+    agent: CompiledStateGraph, thread: dict, effort: str, repeat: int, metadata: dict
 ) -> dict:
     """Replay one thread turn-by-turn on a shared thread_id; return the transcript unit.
 
@@ -377,8 +435,9 @@ async def replay_thread(
         agent: The compiled agent (already at the target effort).
         thread: The gold thread (its `id` and `turns`).
         effort: The reasoning effort in effect (for labels and the unit record).
-        repeat: The repeat index.
-        branch: The checked-out git branch (for labels).
+        repeat: The repeat index. It is part of the checkpoint `thread_id`, so two
+            replays of one thread on one agent need different values.
+        metadata: The run's :func:`trace_metadata` (for labels).
 
     Returns:
         The unit: `{thread, effort, repeat, turns, tables, uuid_to_gcp}`.
@@ -392,7 +451,7 @@ async def replay_thread(
     table_details: dict[str, dict] = {}
 
     for turn_index, turn in enumerate(thread["turns"]):
-        config = _run_config(thread_id, thread, effort, repeat, turn_index, branch)
+        config = _run_config(thread_id, thread, effort, repeat, turn_index, metadata)
         try:
             result = await agent.ainvoke(
                 {"messages": [{"role": "user", "content": turn["user"]}]},
@@ -438,7 +497,7 @@ async def replay_thread(
     }
 
 
-def _unit_progress(unit: dict) -> str:
+def unit_progress(unit: dict) -> str:
     """A one-line progress summary of a finished unit: each turn's status/kind."""
     marks = []
     for record in unit["turns"]:
@@ -517,9 +576,8 @@ async def main() -> None:
 
     branch = current_branch()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = args.out or str(
-        EVAL_DIR / f"transcript_{branch.replace('/', '-')}_{effort}_{timestamp}.json"
-    )
+    eval_run = f"{branch.replace('/', '-')}_{effort}_{timestamp}"
+    out_path = args.out or str(EVAL_DIR / f"transcript_{eval_run}.json")
     ls_project, tracing = configure_tracing(args)
 
     print(
@@ -541,13 +599,14 @@ async def main() -> None:
         )
         return
 
+    metadata = trace_metadata(effort, branch, eval_run)
     agent = build_agent(effort)
     semaphore = asyncio.Semaphore(args.concurrency)
 
     async def run_unit(thread: dict, repeat: int) -> dict:
         async with semaphore:
-            unit = await replay_thread(agent, thread, effort, repeat, branch)
-            print(f"[{thread['id']:<16} {effort} #{repeat}] {_unit_progress(unit)}")
+            unit = await replay_thread(agent, thread, effort, repeat, metadata)
+            print(f"[{thread['id']:<16} {effort} #{repeat}] {unit_progress(unit)}")
             return unit
 
     units = await asyncio.gather(
