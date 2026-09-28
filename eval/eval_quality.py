@@ -31,8 +31,8 @@ each other:
   eval_faithfulness.py  structured output's self-consistency — gold-free, no LLM/BQ
   eval_queries.py       source/period from the executed SQL vs the gold — no LLM/BQ
 
-    uv run eval/eval_quality.py --in eval/<transcript>.json --dry-run
-    uv run eval/eval_quality.py --in eval/<transcript>.json --judge-model google_genai:gemini-3.1-pro-preview
+    uv run python -m eval.eval_quality --in eval/<transcript>.json --dry-run
+    uv run python -m eval.eval_quality --in eval/<transcript>.json --judge-model google_genai:gemini-3.1-pro-preview
 
 NOTE: the judge should ideally be a stronger / different-family model than the
 agent (less self-preference). Default --judge-model is google_genai:gemini-3.1-pro-preview.
@@ -43,7 +43,6 @@ import asyncio
 import hashlib
 import json
 import os
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -53,12 +52,8 @@ from langchain.chat_models import init_chat_model
 from langchain.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-# Make the repo root importable so `app` resolves whether this file is run as a
-# module (python -m eval.eval_quality) or directly (python eval/eval_quality.py).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from app.agent.tools.bigquery import MAX_BYTES_BILLED, _bq_client  # noqa: E402
-from app.settings import settings  # noqa: E402
+from app.agent.tools.bigquery import MAX_BYTES_BILLED, _bq_client
+from app.settings import settings
 
 # This script's folder — gold input and result files default here, so the eval
 # works regardless of the current working directory.

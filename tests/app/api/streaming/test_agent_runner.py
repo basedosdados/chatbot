@@ -599,12 +599,7 @@ class TestRunAgent:
     ):
         """A crash mid-run persists the error message in the thread's language."""
         agent = MagicMock()
-
-        async def astream(*args, **kwargs):
-            raise RuntimeError("boom")
-            yield  # pragma: no cover — make this an async generator
-
-        agent.astream = astream
+        agent.astream = MagicMock(side_effect=RuntimeError("boom"))
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
 
         await run_agent(
@@ -969,12 +964,7 @@ class TestRunAgent:
     ):
         """Test unexpected exceptions are handled properly."""
         agent = MagicMock()
-
-        async def astream(*args, **kwargs):
-            raise RuntimeError("error")
-            yield  # make this a generator
-
-        agent.astream = astream
+        agent.astream = MagicMock(side_effect=RuntimeError("error"))
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
 
         await run_agent(

@@ -69,7 +69,7 @@ class TestAsyncDatabaseThread:
     ):
         """Test getting all threads for a user."""
         thread_1 = await thread_factory("Mock Thread 1")
-        thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
+        await thread_factory("Mock Thread 2")
 
         threads = await database.get_threads(user_id=thread_1.user_id)
 
@@ -81,7 +81,7 @@ class TestAsyncDatabaseThread:
     ):
         """Test threads ordering."""
         thread_1 = await thread_factory("Mock Thread 1")
-        thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
+        await thread_factory("Mock Thread 2")
 
         threads = await database.get_threads(
             user_id=thread_1.user_id, order_by="created_at"
@@ -96,7 +96,7 @@ class TestAsyncDatabaseThread:
     ):
         """Test threads ordering."""
         thread_1 = await thread_factory("Mock Thread 1")
-        thread_2 = await thread_factory("Mock Thread 2")  # noqa: F841
+        await thread_factory("Mock Thread 2")
 
         threads = await database.get_threads(
             user_id=thread_1.user_id, order_by="-created_at"

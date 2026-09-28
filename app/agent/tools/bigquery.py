@@ -23,7 +23,7 @@ MAX_CONTEXT_ROWS = 1000
 
 
 @cache
-def _bq_client() -> bq.Client:  # pragma: no cover
+def _bq_client() -> bq.Client:
     return bq.Client(
         project=settings.GOOGLE_BILLING_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,

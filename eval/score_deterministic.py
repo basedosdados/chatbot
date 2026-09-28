@@ -26,21 +26,18 @@ table's own `period_end` granularity for `latest`, the value's granularity for a
 point/range); a month/day target the query pinned only to the year abstains (None) and
 defers to the judge.
 
-    uv run eval/score_deterministic.py --in eval/transcript_*.json
-    uv run eval/score_deterministic.py --in eval/transcript_*.json --show-failures
+    uv run python -m eval.score_deterministic --in eval/transcript_*.json
+    uv run python -m eval.score_deterministic --in eval/transcript_*.json --show-failures
 """
 
 import argparse
 import json
 import re
-import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from eval.lib import gold, metadata, period, sql  # noqa: E402
+from eval.lib import gold, metadata, period, sql
 
 EVAL_DIR = Path(__file__).resolve().parent
 

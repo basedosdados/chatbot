@@ -105,7 +105,7 @@ def is_result_expired(created_at: datetime) -> bool:
 
 
 @cache
-def _bq_client() -> bq.Client:  # pragma: no cover
+def _bq_client() -> bq.Client:
     return bq.Client(
         project=settings.GOOGLE_BILLING_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,

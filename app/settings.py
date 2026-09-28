@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def DB_URL(self) -> str:  # pragma: no cover
+    def DB_URL(self) -> str:
         """PostgreSQL database URL."""
         user = quote(self.DB_USER, safe="")
         password = quote(self.DB_PASSWORD, safe="")
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def SQLALCHEMY_DB_URL(self) -> str:  # pragma: no cover
+    def SQLALCHEMY_DB_URL(self) -> str:
         """PostgreSQL database URL for SQLAlchemy."""
         user = quote(self.DB_USER, safe="")
         password = quote(self.DB_PASSWORD, safe="")
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
 
     @computed_field
     @cached_property
-    def GOOGLE_CREDENTIALS(self) -> Credentials:  # pragma: no cover
+    def GOOGLE_CREDENTIALS(self) -> Credentials:
         """Google Cloud credentials."""
         return Credentials.from_service_account_file(
             filename=self.GOOGLE_SERVICE_ACCOUNT,

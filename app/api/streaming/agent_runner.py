@@ -352,7 +352,7 @@ async def run_agent(
         return
 
     try:
-        async for mode, chunk in agent.astream(  # pragma: no cover
+        async for mode, chunk in agent.astream(
             input={"messages": [{"role": "user", "content": user_message.content}]},
             config=config,
             context=context,

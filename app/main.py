@@ -3,23 +3,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    ModelCallLimitMiddleware,
-    SummarizationMiddleware,
-)
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from app.agent import runtime_config
-from app.agent.context import AgentContext
-from app.agent.middleware import system_prompt_middleware
-from app.agent.prompts import SYSTEM_PROMPT
-from app.agent.schemas import StructuredResponse
-from app.agent.tools import BDToolkit
+from app.agent.factory import build_agent
 from app.api.main import api_router
 from app.db.database import engine, init_database
 from app.log_config import setup_logging
@@ -29,7 +18,7 @@ setup_logging()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # pragma: no cover
+async def lifespan(app: FastAPI):
     try:
         if settings.AUTH_DEV_MODE and settings.ENVIRONMENT == "development":
             logger.warning(
@@ -54,27 +43,6 @@ async def lifespan(app: FastAPI):  # pragma: no cover
             "row_factory": dict_row,
         }
 
-        model = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            model=settings.MODEL_URI,
-            reasoning={
-                "effort": settings.REASONING_EFFORT,
-                "summary": runtime_config.REASONING_SUMMARY,
-            },
-        )
-
-        summ_middleware = SummarizationMiddleware(
-            model=model,
-            trigger=runtime_config.SUMMARIZATION_TRIGGER,
-            keep=runtime_config.SUMMARIZATION_KEEP,
-            trim_tokens_to_summarize=runtime_config.SUMMARIZATION_TRIM_TOKENS,
-        )
-
-        limit_middleware = ModelCallLimitMiddleware(
-            run_limit=runtime_config.MODEL_CALL_RUN_LIMIT,
-            exit_behavior=runtime_config.MODEL_CALL_EXIT_BEHAVIOR,
-        )
-
         async with AsyncConnectionPool(
             conninfo=settings.DB_URL,
             kwargs=conn_kwargs,
@@ -85,19 +53,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         ) as pool:
             checkpointer = AsyncPostgresSaver(pool)
 
-            agent = create_agent(
-                model=model,
-                tools=BDToolkit.get_tools(),
-                system_prompt=SYSTEM_PROMPT,
-                middleware=[
-                    system_prompt_middleware,
-                    summ_middleware,
-                    limit_middleware,
-                ],
-                response_format=StructuredResponse,
-                context_schema=AgentContext,
-                checkpointer=checkpointer,
-            )
+            agent = build_agent(checkpointer=checkpointer)
 
             app.state.agent = agent
             app.state.running_runs = {}

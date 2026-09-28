@@ -6,11 +6,10 @@ each gold thread, and record everything a scorer or the judge could need — the
 does **no** scoring; the deterministic scorer and the judge are separate passes over the
 transcript it writes.
 
-What it mirrors from `app/main.py`: a `ChatOpenAI` model with reasoning effort, the
-system-prompt / summarization / call-limit middleware, `response_format=StructuredResponse`
-and `context_schema=AgentContext`. What it changes for eval: an in-memory checkpointer,
-and the reasoning **effort** is chosen per run (production pins one; the eval runs a single
-effort per invocation), because a GPT-5.6 reasoning model has no temperature to sweep.
+It builds the agent with `app.agent.factory.build_agent`, the same call production makes.
+What it changes for eval: an in-memory checkpointer, and the reasoning **effort** is chosen
+per run (production pins one; the eval runs a single effort per invocation), because a
+GPT-5.6 reasoning model has no temperature to sweep.
 
 Each gold thread is replayed on a shared `thread_id` (so follow-ups see prior context),
 `--repeats` times, at one `--effort` (default medium). One replay is a *unit*; every unit
@@ -19,9 +18,9 @@ so run-relative checks read each run's own `partitioned_by` / coded-column flags
 than constants. To compare efforts, run the script once per effort — each writes its own
 transcript — then diff the scored results.
 
-    uv run eval/runner.py --dry-run
-    uv run eval/runner.py --repeats 5 --effort high
-    uv run eval/runner.py --thread comex-stat --repeats 1
+    uv run python -m eval.runner --dry-run
+    uv run python -m eval.runner --repeats 5 --effort high
+    uv run python -m eval.runner --thread comex-stat --repeats 1
 
 Every turn is a live multi-step agent run — cost is (threads x turns x repeats).
 """
@@ -31,41 +30,22 @@ import asyncio
 import json
 import os
 import subprocess
-import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
 
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    ModelCallLimitMiddleware,
-    SummarizationMiddleware,
-)
 from langchain.messages import AnyMessage
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
-# Make the repo root importable so `app` and `eval.lib` resolve whether this file
-# is run as a module (python -m eval.runner) or directly (python eval/runner.py).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from app.agent.context import AgentContext  # noqa: E402
-from app.agent.middleware import system_prompt_middleware  # noqa: E402
-from app.agent.prompts import SYSTEM_PROMPT  # noqa: E402
-from app.agent.schemas import StructuredResponse  # noqa: E402
-from app.agent.tools import BDToolkit  # noqa: E402
-from app.i18n import DEFAULT_LANGUAGE  # noqa: E402
-from app.settings import settings  # noqa: E402
-from eval.lib import gold  # noqa: E402
+from app.agent import factory
+from app.agent.context import AgentContext
+from app.agent.prompts import SYSTEM_PROMPT
+from app.i18n import DEFAULT_LANGUAGE
+from app.settings import settings
+from eval.lib import gold
 
 EVAL_DIR = Path(__file__).resolve().parent
-
-# Middleware tunables, kept in step with app/main.py.
-# If production changes these, change them here too.
-SUMMARIZE_TRIGGER_TOKENS = 500_000
-SUMMARIZE_KEEP_TOKENS = 100_000
-MODEL_CALL_RUN_LIMIT = 20
 
 # The reasoning effort to run at by default (see module docstring for why effort, not temp).
 DEFAULT_EFFORT = "medium"
@@ -79,7 +59,7 @@ EVAL_USER_ID = "eval-harness"
 
 
 # =============================================================================
-# Agent construction (mirrors app/main.py, parameterized by reasoning effort)
+# Agent construction (the production factory, parameterized by reasoning effort)
 # =============================================================================
 def current_branch() -> str:
     """The current git branch name, or "unknown" if git can't be queried."""
@@ -92,7 +72,7 @@ def current_branch() -> str:
 
 
 def build_agent(effort: str) -> CompiledStateGraph:
-    """Build the agent under test at a given reasoning effort, mirroring production.
+    """Build the agent under test at a given reasoning effort, exactly as production does.
 
     Args:
         effort: The reasoning effort to run at ("medium", "high", ...).
@@ -100,32 +80,7 @@ def build_agent(effort: str) -> CompiledStateGraph:
     Returns:
         The compiled agent graph, with a fresh in-memory checkpointer.
     """
-    model = ChatOpenAI(
-        api_key=settings.OPENAI_API_KEY,
-        model=settings.MODEL_URI,
-        reasoning={"effort": effort, "summary": "auto"},
-    )
-
-    middleware = [
-        system_prompt_middleware,
-        SummarizationMiddleware(
-            model=model,
-            trigger=("tokens", SUMMARIZE_TRIGGER_TOKENS),
-            keep=("tokens", SUMMARIZE_KEEP_TOKENS),
-            trim_tokens_to_summarize=None,
-        ),
-        ModelCallLimitMiddleware(run_limit=MODEL_CALL_RUN_LIMIT, exit_behavior="end"),
-    ]
-
-    return create_agent(
-        model=model,
-        tools=BDToolkit.get_tools(),
-        system_prompt=SYSTEM_PROMPT,
-        middleware=middleware,
-        response_format=StructuredResponse,
-        context_schema=AgentContext,
-        checkpointer=InMemorySaver(),
-    )
+    return factory.build_agent(checkpointer=InMemorySaver(), reasoning_effort=effort)
 
 
 # =============================================================================

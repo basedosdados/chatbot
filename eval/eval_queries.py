@@ -31,23 +31,18 @@ one and of each other:
   eval_faithfulness.py  structured output's self-consistency — gold-free; this module
                         reuses its SQL/period helpers
 
-    uv run eval/eval_queries.py --in eval/<transcript>.json
-    uv run eval/eval_queries.py --in eval/<transcript>.json --show-failures
+    uv run python -m eval.eval_queries --in eval/<transcript>.json
+    uv run python -m eval.eval_queries --in eval/<transcript>.json --show-failures
 """
 
 import argparse
 import json
-import sys
 from collections import defaultdict
 from pathlib import Path
 
 import yaml
 
-# Make the repo root importable so `eval.eval_faithfulness` resolves whether run as a
-# module (python -m eval.eval_queries) or directly (python eval/eval_queries.py).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from eval.eval_faithfulness import (  # noqa: E402
+from eval.eval_faithfulness import (
     _leading_year,
     _tables_and_years,
     turn_success_queries,

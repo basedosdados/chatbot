@@ -228,7 +228,7 @@ async def send_message(
 
     running_runs[run_id] = task
 
-    def _cleanup(task: asyncio.Task):  # pragma: no cover
+    def _cleanup(task: asyncio.Task):
         del running_runs[run_id]
         if task.cancelled():
             logger.warning(f"run_agent task {run_id} was cancelled mid-run")

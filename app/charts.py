@@ -236,7 +236,7 @@ class ChartSpec(BaseModel):
 # CHART DATA FETCHING
 # ===================================================================
 @cache
-def _bq_client() -> bq.Client:  # pragma: no cover
+def _bq_client() -> bq.Client:
     return bq.Client(
         project=settings.GOOGLE_BILLING_PROJECT,
         credentials=settings.GOOGLE_CREDENTIALS,
@@ -456,7 +456,7 @@ def inject_chart_data(
 # CHART SPEC GENERATION
 # ===================================================================
 @cache
-def _chart_spec_model():  # pragma: no cover
+def _chart_spec_model():
     """A model that returns a parsed `ChartSpec` via forced function-calling.
 
     `method="function_calling"` (not strict json_schema, which 400s on the open spec) and

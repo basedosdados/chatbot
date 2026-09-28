@@ -48,8 +48,8 @@ transcript, independent of this one and of each other:
   eval_queries.py   source/period from the executed SQL vs the gold — reuses this
                     module's SQL/period helpers (_leading_year, _tables_and_years, ...)
 
-    uv run eval/eval_faithfulness.py --in eval/<transcript>.json
-    uv run eval/eval_faithfulness.py --in eval/<transcript>.json --show-failures
+    uv run python -m eval.eval_faithfulness --in eval/<transcript>.json
+    uv run python -m eval.eval_faithfulness --in eval/<transcript>.json --show-failures
 """
 
 import argparse

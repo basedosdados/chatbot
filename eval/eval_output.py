@@ -30,9 +30,9 @@ JSON that the three post-hoc scorers read (no agent; run them in any order):
   eval_queries.py       source/period from the executed SQL vs the gold — no LLM/BQ
 
 Example Usage:
-    uv run eval/eval_output.py --repeats 10 --temperature 0.0
-    uv run eval/eval_output.py --thread <thread-id> --dry-run
-    uv run eval/eval_output.py --no-structured   # baseline: free-text agent (e.g. main)
+    uv run python -m eval.eval_output --repeats 10 --temperature 0.0
+    uv run python -m eval.eval_output --thread <thread-id> --dry-run
+    uv run python -m eval.eval_output --no-structured   # baseline: free-text agent (e.g. main)
 
 Each turn runs the real agent (live BQ + LLM) — mind the cost (sum of turns x K).
 """
@@ -43,7 +43,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import traceback
 from collections import defaultdict
 from datetime import date, datetime
@@ -60,19 +59,15 @@ from langchain.messages import AnyMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
-# Make the repo root importable so `app` resolves whether this file is run as a
-# module (python -m eval.eval_output) or directly (python eval/eval_output.py).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from app.agent.prompts import SYSTEM_PROMPT  # noqa: E402
-from app.agent.tools import BDToolkit  # noqa: E402
-from app.settings import settings  # noqa: E402
+from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.tools import BDToolkit
+from app.settings import settings
 
 # Structured output only exists on the structured-response branch. On main (no structured
 # output) this import fails; run with --no-structured, which builds the agent without a
 # response_format and reads the answer from the final message instead.
 try:
-    from app.agent.schemas import StructuredResponse  # noqa: E402
+    from app.agent.schemas import StructuredResponse
 except ImportError:
     StructuredResponse = None
 
