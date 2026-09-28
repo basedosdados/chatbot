@@ -8,9 +8,18 @@ keys, up for the keys in `evaluators.LOWER_IS_BETTER`.
 The tolerance of a rate (a 0-1 score) is in points: the default 10 means a rate may
 fall by up to 0.10. The tolerance of a count (`evaluators.COUNT_KEYS`) is relative: 10
 means the count may rise by up to 10%. `select_shape_ok` has no tolerance. The script
-exits non-zero when any key falls more than its tolerance. A key found in only one
-experiment, or with fewer than `--min-samples` samples on either side, is printed but
-does not fail the gate: on a few samples, one turn moves the mean by many points.
+exits non-zero when any key falls more than its tolerance. A key with fewer than
+`--min-samples` samples on either side is printed but does not fail the gate: on a few
+samples, one turn moves the mean by many points. A key found only in the candidate is
+printed and does not fail the gate.
+
+The gate fails closed. It also exits non-zero when either experiment has no scored
+feedback, when a baseline key is missing from the candidate, when either experiment has
+`judge_errors` (a failed judge call leaves the quality keys without that turn's score),
+or when the experiments did not run over the same examples. The same examples means the
+same `POPULATION_KEYS` metadata (see `experiment.population_metadata`): the dataset id,
+the dataset version tag, and the fingerprint of the selected example ids. An experiment
+without this metadata fails the gate.
 
     uv run python -m eval.compare --baseline "<experiment>" --candidate "<experiment>"
     uv run python -m eval.compare --baseline "<experiment>" --candidate "<experiment>" --tolerance 5
@@ -45,6 +54,17 @@ _EPSILON = 1e-9
 
 # Run ids per `list_feedback` request, to keep the request URL short.
 _RUN_ID_BATCH = 100
+
+# The experiment metadata that identifies the evaluated examples, with the text of a
+# mismatch. `experiment.population_metadata` writes it.
+POPULATION_KEYS = {
+    "dataset_id": "different datasets",
+    "dataset_tag": "different dataset versions",
+    "example_selection": "different example selections",
+}
+
+# The feedback key that counts failed judge calls (see `evaluators.judge_evaluator`).
+JUDGE_ERRORS_KEY = "judge_errors"
 
 
 def mean_scores(feedback: Iterable[Any]) -> dict[str, tuple[float, int]]:
@@ -102,9 +122,9 @@ def compare(
         min_samples: The fewest samples on each side for a key to fail the gate.
 
     Returns:
-        Rows of `{key, baseline, candidate, fall, tolerance, few_samples, failed}`.
-        `baseline` and `candidate` are `(mean, n)` or None; `fall` is None when a side
-        is missing.
+        Rows of `{key, baseline, candidate, fall, tolerance, few_samples, failed,
+        reason}`. `baseline` and `candidate` are `(mean, n)` or None; `fall` is None
+        when a side is missing. `reason` says why a row failed, or is None.
     """
     rows = []
     for key in sorted(baseline.keys() | candidate.keys()):
@@ -116,6 +136,18 @@ def compare(
             else None
         )
         few_samples = key_fall is not None and min(before[1], after[1]) < min_samples
+        if key == JUDGE_ERRORS_KEY:
+            reason = "judge calls failed"
+        elif after is None:
+            reason = "missing in candidate"
+        elif (
+            key_fall is not None
+            and not few_samples
+            and key_fall > key_tolerance + _EPSILON
+        ):
+            reason = "fell more than the tolerance"
+        else:
+            reason = None
         rows.append(
             {
                 "key": key,
@@ -124,12 +156,44 @@ def compare(
                 "fall": key_fall,
                 "tolerance": key_tolerance,
                 "few_samples": few_samples,
-                "failed": key_fall is not None
-                and not few_samples
-                and key_fall > key_tolerance + _EPSILON,
+                "failed": reason is not None,
+                "reason": reason,
             }
         )
     return rows
+
+
+def gate_problems(
+    baseline: dict[str, tuple[float, int]],
+    candidate: dict[str, tuple[float, int]],
+    baseline_metadata: dict[str, Any],
+    candidate_metadata: dict[str, Any],
+) -> list[str]:
+    """The reasons the two experiments cannot be compared at all.
+
+    Args:
+        baseline: The baseline `mean_scores`.
+        candidate: The candidate `mean_scores`.
+        baseline_metadata: The baseline experiment metadata.
+        candidate_metadata: The candidate experiment metadata.
+
+    Returns:
+        One message per problem; empty when the experiments are comparable.
+    """
+    problems = [
+        f"the {side} has no scored feedback"
+        for side, scores in (("baseline", baseline), ("candidate", candidate))
+        if not scores
+    ]
+    for key, mismatch in POPULATION_KEYS.items():
+        before, after = baseline_metadata.get(key), candidate_metadata.get(key)
+        if before is None or after is None:
+            problems.append(f"an experiment has no {key} metadata")
+        elif before != after:
+            problems.append(
+                f"the experiments ran over {mismatch} ({key} {before!r} and {after!r})"
+            )
+    return problems
 
 
 def _format_side(side: tuple[float, int] | None) -> str:
@@ -148,8 +212,8 @@ def format_row(row: dict[str, Any]) -> str:
         )
         if row["few_samples"]:
             verdict += "  few samples"
-        if row["failed"]:
-            verdict += "  FAIL"
+    if row["failed"]:
+        verdict += f"  FAIL: {row['reason']}"
     return (
         f"  {row['key']:<24} {_format_side(row['baseline']):>16} "
         f"-> {_format_side(row['candidate']):>16}  {verdict}"
@@ -200,37 +264,34 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Print one delta per key and exit non-zero when a key falls too far."""
+    """Print one delta per key and exit non-zero when the gate fails."""
     args = parse_args()
     client = Client(api_key=settings.LANGSMITH_API_KEY)
     projects = {
         side: _read_experiment(client, name)
         for side, name in (("baseline", args.baseline), ("candidate", args.candidate))
     }
+    metadata = {side: project.metadata or {} for side, project in projects.items()}
     for side, project in projects.items():
-        metadata = project.metadata or {}
         print(
-            f"{side:<9} {project.name!r}  effort={metadata.get('reasoning_effort')!r}"
-            f"  dataset={metadata.get('dataset_tag')!r}"
+            f"{side:<9} {project.name!r}"
+            f"  effort={metadata[side].get('reasoning_effort')!r}"
+            f"  dataset={metadata[side].get('dataset_tag')!r}"
+            f"  examples={metadata[side].get('example_count')!r}"
         )
-    tags = {
-        (project.metadata or {}).get("dataset_tag") for project in projects.values()
-    }
-    if len(tags) > 1:
-        print("warning: the experiments ran over different dataset versions")
 
-    rows = compare(
-        experiment_scores(client, projects["baseline"]),
-        experiment_scores(client, projects["candidate"]),
-        args.tolerance,
-        args.min_samples,
+    baseline = experiment_scores(client, projects["baseline"])
+    candidate = experiment_scores(client, projects["candidate"])
+    problems = gate_problems(
+        baseline, candidate, metadata["baseline"], metadata["candidate"]
     )
+    rows = compare(baseline, candidate, args.tolerance, args.min_samples)
     print()
     for row in rows:
         print(format_row(row))
-    failed = [row["key"] for row in rows if row["failed"]]
-    if failed:
-        sys.exit(f"\ndrift: {', '.join(failed)} fell more than the tolerance")
+    failed = [f"{row['key']} ({row['reason']})" for row in rows if row["failed"]]
+    if problems or failed:
+        sys.exit("\ngate failed:\n" + "\n".join(f"  {p}" for p in problems + failed))
     print("\nno key fell more than its tolerance")
 
 

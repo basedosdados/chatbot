@@ -7,8 +7,10 @@ the transcript unit. The evaluators in `evaluators.py` score that unit.
 
 The experiment name starts with the `agent_config_label` of the config under test, and
 the experiment metadata holds its full identity (`agent_config_id`, hashes, effort),
-plus `branch`, `eval_run`, `models`, and `judge_model`. Every agent trace carries the
-same metadata and the production tags, so it joins the production traces of that config.
+plus `branch`, `eval_run`, `models`, and `judge_model`. It also identifies the examples
+the experiment ran over (`population_metadata`), so `compare.py` gates only experiments
+over the same examples. Every agent trace carries the same metadata and the production
+tags, so it joins the production traces of that config.
 
     uv run python -m eval.experiment --effort medium --repetitions 1 --split ask --no-judge
     uv run python -m eval.experiment --effort medium --repetitions 3
@@ -19,14 +21,16 @@ Every turn is a live multi-step agent run: cost is (threads x turns x repetition
 
 import argparse
 import asyncio
+import hashlib
 import itertools
 import sys
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 
 from langgraph.graph.state import CompiledStateGraph
 from langsmith import Client, aevaluate
+from langsmith.schemas import Example
 
 from app.settings import settings
 from eval import evaluators, ls_dataset, runner
@@ -45,6 +49,33 @@ def thread_from_inputs(inputs: dict) -> dict:
     return {
         "id": inputs["thread_id"],
         "turns": [{"user": user} for user in inputs["turns"]],
+    }
+
+
+def population_metadata(examples: Sequence[Example]) -> dict:
+    """The experiment metadata that identifies the examples it runs over.
+
+    `--dataset`, `--split`, and `--thread` change the examples, and the dataset version
+    tag does not show that. So the metadata keeps the dataset id and a fingerprint of the
+    selected example ids. The order of the examples does not change the fingerprint.
+
+    Args:
+        examples: The selected dataset examples, all from one dataset.
+
+    Returns:
+        `{dataset_id, example_count, example_selection}`; `example_selection` is the
+        SHA-256 hex digest of the sorted example ids.
+    """
+    dataset_ids = {str(example.dataset_id) for example in examples}
+    if len(dataset_ids) != 1:
+        raise ValueError(f"examples from {len(dataset_ids)} datasets, expected 1")
+    example_ids = sorted(str(example.id) for example in examples)
+    return {
+        "dataset_id": dataset_ids.pop(),
+        "example_count": len(example_ids),
+        "example_selection": hashlib.sha256(
+            "\n".join(example_ids).encode()
+        ).hexdigest(),
     }
 
 
@@ -171,7 +202,12 @@ async def main() -> None:
         evaluators=scorers,
         experiment_prefix=metadata["agent_config_label"],
         description=f"effort {effort} on {branch}, dataset {tag}",
-        metadata={**metadata, "judge_model": judge_model, "dataset_tag": tag},
+        metadata={
+            **metadata,
+            **population_metadata(examples),
+            "judge_model": judge_model,
+            "dataset_tag": tag,
+        },
         num_repetitions=args.repetitions,
         max_concurrency=args.concurrency,
         client=client,
