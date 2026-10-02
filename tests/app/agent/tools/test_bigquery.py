@@ -461,12 +461,40 @@ class TestDecodeTableValues:
 
         call_args = mock_bigquery_client.query.call_args[0][0]
         assert "id_tabela = @table_name" in call_args
-        assert "nome_coluna = @column_name" in call_args
+        assert "TRIM(nome_coluna) = @column_name" in call_args
 
         job_config = mock_bigquery_client.query.call_args[1]["job_config"]
         param_names = {p.name for p in job_config.query_parameters}
         assert "table_name" in param_names
         assert "column_name" in param_names
+
+    def test_decode_specific_column_strips_whitespace(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """Test that column names are matched and returned without stray whitespace."""
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = []
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.return_value = mock_query_job
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        _invoke_tool(
+            decode_table_values,
+            {"table_gcp_id": "project.dataset.table", "column_name": " col1 "},
+            context=mock_context,
+        )
+
+        call_args = mock_bigquery_client.query.call_args[0][0]
+        assert "SELECT TRIM(nome_coluna) AS nome_coluna" in call_args
+        assert "TRIM(nome_coluna) = @column_name" in call_args
+
+        job_config = mock_bigquery_client.query.call_args[1]["job_config"]
+        params = {p.name: p.value for p in job_config.query_parameters}
+        assert params["column_name"] == "col1"
 
     def test_dictionary_not_found(
         self, mocker: MockerFixture, mock_context: AgentContext
@@ -494,6 +522,81 @@ class TestDecodeTableValues:
 
         assert output["status"] == "error"
         assert output["message"] == "Dictionary table not found for this dataset."
+
+    def test_dictionary_table_passed_as_target(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """Test error when the dictionary table itself is passed instead of a data table."""
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        message = _invoke_tool(
+            decode_table_values,
+            {"table_gcp_id": "project.dataset.dicionario", "column_name": "col1"},
+            context=mock_context,
+        )
+
+        output = json.loads(message.content)
+
+        assert output["status"] == "error"
+        assert "dictionary table" in output["message"]
+        mock_bigquery_client.query.assert_not_called()
+
+    def test_no_entries_for_column(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """Test error when the dictionary has no entries for the requested column."""
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = []
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.return_value = mock_query_job
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        message = _invoke_tool(
+            decode_table_values,
+            {"table_gcp_id": "project.dataset.table", "column_name": "col1"},
+            context=mock_context,
+        )
+
+        output = json.loads(message.content)
+
+        assert output["status"] == "error"
+        assert (
+            output["message"]
+            == "No dictionary entries found for column 'col1' of table 'table'."
+        )
+
+    def test_no_entries_for_table(
+        self, mocker: MockerFixture, mock_context: AgentContext
+    ):
+        """Test error when the dictionary has no entries for the table."""
+        mock_query_job = MagicMock()
+        mock_query_job.result.return_value = []
+
+        mock_bigquery_client = MagicMock(spec=bq.Client)
+        mock_bigquery_client.query.return_value = mock_query_job
+
+        mocker.patch(
+            "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
+        )
+
+        message = _invoke_tool(
+            decode_table_values,
+            {"table_gcp_id": "project.dataset.table"},
+            context=mock_context,
+        )
+
+        output = json.loads(message.content)
+
+        assert output["status"] == "error"
+        assert output["message"] == "No dictionary entries found for table 'table'."
 
     def test_invalid_table_reference(self, mock_context: AgentContext):
         """Test error when table reference format is invalid."""
