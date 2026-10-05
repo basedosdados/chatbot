@@ -143,10 +143,18 @@ def decode_table_values(
             f"Invalid table reference: '{table_gcp_id}'. Expected format: project.dataset.table"
         )
 
+    if table_name == "dicionario":
+        raise ValueError(
+            f"'{table_gcp_id}' is the dataset's dictionary table. "
+            "Pass the data table that holds the coded column instead."
+        )
+
     dict_table_id = f"`{project_name}.{dataset_name}.dicionario`"
 
+    # Some dictionaries store column names with stray whitespace
+    # (e.g. "col "), so compare and return them trimmed.
     search_query = f"""
-        SELECT nome_coluna, chave, valor
+        SELECT TRIM(nome_coluna) AS nome_coluna, chave, valor
         FROM {dict_table_id}
         WHERE id_tabela = @table_name
     """
@@ -156,9 +164,9 @@ def decode_table_values(
     ]
 
     if column_name is not None:
-        search_query += "AND nome_coluna = @column_name\n"
+        search_query += "AND TRIM(nome_coluna) = @column_name\n"
         query_params.append(
-            bq.ScalarQueryParameter("column_name", "STRING", column_name),
+            bq.ScalarQueryParameter("column_name", "STRING", column_name.strip()),
         )
 
     search_query += "ORDER BY nome_coluna, chave"
@@ -178,5 +186,13 @@ def decode_table_values(
         results = [dict(row) for row in job.result()]
     except NotFound as e:
         raise ValueError("Dictionary table not found for this dataset.") from e
+
+    if not results:
+        target = (
+            f"column '{column_name.strip()}' of " if column_name is not None else ""
+        )
+        raise ValueError(
+            f"No dictionary entries found for {target}table '{table_name}'."
+        )
 
     return json.dumps(results, ensure_ascii=False, indent=2, default=str)
