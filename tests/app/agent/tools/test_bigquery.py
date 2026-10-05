@@ -468,12 +468,26 @@ class TestDecodeTableValues:
         assert "table_name" in param_names
         assert "column_name" in param_names
 
+    @pytest.mark.parametrize(
+        "column_name",
+        [
+            pytest.param("col1", id="stored-name-has-whitespace"),
+            pytest.param("col1 ", id="passed-name-has-whitespace"),
+        ],
+    )
     def test_decode_specific_column_strips_whitespace(
-        self, mocker: MockerFixture, mock_context: AgentContext
+        self, mocker: MockerFixture, mock_context: AgentContext, column_name: str
     ):
-        """Test that column names are matched and returned without stray whitespace."""
+        """Test that column names are matched and selected trimmed of stray whitespace.
+
+        Some dictionaries store names with stray whitespace (e.g. "col1 "), which the
+        model passes without it, so the query trims the stored names on both sides. The
+        mock stands in for BigQuery, so it returns the row already trimmed by that query.
+        """
         mock_query_job = MagicMock()
-        mock_query_job.result.return_value = []
+        mock_query_job.result.return_value = [
+            {"nome_coluna": "col1", "chave": "1", "valor": "Value 1"},
+        ]
 
         mock_bigquery_client = MagicMock(spec=bq.Client)
         mock_bigquery_client.query.return_value = mock_query_job
@@ -482,11 +496,15 @@ class TestDecodeTableValues:
             "app.agent.tools.bigquery._bq_client", return_value=mock_bigquery_client
         )
 
-        _invoke_tool(
+        message = _invoke_tool(
             decode_table_values,
-            {"table_gcp_id": "project.dataset.table", "column_name": " col1 "},
+            {"table_gcp_id": "project.dataset.table", "column_name": column_name},
             context=mock_context,
         )
+
+        output = json.loads(message.content)
+
+        assert output == [{"nome_coluna": "col1", "chave": "1", "valor": "Value 1"}]
 
         call_args = mock_bigquery_client.query.call_args[0][0]
         assert "SELECT TRIM(nome_coluna) AS nome_coluna" in call_args
@@ -542,7 +560,10 @@ class TestDecodeTableValues:
         output = json.loads(message.content)
 
         assert output["status"] == "error"
-        assert "dictionary table" in output["message"]
+        assert output["message"] == (
+            "'project.dataset.dicionario' is the dataset's dictionary table. "
+            "Pass the data table that holds the coded column instead."
+        )
         mock_bigquery_client.query.assert_not_called()
 
     def test_no_entries_for_column(
