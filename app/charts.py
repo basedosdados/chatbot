@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import Callable
 from decimal import Decimal
 from functools import cache
@@ -133,6 +134,19 @@ _VEGA_COLOR_SCHEMES = frozenset(
     }
 )
 
+# d3-format's specifier grammar ([[fill]align][sign][symbol][0][width][,][.precision][~][type]),
+# copied from d3-format 3.1.0 as bundled by vl-convert; a string outside it makes d3 throw
+# "invalid format" at render. d3 does not throw on an unknown type letter (e.g. ".1F") but
+# silently falls back to ".12~g" (labels like "2e+2"), so its real types are checked too.
+_D3_NUMBER_FORMAT = re.compile(
+    pattern=r"^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$",
+    flags=re.IGNORECASE,
+)
+_D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
+
+# Whole-number values in this range are read as calendar years (e.g. `ano` = 2019).
+_YEAR_RANGE = range(1000, 3001)
+
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
 You are a data visualization specialist. Given a small, already-aggregated query result and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
@@ -163,6 +177,10 @@ Use a named `scheme` only when the request names or clearly maps to one of the b
 
 Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the response's language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
 
+## Years
+
+A year stored as a plain integer (e.g. `2019`) is not a date: Vega-Lite reads a number in a `temporal` field as milliseconds since 1970, so every year collapses onto one "1969"/"1970" tick. Never encode an integer year column as `temporal` or give it a `timeUnit`; encode it as `quantitative` (or `ordinal` for bars) with the integer label format on its axis, `"axis": {"format": "d"}` — a `format` on the field itself does not reach axis labels — and never abbreviate it with SI notation. Use `temporal` only for real date or datetime columns.
+
 ## Log scales
 
 A log scale is undefined at zero and below, so a single non-positive value in the encoded field collapses the whole axis — no ticks, every point crushed into a corner. Real-world columns routinely carry zeros, nulls, and occasional negatives. So whenever you set `"scale": {"type": "log"}`, first drop the non-positive rows with a `filter` transform over every log-scaled field. If a field genuinely spans zero and cannot be filtered, use a linear scale instead.
@@ -170,6 +188,10 @@ A log scale is undefined at zero and below, so a single non-positive value in th
 ## Scale domains
 
 Never write `null` inside a literal `scale.domain` array (e.g. `{"domain": [0, null]}`) — Vega-Lite treats a literal domain as authoritative and does not fill a `null` entry in from the data, so the scale silently collapses to a zero-width range and the chart renders empty (no bars, no marks) with no error. To pin one end while leaving the other data-driven, use `domainMin`/`domainMax` instead (e.g. `{"domainMin": 0}`). Quantitative scales already default to including zero, so most of the time no domain override is needed at all.
+
+## Layered charts
+
+In a `layer`, layers that share an axis are merged into one axis, and a property hidden on any layer is hidden on the merged axis. Never set `"labels": false`, `"ticks": false`, `"title": null` or `"axis": null` on a secondary layer to avoid duplicates — that removes the labels from the whole chart. Define each axis once, on the first layer or in a shared top-level `encoding`, and leave the other layers' axes unset.
 
 ## Size
 
@@ -603,12 +625,113 @@ def _collect_scheme_names(node: JsonValue) -> set[str]:
     return found
 
 
-def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
+def _collect_number_formats(node: JsonValue) -> set[str]:
+    """Collect every number-format string a spec applies, anywhere within it.
+
+    A format is a number format when it sits on a quantitative field definition (or one
+    with `formatType: "number"`), either directly or under that definition's `axis` or
+    `legend`. Formats on temporal fields, or with a time `formatType`, are date formats
+    and are not collected.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every number-format string found.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        format_type = node.get("formatType")
+        if format_type == "number" or (
+            node.get("type") == "quantitative" and format_type not in ("time", "utc")
+        ):
+            for holder in (node, node.get("axis"), node.get("legend")):
+                if isinstance(holder, dict) and isinstance(holder.get("format"), str):
+                    found.add(holder["format"])
+        for value in node.values():
+            found |= _collect_number_formats(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_number_formats(item)
+    return found
+
+
+def _collect_temporal_fields(node: JsonValue) -> set[str]:
+    """Collect every field a spec treats as a date, anywhere within it.
+
+    A field is treated as a date when its definition is `temporal` or carries a
+    `timeUnit` (which also covers a `timeUnit` transform).
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every field name treated as a date.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if isinstance(node.get("field"), str) and (
+            node.get("type") == "temporal" or "timeUnit" in node
+        ):
+            found.add(node["field"])
+        for value in node.values():
+            found |= _collect_temporal_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_temporal_fields(item)
+    return found
+
+
+def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[str]:
+    """Find the columns whose every non-null value is a whole-number calendar year.
+
+    Args:
+        columns (list[str]): The result's column names.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        set[str]: Columns holding only integers within `_YEAR_RANGE` (and at least one).
+    """
+    year_columns: set[str] = set()
+    for column in columns:
+        values = [row[column] for row in rows if row[column] is not None]
+        if values and all(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value in _YEAR_RANGE
+            for value in values
+        ):
+            year_columns.add(column)
+    return year_columns
+
+
+def _is_valid_number_format(specifier: str) -> bool:
+    """Return whether d3-format accepts a number-format specifier.
+
+    Args:
+        specifier (str): The format string (e.g. ".1f", ",.0f", "~s").
+
+    Returns:
+        bool: True if d3-format can parse it.
+    """
+    match = _D3_NUMBER_FORMAT.match(specifier)
+    if match is None:
+        return False
+    format_type = match.group(10)
+    return format_type is None or format_type in _D3_NUMBER_FORMAT_TYPES
+
+
+def _validate_chart_spec(
+    spec: dict[str, Any],
+    columns: list[str],
+    year_columns: frozenset[str] = frozenset(),
+) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
     Args:
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
+        year_columns (frozenset[str]): Columns holding whole-number years (see `_integer_year_columns`).
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
@@ -636,6 +759,30 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
         errors.append(
             f"Unknown color scheme(s): {unknown_schemes}. Use an exact Vega scheme name, "
             "or set explicit colors via a `range` instead."
+        )
+
+    # An invalid number format (e.g. ".2f%") also throws only once a scale has data — the
+    # empty-data render below never formats a tick or legend label — so check the grammar here.
+    invalid_formats = sorted(
+        f for f in _collect_number_formats(spec) if not _is_valid_number_format(f)
+    )
+    if invalid_formats:
+        errors.append(
+            f"Invalid number format(s): {invalid_formats}. Use a d3-format specifier such "
+            "as '.1f', ',.0f', '~s' or '.1%' (the '%' type multiplies by 100, so use it "
+            "only on fractions). To append a unit or a '%' sign to values that are already "
+            "percentages, use a `labelExpr` instead."
+        )
+
+    # An integer year in a temporal field is read as epoch milliseconds, so every year
+    # lands on 1970 — the chart renders without any error, so no render check catches it.
+    temporal_years = sorted(_collect_temporal_fields(spec) & year_columns)
+    if temporal_years:
+        errors.append(
+            f"Column(s) {temporal_years} hold integer years, not dates, but are encoded "
+            "as `temporal` or with a `timeUnit`, so every year renders as 1970. Encode "
+            'them as `quantitative` (or `ordinal` for bars) with `"axis": {"format": "d"}` '
+            "instead."
         )
 
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
@@ -671,6 +818,7 @@ async def generate_chart_spec(
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
     sample_rows = rows[:CHART_SPEC_SAMPLE_ROWS]
+    year_columns = frozenset(_integer_year_columns(columns, rows))
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -694,7 +842,9 @@ async def generate_chart_spec(
             spec = _sanitize_chart_spec(parsed.spec)
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
             previous_spec = spec  # feed the spec back if it fails to validate
-            errors = await asyncio.to_thread(_validate_chart_spec, spec, columns)
+            errors = await asyncio.to_thread(
+                _validate_chart_spec, spec, columns, year_columns
+            )
             if not errors:
                 return spec
 

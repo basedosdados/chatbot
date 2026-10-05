@@ -7,12 +7,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import vl_convert as vlc
 from google.api_core.exceptions import NotFound
 from langchain_core.messages import SystemMessage
 
 from app import charts
 from app.charts import (
     _CHART_SPEC_INSTRUCTIONS,
+    _D3_NUMBER_FORMAT,
     MAX_CHART_SPEC_ATTEMPTS,
     VEGA_LITE_SCHEMA,
     ChartHandleNotFound,
@@ -21,10 +23,14 @@ from app.charts import (
     ChartSpecInvalid,
     _chart_spec_user_prompt,
     _collect,
+    _collect_number_formats,
     _collect_scheme_names,
+    _collect_temporal_fields,
     _fetch_rows,
     _geo_stub_node,
     _geo_url_node,
+    _integer_year_columns,
+    _is_valid_number_format,
     _resolve_named_data,
     _sanitize_chart_spec,
     _validate_chart_spec,
@@ -184,6 +190,22 @@ class TestFetchRows:
         assert isinstance(got[0]["temperatura_media"], float)
         # The bound rows must be plain JSON values, or spec serialization fails.
         json.dumps(got)
+
+    def test_whole_number_decimal_becomes_int(self, mocker):
+        """A whole-number Decimal becomes an int, not a float.
+
+        A NUMERIC year (`Decimal("2019")`) must arrive as 2019, not 2019.0,
+        or `_integer_year_columns` would not recognize the column as years.
+        """
+        rows = [{"ano": Decimal("2019"), "total": Decimal("10.00")}]
+        client = self._client(rows, columns=("ano", "total"))
+        mocker.patch("app.charts._bq_client", return_value=client)
+
+        columns, got = _fetch_rows(DESTINATION)
+
+        assert got == [{"ano": 2019, "total": 10}]
+        assert all(isinstance(value, int) for value in got[0].values())
+        assert _integer_year_columns(columns, got) == {"ano"}
 
     def test_missing_table_maps_to_expired(self, mocker):
         client = MagicMock()
@@ -379,8 +401,215 @@ class TestCollectSchemeNames:
         assert _collect_scheme_names(spec) == set()
 
 
+class TestCollectNumberFormats:
+    def test_collects_formats_on_a_quantitative_field_its_axis_and_legend(self):
+        spec = {
+            "encoding": {
+                "y": {"field": "v", "type": "quantitative", "axis": {"format": "~s"}},
+                "color": {
+                    "field": "v",
+                    "type": "quantitative",
+                    "legend": {"format": ".1%"},
+                },
+                "tooltip": [{"field": "v", "type": "quantitative", "format": ",.0f"}],
+            }
+        }
+
+        assert _collect_number_formats(spec) == {"~s", ".1%", ",.0f"}
+
+    def test_ignores_formats_on_temporal_fields(self):
+        # `%b %Y` is a d3-time-format string, not a number format.
+        spec = {
+            "encoding": {
+                "x": {"field": "data", "type": "temporal", "axis": {"format": "%b %Y"}},
+                "tooltip": [
+                    {"field": "data", "type": "temporal", "format": "%B de %Y"}
+                ],
+            }
+        }
+
+        assert _collect_number_formats(spec) == set()
+
+    def test_ignores_a_quantitative_field_with_a_time_format_type(self):
+        spec = {
+            "field": "ts",
+            "type": "quantitative",
+            "formatType": "time",
+            "format": "%Y",
+        }
+
+        assert _collect_number_formats(spec) == set()
+
+    def test_collects_an_explicit_number_format_type(self):
+        spec = {
+            "field": "v",
+            "type": "ordinal",
+            "formatType": "number",
+            "format": ".2f",
+        }
+
+        assert _collect_number_formats(spec) == {".2f"}
+
+    def test_collects_across_layers(self):
+        spec = {
+            "layer": [
+                {"encoding": {"y": {"type": "quantitative", "format": ".1f"}}},
+                {"encoding": {"text": {"type": "quantitative", "format": "d"}}},
+            ]
+        }
+
+        assert _collect_number_formats(spec) == {".1f", "d"}
+
+
+class TestCollectTemporalFields:
+    def test_collects_temporal_and_time_unit_fields_across_views(self):
+        spec = {
+            "transform": [{"timeUnit": "year", "field": "data_tu", "as": "a"}],
+            "layer": [
+                {"encoding": {"x": {"field": "ano", "type": "temporal"}}},
+                {"encoding": {"x": {"field": "mes", "timeUnit": "month"}}},
+            ],
+            "encoding": {"y": {"field": "total", "type": "quantitative"}},
+        }
+
+        assert _collect_temporal_fields(spec) == {"ano", "mes", "data_tu"}
+
+
+class TestIntegerYearColumns:
+    def test_finds_only_whole_number_year_columns(self):
+        rows = [
+            {
+                "ano": 2019,
+                "total": 5,
+                "data": "2019-01-01",
+                "flag": True,
+                "taxa": 2019.5,
+            },
+            {
+                "ano": None,
+                "total": 2020,
+                "data": "2020-01-01",
+                "flag": True,
+                "taxa": 1.0,
+            },
+        ]
+
+        assert _integer_year_columns(list(rows[0]), rows) == {"ano"}
+
+    def test_an_all_null_column_is_not_a_year(self):
+        assert _integer_year_columns(["ano"], [{"ano": None}]) == set()
+
+
+class TestIsValidNumberFormat:
+    @pytest.mark.parametrize(
+        "specifier", ["", ".1f", ",.0f", "~s", ".1%", "$,.2f", "+.1f", "08.2f", ",.2~f"]
+    )
+    def test_accepts_d3_specifiers(self, specifier):
+        assert _is_valid_number_format(specifier)
+
+    @pytest.mark.parametrize("specifier", [".2f%", ".1F", "%Y", ".2f mil", "abc"])
+    def test_rejects_invalid_specifiers(self, specifier):
+        assert not _is_valid_number_format(specifier)
+
+    @pytest.mark.parametrize(
+        "specifier",
+        [
+            *("", ".1f", ",.0f", "~s", ".1%", "$,.2f", "+.1f", "08.2f", ",.2~f"),
+            *("*^10", "(.2f", "#x", ".1F", ".1z"),
+            *(".2f%", "%Y", ".2f mil", "abc", ".f", "1.2.3f", ",,d"),
+        ],
+    )
+    def test_grammar_matches_the_bundled_d3_format(self, specifier):
+        """The grammar must reject exactly what vl-convert's bundled d3-format throws on.
+
+        Guards against a vl-convert upgrade shipping a d3-format with a different grammar.
+        """
+        spec = {
+            "$schema": VEGA_LITE_SCHEMA,
+            "data": {"values": [{"ano": 2019, "total": 1234.5}]},
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "axis": {"format": specifier},
+                },
+            },
+        }
+        try:
+            vlc.vegalite_to_svg(json.dumps(spec))
+            d3_throws = False
+        except ValueError:
+            d3_throws = True
+
+        assert d3_throws == (_D3_NUMBER_FORMAT.match(specifier) is None)
+
+
 class TestValidateChartSpec:
     """Uses the real vl-convert compiler (in-process)."""
+
+    def test_invalid_legend_number_format_is_rejected(self):
+        """The `.2f%` legend format that shipped on a choropleth.
+
+        d3 throws on it only when a scale with data formats a label, which the empty-data
+        render never does — so the format check, not the compile step, must catch it.
+        """
+        spec = _choropleth_spec()
+        spec["encoding"]["color"]["legend"] = {"format": ".2f%"}
+
+        errors = _validate_chart_spec(spec, ["sigla_uf", "valor"])
+
+        assert any(".2f%" in error and "format" in error for error in errors)
+        assert not any("compile" in error for error in errors)
+
+    def test_valid_number_formats_pass(self):
+        spec = {
+            "mark": "line",
+            "encoding": {
+                "x": {"field": "data", "type": "temporal", "axis": {"format": "%b %Y"}},
+                "y": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "axis": {"format": "~s"},
+                },
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["data", "total"]) == []
+
+    def test_temporal_integer_year_is_rejected(self):
+        """An integer year as `temporal` renders every year as 1970, with no render error."""
+        spec = {
+            "mark": "line",
+            "encoding": {
+                "x": {"field": "ano", "type": "temporal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        errors = _validate_chart_spec(
+            spec, ["ano", "total"], year_columns=frozenset({"ano"})
+        )
+
+        assert any("ano" in error and "temporal" in error for error in errors)
+        assert not any("compile" in error for error in errors)
+
+    def test_quantitative_integer_year_passes(self):
+        spec = {
+            "mark": "line",
+            "encoding": {
+                "x": {"field": "ano", "type": "quantitative", "axis": {"format": "d"}},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        assert (
+            _validate_chart_spec(
+                spec, ["ano", "total"], year_columns=frozenset({"ano"})
+            )
+            == []
+        )
 
     def test_valid_spec_has_no_errors(self):
         spec = {
@@ -587,7 +816,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns: []
+            lambda spec, columns, year_columns: []
             if spec["encoding"] == good["encoding"]
             else ["bad column"],
         )
@@ -596,6 +825,22 @@ class TestGenerateChartSpec:
 
         assert result["encoding"] == good["encoding"]
         assert model.ainvoke.await_count == 2
+
+    async def test_year_columns_are_detected_from_all_rows(self, monkeypatch):
+        """The year check sees every row, not just the sample shown to the model."""
+        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
+        self._model(monkeypatch, _structured_reply(spec))
+        seen = []
+        monkeypatch.setattr(
+            charts,
+            "_validate_chart_spec",
+            lambda spec, columns, year_columns: seen.append(year_columns) or [],
+        )
+        rows = [{"ano": 2000 + i, "n": 1} for i in range(10)] + [{"ano": 1, "n": 1}]
+
+        await generate_chart_spec(["ano", "n"], rows, "a bar chart")
+
+        assert seen == [frozenset()]  # the 11th row is not a year, so `ano` is not one
 
     async def test_rejected_spec_is_fed_back_on_retry(self, monkeypatch):
         """The retry prompt carries the model's own rejected spec plus the errors."""
@@ -607,7 +852,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns: []
+            lambda spec, columns, year_columns: []
             if spec["encoding"] == good["encoding"]
             else ["column 'nope' is not in the result"],
         )
@@ -629,7 +874,9 @@ class TestGenerateChartSpec:
             "data": {"url": "https://evil.example/x.json"},
         }
         model = self._model(monkeypatch, _structured_reply(spec))
-        monkeypatch.setattr(charts, "_validate_chart_spec", lambda spec, columns: [])
+        monkeypatch.setattr(
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+        )
 
         result = await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
 
@@ -642,7 +889,9 @@ class TestGenerateChartSpec:
         empty = _structured_reply(None)
         good = _structured_reply({"mark": "bar", "encoding": {"x": {"field": "ano"}}})
         model = self._model(monkeypatch, empty, good)
-        monkeypatch.setattr(charts, "_validate_chart_spec", lambda spec, columns: [])
+        monkeypatch.setattr(
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+        )
 
         result = await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
 
@@ -654,7 +903,9 @@ class TestGenerateChartSpec:
         messages = [_structured_reply(spec) for _ in range(MAX_CHART_SPEC_ATTEMPTS)]
         model = self._model(monkeypatch, *messages)
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns: ["always bad"]
+            charts,
+            "_validate_chart_spec",
+            lambda spec, columns, year_columns: ["always bad"],
         )
 
         with pytest.raises(ChartSpecInvalid):
