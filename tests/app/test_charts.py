@@ -23,6 +23,7 @@ from app.charts import (
     ChartSpecInvalid,
     _chart_spec_user_prompt,
     _collect,
+    _collect_derived_fields,
     _collect_number_formats,
     _collect_scheme_names,
     _collect_temporal_fields,
@@ -357,6 +358,59 @@ class TestCollect:
         assert _collect({"field": 5, "x": {"field": "ano"}}, "field") == {"ano"}
 
 
+class TestCollectDerivedFields:
+    def test_collects_string_as(self):
+        spec = {"transform": [{"calculate": "datum.total * 2", "as": "dobro"}]}
+
+        assert _collect_derived_fields(spec) == {"dobro"}
+
+    def test_collects_list_as(self):
+        """`fold`, `stack`, `regression`, … name several outputs in a list."""
+        spec = {
+            "transform": [{"fold": ["homens", "mulheres"], "as": ["sexo", "valor"]}]
+        }
+
+        assert _collect_derived_fields(spec) == {"sexo", "valor"}
+
+    def test_collects_as_inside_aggregate_ops(self):
+        spec = {
+            "transform": [
+                {
+                    "aggregate": [{"op": "sum", "field": "v", "as": "total"}],
+                    "groupby": ["uf"],
+                }
+            ]
+        }
+
+        assert _collect_derived_fields(spec) == {"total"}
+
+    def test_bin_transform_also_creates_end_field(self):
+        spec = {"transform": [{"bin": True, "field": "renda", "as": "faixa"}]}
+
+        assert _collect_derived_fields(spec) == {"faixa", "faixa_end"}
+
+    @pytest.mark.parametrize(
+        "transform, expected",
+        [
+            ({"fold": ["a", "b"]}, {"key", "value"}),
+            ({"density": "renda"}, {"value", "density"}),
+            ({"quantile": "renda"}, {"prob", "value"}),
+        ],
+    )
+    def test_default_outputs_when_as_is_omitted(self, transform, expected):
+        assert _collect_derived_fields({"transform": [transform]}) == expected
+
+    def test_collects_across_layers(self):
+        spec = {
+            "layer": [
+                {"transform": [{"calculate": "1", "as": "a"}]},
+                {"transform": [{"regression": "y", "on": "x", "as": ["rx", "ry"]}]},
+            ]
+        }
+
+        assert _collect_derived_fields(spec) == {"a", "rx", "ry"}
+
+
 class TestCollectSchemeNames:
     def test_collects_a_string_scheme(self):
         spec = {"encoding": {"color": {"field": "v", "scale": {"scheme": "reds"}}}}
@@ -655,6 +709,71 @@ class TestValidateChartSpec:
             },
         }
         assert _validate_chart_spec(spec, ["ano", "total"]) == []
+
+    def test_fold_into_grouped_bars_is_valid(self):
+        """A wide result folded into long form — the production spec this used to reject."""
+        spec = {
+            "transform": [
+                {
+                    "fold": ["remuneracao_media_homens", "remuneracao_media_mulheres"],
+                    "as": ["sexo", "remuneracao_media"],
+                },
+                {
+                    "calculate": "datum.sexo === 'remuneracao_media_homens' ? 'Homens' : 'Mulheres'",
+                    "as": "sexo_label",
+                },
+            ],
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "xOffset": {"field": "sexo_label", "type": "nominal"},
+                "y": {"field": "remuneracao_media", "type": "quantitative"},
+                "color": {"field": "sexo_label", "type": "nominal"},
+            },
+        }
+        columns = ["ano", "remuneracao_media_homens", "remuneracao_media_mulheres"]
+
+        assert _validate_chart_spec(spec, columns) == []
+
+    def test_fold_default_output_names_are_valid(self):
+        spec = {
+            "transform": [{"fold": ["homens", "mulheres"]}],
+            "mark": "line",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "value", "type": "quantitative"},
+                "color": {"field": "key", "type": "nominal"},
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["ano", "homens", "mulheres"]) == []
+
+    def test_pivot_output_fields_are_not_flagged(self):
+        """A pivot's new columns are named after data values, unknown from the spec."""
+        spec = {
+            "transform": [{"pivot": "sexo", "value": "total", "groupby": ["ano"]}],
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "Homens", "type": "quantitative"},
+            },
+        }
+
+        assert _validate_chart_spec(spec, ["ano", "sexo", "total"]) == []
+
+    def test_missing_column_still_flagged_alongside_a_fold(self):
+        spec = {
+            "transform": [{"fold": ["homens", "mulheres"], "as": ["sexo", "valor"]}],
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "remuneracao", "type": "quantitative"},
+            },
+        }
+
+        errors = _validate_chart_spec(spec, ["ano", "homens", "mulheres"])
+
+        assert any("remuneracao" in error for error in errors)
 
     def test_invalid_mark_fails_to_compile(self):
         """A structurally invalid spec is caught by the vl-convert compile step."""

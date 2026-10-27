@@ -147,6 +147,13 @@ _D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
 # Whole-number values in this range are read as calendar years (e.g. `ano` = 2019).
 _YEAR_RANGE = range(1000, 3001)
 
+# Fields a transform creates when its `as` is omitted (Vega-Lite's defaults).
+_DEFAULT_TRANSFORM_OUTPUTS = {
+    "fold": ("key", "value"),
+    "density": ("value", "density"),
+    "quantile": ("prob", "value"),
+}
+
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
 You are a data visualization specialist. Given a small, already-aggregated query result and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
@@ -597,6 +604,40 @@ def _collect(node: JsonValue, key: str) -> set[str]:
     return found
 
 
+def _collect_derived_fields(node: JsonValue) -> set[str]:
+    """Collect every field a spec's transforms create, anywhere within it.
+
+    A transform names its outputs in `as`: a string (`calculate`, `aggregate`, `window`, …)
+    or a list (`fold`, `stack`, `regression`, …). A bin transform also creates `<as>_end`,
+    and `fold`, `density` and `quantile` fall back to default names when `as` is omitted.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every field name a transform creates.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        output = node.get("as")
+        if isinstance(output, str):
+            found.add(output)
+            if "bin" in node:
+                found.add(f"{output}_end")
+        elif isinstance(output, list):
+            found |= {name for name in output if isinstance(name, str)}
+        else:
+            for transform, defaults in _DEFAULT_TRANSFORM_OUTPUTS.items():
+                if transform in node:
+                    found.update(defaults)
+        for value in node.values():
+            found |= _collect_derived_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_derived_fields(item)
+    return found
+
+
 def _collect_scheme_names(node: JsonValue) -> set[str]:
     """Collect every color-scheme name a spec references, anywhere within it.
 
@@ -739,13 +780,15 @@ def _validate_chart_spec(
     errors: list[str] = []
 
     referenced = _collect(spec, "field")
-    derived = _collect(spec, "as")  # fields produced by transforms
+    derived = _collect_derived_fields(spec)
     # A geoshape references its geometry's own fields — the top-level `id` and its labels
     # under `properties.*` — which are not result columns; we allow those and flag the rest.
     unknown = referenced - set(columns) - derived - {"*", "id"}
     missing = sorted(field for field in unknown if not field.startswith("properties."))
 
-    if missing:
+    # A pivot names its new columns after the pivoted field's values, which the spec alone
+    # does not reveal, so the check is skipped rather than reject a valid spec.
+    if missing and not _collect(spec, "pivot"):
         errors.append(
             f"Encoding references column(s) not in the result: {missing}. "
             f"Available columns: {sorted(columns)}."
