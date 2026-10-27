@@ -70,6 +70,10 @@ _RESULT_SOURCE = "query_result"
 # Every data-source name a spec may reference; anything else in a `data` node is dropped.
 _ALLOWED_SOURCES = frozenset({_RESULT_SOURCE, *_GEO_ASSETS})
 
+# Vega-Lite data generators: they synthesize values (a number sequence, a map graticule,
+# the globe's outline) without fetching anything, so a spec may keep them.
+_DATA_GENERATORS = frozenset({"sequence", "graticule", "sphere"})
+
 # Vega's built-in color scheme names (https://vega.github.io/vega/docs/schemes/). A scheme
 # name outside this set is rejected. Includes the dark-/light-background ramp variants for
 # completeness, though the prompt steers away from them. Keep in sync with the scheme list
@@ -199,6 +203,7 @@ _MIN_INVISIBLE_CHANNEL = 235
 
 # Fields a transform creates when its `as` is omitted (Vega-Lite's defaults).
 _DEFAULT_TRANSFORM_OUTPUTS = {
+    "sequence": ("data",),
     "fold": ("key", "value"),
     "density": ("value", "density"),
     "quantile": ("prob", "value"),
@@ -750,7 +755,8 @@ def _sanitize_chart_spec(node: JsonValue) -> JsonValue:
     """Sanitize a model spec: drop untrusted keys, keep only allowlisted named sources.
 
     Every `_UNTRUSTED_KEYS` key (`datasets`, `url`, `href`) is removed outright, and a `data`
-    node survives only when it is exactly `{"name": <allowlisted source>}`, so the model can
+    node survives only when it is exactly `{"name": <allowlisted source>}` or a data
+    generator (whose own `name` is dropped, so it cannot shadow a source), so the model can
     never supply its own data or a clickable link.
 
     Args:
@@ -771,6 +777,15 @@ def _sanitize_chart_spec(node: JsonValue) -> JsonValue:
                     and value["name"] in _ALLOWED_SOURCES
                 ):
                     out[key] = {"name": value["name"]}
+                elif (
+                    isinstance(value, dict)
+                    and len(set(value) & _DATA_GENERATORS) == 1
+                    and set(value) - {"name"} <= _DATA_GENERATORS
+                ):
+                    out[key] = {
+                        generator: _sanitize_chart_spec(value[generator])
+                        for generator in set(value) & _DATA_GENERATORS
+                    }
                 # any other data node (inline values, url, unknown name) is dropped
                 continue
             out[key] = _sanitize_chart_spec(value)
@@ -808,7 +823,8 @@ def _collect_derived_fields(node: JsonValue) -> set[str]:
 
     A transform names its outputs in `as`: a string (`calculate`, `aggregate`, `window`, …)
     or a list (`fold`, `stack`, `regression`, …). A bin transform also creates `<as>_end`,
-    and `fold`, `density` and `quantile` fall back to default names when `as` is omitted.
+    and `fold`, `density`, `quantile` and a `sequence` generator fall back to default names
+    when `as` is omitted.
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.

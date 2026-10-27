@@ -144,6 +144,41 @@ class TestSanitizeChartSpec:
         assert "javascript:" not in json.dumps(clean)
 
 
+class TestSanitizeDataGenerators:
+    @pytest.mark.parametrize(
+        "generator",
+        [
+            {"sequence": {"start": 0, "stop": 10, "step": 1, "as": "x"}},
+            {"graticule": {"step": [15, 15]}},
+            {"sphere": True},
+        ],
+    )
+    def test_generators_are_kept(self, generator):
+        assert _sanitize_chart_spec({"data": generator}) == {"data": generator}
+
+    def test_a_generator_name_is_dropped(self):
+        """A named generator could otherwise shadow the `query_result` dataset."""
+        spec = {"data": {"sequence": {"start": 0, "stop": 3}, "name": "query_result"}}
+
+        assert _sanitize_chart_spec(spec) == {
+            "data": {"sequence": {"start": 0, "stop": 3}}
+        }
+
+    def test_a_generator_mixed_with_inline_data_is_dropped(self):
+        spec = {"data": {"sphere": True, "values": [{"a": 1}]}}
+
+        assert _sanitize_chart_spec(spec) == {}
+
+    def test_a_sequence_chart_validates(self):
+        spec = {
+            "data": {"sequence": {"start": 0, "stop": 5}},
+            "mark": "line",
+            "encoding": {"x": {"field": "data", "type": "quantitative"}},
+        }
+
+        assert _validate_chart_spec(_sanitize_chart_spec(spec), []) == []
+
+
 class TestFetchRows:
     def _client(self, rows, columns=("col1",)):
         client = MagicMock()
