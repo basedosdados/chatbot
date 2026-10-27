@@ -252,35 +252,31 @@ class TestGeoStubNode:
 
 
 class TestResolveNamedData:
-    def test_resolves_query_result_to_rows(self):
-        rows = [{"sigla_uf": "SP", "valor": 1}]
-
-        assert _resolve_named_data({"name": "query_result"}, rows, _geo_url_node) == {
-            "values": rows
-        }
-
     def test_resolves_a_geo_name_via_the_given_resolver(self):
-        node = _resolve_named_data({"name": "brazil_states"}, [], _geo_url_node)
+        node = _resolve_named_data({"name": "brazil_states"}, _geo_url_node)
 
         assert node == _geo_url_node("brazil_states")
 
-    def test_resolves_references_nested_anywhere(self):
-        rows = [{"sigla_uf": "SP", "valor": 1}]
+    def test_resolves_geo_references_nested_anywhere(self):
+        spec = {"layer": [{"data": {"name": "brazil_municipalities"}}]}
+
+        resolved = _resolve_named_data(spec, _geo_stub_node)
+
+        assert resolved["layer"][0]["data"] == _geo_stub_node("brazil_municipalities")
+
+    def test_keeps_query_result_references(self):
+        """They read the rows bound once under top-level `datasets`."""
         spec = {"transform": [{"from": {"data": {"name": "query_result"}}}]}
 
-        resolved = _resolve_named_data(spec, rows, _geo_url_node)
-
-        assert resolved["transform"][0]["from"]["data"] == {"values": rows}
+        assert _resolve_named_data(spec, _geo_url_node) == spec
 
     def test_leaves_unknown_names_and_plain_nodes_untouched(self):
         # An unknown name is not resolved here (sanitize drops it earlier).
-        assert _resolve_named_data({"name": "secret"}, [], _geo_url_node) == {
+        assert _resolve_named_data({"name": "secret"}, _geo_url_node) == {
             "name": "secret"
         }
         # A node with no named source passes through unchanged.
-        assert _resolve_named_data({"mark": "bar"}, [], _geo_url_node) == {
-            "mark": "bar"
-        }
+        assert _resolve_named_data({"mark": "bar"}, _geo_url_node) == {"mark": "bar"}
 
 
 class TestInjectChartData:
@@ -293,7 +289,8 @@ class TestInjectChartData:
         chart = inject_chart_data(spec, rows)
 
         assert chart["$schema"] == VEGA_LITE_SCHEMA
-        assert chart["data"] == {"values": rows}
+        assert chart["datasets"] == {"query_result": rows}
+        assert chart["data"] == {"name": "query_result"}
         assert chart["mark"] == "bar"
 
     def test_resolves_named_sources_in_a_choropleth(self):
@@ -301,10 +298,41 @@ class TestInjectChartData:
 
         chart = inject_chart_data(_choropleth_spec(), rows)
 
-        # Top-level geometry becomes a URL node (fetched client-side); the rows fill the
-        # lookup source inline.
+        # Top-level geometry becomes a URL node (fetched client-side); the lookup reads
+        # the rows from the bound dataset.
         assert chart["data"] == _geo_url_node("brazil_states")
-        assert chart["transform"][0]["from"]["data"] == {"values": rows}
+        assert chart["transform"][0]["from"]["data"] == {"name": "query_result"}
+        assert chart["datasets"] == {"query_result": rows}
+
+    def test_rows_appear_once_however_many_views_use_them(self):
+        rows = [{"ano": 2025, "total": 10}]
+        spec = {
+            "layer": [
+                {"data": {"name": "query_result"}, "mark": "bar"},
+                {"data": {"name": "query_result"}, "mark": "line"},
+            ]
+        }
+
+        chart = inject_chart_data(spec, rows)
+
+        assert json.dumps(chart).count('"total": 10') == 1
+
+    def test_bound_chart_renders(self):
+        rows = [{"ano": 2024, "total": 10}, {"ano": 2025, "total": 12}]
+        spec = {
+            "layer": [
+                {"data": {"name": "query_result"}, "mark": "bar"},
+                {"mark": "line"},
+            ],
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        svg = vlc.vegalite_to_svg(json.dumps(inject_chart_data(spec, rows)))
+
+        assert "<path" in svg
 
 
 class TestFetchChartData:

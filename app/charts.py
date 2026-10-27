@@ -437,35 +437,54 @@ def _geo_stub_node(name: str) -> dict[str, Any]:
 
 def _resolve_named_data(
     node: JsonValue,
-    rows: list[dict[str, Any]],
     geo_node: Callable[[str], dict[str, Any]],
 ) -> JsonValue:
-    """Replace every `{"name": <allowlisted>}` data reference with real data.
+    """Replace every `{"name": <geo source>}` data reference with real geometry.
 
-    `query_result` resolves to the rows; a geo name resolves via a `geo_node` — a URL
-    node for a render-ready spec, a tiny inline stub for offline validation. Any other
-    `{"name": ...}` was already dropped by `_sanitize_chart_spec`.
+    A geo name resolves via a `geo_node` — a URL node for a render-ready spec, a tiny
+    inline stub for offline validation. `{"name": "query_result"}` references are kept:
+    they resolve to the rows bound once under top-level `datasets` (see `_bind_rows`).
+    Any other `{"name": ...}` was already dropped by `_sanitize_chart_spec`.
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.
-        rows (list[dict[str, Any]]): The exact result rows to bind for `query_result`.
         geo_node (Callable[[str], dict[str, Any]]): Resolver for a geo source name.
 
     Returns:
-        JsonValue: The same node with its named data references resolved.
+        JsonValue: The same node with its geo data references resolved.
     """
     if isinstance(node, dict):
-        if set(node) == {"name"} and node["name"] in _ALLOWED_SOURCES:
-            if node["name"] == _RESULT_SOURCE:
-                return {"values": rows}
+        if set(node) == {"name"} and node["name"] in _GEO_ASSETS:
             return geo_node(node["name"])
         return {
-            key: _resolve_named_data(value, rows, geo_node)
-            for key, value in node.items()
+            key: _resolve_named_data(value, geo_node) for key, value in node.items()
         }
     if isinstance(node, list):
-        return [_resolve_named_data(item, rows, geo_node) for item in node]
+        return [_resolve_named_data(item, geo_node) for item in node]
     return node
+
+
+def _bind_rows(spec: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Bind the result rows once, as the `query_result` dataset, and set the schema.
+
+    Every `{"name": "query_result"}` reference — in any layer, facet or lookup — reads the
+    same top-level dataset, so the rows appear once in the payload however many views use
+    them. A plain chart that declared no data reads them by default.
+
+    Args:
+        spec (dict[str, Any]): A sanitized spec with its geo sources resolved.
+        rows (list[dict[str, Any]]): The rows to bind.
+
+    Returns:
+        dict[str, Any]: The spec with the rows bound.
+    """
+    chart = {
+        **spec,
+        "$schema": VEGA_LITE_SCHEMA,
+        "datasets": {_RESULT_SOURCE: rows},
+    }
+    chart.setdefault("data", {"name": _RESULT_SOURCE})
+    return chart
 
 
 def inject_chart_data(
@@ -474,8 +493,8 @@ def inject_chart_data(
     """Inject the real geometry and result rows into an already-sanitized spec.
 
     Takes an already sanitized spec from `generate_chart_spec` and makes it render-ready:
-    resolves its named sources (a geo name to a TopoJSON URL, `query_result` to the rows)
-    and binds the rows as the default data for a plain chart that declared none.
+    resolves its geo sources to TopoJSON URLs and binds the rows once as the
+    `query_result` dataset (see `_bind_rows`).
 
     Args:
         spec (dict[str, Any]): A sanitized, data-less spec from `generate_chart_spec`.
@@ -484,10 +503,7 @@ def inject_chart_data(
     Returns:
         dict[str, Any]: A render-ready Vega-Lite spec with the real data bound in.
     """
-    chart = _resolve_named_data(spec, rows, _geo_url_node)
-    chart["$schema"] = VEGA_LITE_SCHEMA
-    chart.setdefault("data", {"values": rows})
-    return chart
+    return _bind_rows(_resolve_named_data(spec, _geo_url_node), rows)
 
 
 # ===================================================================
@@ -964,9 +980,7 @@ def _validate_chart_spec(
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
     # its geometry; a normal chart just gets empty data. Rendering (not just VL→Vega compiling)
     # is the only way to validate expression strings in the spec.
-    compile_spec = _resolve_named_data(spec, [], _geo_stub_node)
-    compile_spec = {**compile_spec, "$schema": VEGA_LITE_SCHEMA}
-    compile_spec.setdefault("data", {"values": []})
+    compile_spec = _bind_rows(_resolve_named_data(spec, _geo_stub_node), [])
 
     try:
         vlc.vegalite_to_svg(json.dumps(compile_spec))

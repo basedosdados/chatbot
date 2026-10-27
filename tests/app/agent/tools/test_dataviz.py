@@ -256,7 +256,8 @@ class TestChartQueryResult:
         # The card renders the spec; the slug is not part of the artifact.
         assert "slug" not in message.artifact
         # The server binds the exact rows; the model never supplied them.
-        assert message.artifact["spec"]["data"] == {"values": rows}
+        assert message.artifact["spec"]["datasets"] == {"query_result": rows}
+        assert message.artifact["spec"]["data"] == {"name": "query_result"}
         content = json.loads(message.content)
         assert content["status"] == "rendered"
         assert content["row_count"] == 1
