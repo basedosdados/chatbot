@@ -1,14 +1,17 @@
 import asyncio
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from functools import cache
+from pathlib import Path
 from typing import Any
 
 import vl_convert as vlc
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery as bq
+from jsonschema import Draft7Validator
+from jsonschema.exceptions import ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, JsonValue
@@ -19,6 +22,12 @@ from app.exports import ResultTableExpired, is_result_expired
 from app.settings import settings
 
 VEGA_LITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
+
+# The JSON schema of the Vega-Lite version vl-convert bundles (6.4.1 in vl-convert 1.9.0);
+# keep it in sync when upgrading vl-convert.
+_VEGA_LITE_SCHEMA_FILE = (
+    Path(__file__).parent / "assets" / "vega-lite-v6.4.1.schema.json"
+)
 
 # Rows shown to the spec generator. It only needs the shape (columns + a few
 # example values); the full result is bound afterwards by inject_chart_data.
@@ -723,6 +732,119 @@ def _collect_temporal_fields(node: JsonValue) -> set[str]:
     return found
 
 
+@cache
+def _encoding_channel_validators() -> dict[str, Draft7Validator]:
+    """One JSON-schema validator per Vega-Lite encoding channel, keyed by channel name."""
+    schema = json.loads(_VEGA_LITE_SCHEMA_FILE.read_text())
+    definitions = schema["definitions"]
+    return {
+        channel: Draft7Validator({**channel_schema, "definitions": definitions})
+        for channel, channel_schema in definitions["FacetedEncoding"][
+            "properties"
+        ].items()
+    }
+
+
+def _error_leaves(error: ValidationError) -> Iterator[ValidationError]:
+    """The innermost errors under an `anyOf`/`oneOf` error, or the error itself."""
+    if not error.context:
+        yield error
+    for sub_error in error.context:
+        yield from _error_leaves(sub_error)
+
+
+def _unsupported_properties(validator: Draft7Validator, value: JsonValue) -> list[str]:
+    """Describe the properties a channel definition carries that its schema does not allow.
+
+    A channel accepts several shapes (field, datum, value, …), so the schema tries each in
+    an `anyOf`. The shape the model meant is the one whose own top-level keys fit best
+    (then the one with the fewest errors), and its unexpected properties are reported.
+    Only unexpected properties count: Vega-Lite silently ignores them, while other schema
+    violations either fail the compile step or are tolerated by Vega-Lite.
+
+    Args:
+        validator (Draft7Validator): The channel's validator.
+        value (JsonValue): The channel definition.
+
+    Returns:
+        list[str]: "<location> has unsupported <keys>" messages; empty if none.
+    """
+    branches: dict[tuple, list[ValidationError]] = {}
+    for error in validator.iter_errors(value):
+        for leaf in _error_leaves(error):
+            schema_path = list(leaf.absolute_schema_path)
+            branch = (
+                tuple(schema_path[: schema_path.index("anyOf") + 2])
+                if "anyOf" in schema_path
+                else ()
+            )
+            branches.setdefault(branch, []).append(leaf)
+
+    if not branches:
+        return []
+
+    def fit(leaves: list[ValidationError]) -> tuple[int, int]:
+        top_level_unexpected = sum(
+            len(set(leaf.instance) - set(leaf.schema.get("properties", {})))
+            for leaf in leaves
+            if leaf.validator == "additionalProperties" and not leaf.absolute_path
+        )
+        return top_level_unexpected, len(leaves)
+
+    unsupported: dict[str, list[str]] = {}
+    for leaf in min(branches.values(), key=fit):
+        if leaf.validator != "additionalProperties":
+            continue
+        location = "".join(f".{part}" for part in leaf.absolute_path)
+        keys = sorted(set(leaf.instance) - set(leaf.schema.get("properties", {})))
+        # The same location can fail in several nested shapes; keep the closest one.
+        if location not in unsupported or len(keys) < len(unsupported[location]):
+            unsupported[location] = keys
+
+    return [
+        f"{location} has unsupported {keys}" for location, keys in unsupported.items()
+    ]
+
+
+def _collect_unsupported_encoding_properties(
+    node: JsonValue, path: str = ""
+) -> list[str]:
+    """Find encoding channels, anywhere in a spec, with properties Vega-Lite ignores.
+
+    Vega-Lite drops an unknown property without an error, so a misplaced one (e.g. `color`
+    nested inside `y`) compiles, renders, and silently loses what it was meant to do.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+        path (str): The location of `node` within the spec, for the messages.
+
+    Returns:
+        list[str]: One message per offending channel location.
+    """
+    found: list[str] = []
+    if isinstance(node, dict):
+        encoding = node.get("encoding")
+        if isinstance(encoding, dict):
+            validators = _encoding_channel_validators()
+            for channel, definition in encoding.items():
+                location = f"{path}.encoding.{channel}".lstrip(".")
+                if channel not in validators:
+                    found.append(f"{location} is not a Vega-Lite encoding channel")
+                    continue
+                found += [
+                    f"{location}{problem}"
+                    for problem in _unsupported_properties(
+                        validators[channel], definition
+                    )
+                ]
+        for key, value in node.items():
+            found += _collect_unsupported_encoding_properties(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            found += _collect_unsupported_encoding_properties(item, f"{path}[{index}]")
+    return found
+
+
 def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[str]:
     """Find the columns whose every non-null value is a whole-number calendar year.
 
@@ -826,6 +948,17 @@ def _validate_chart_spec(
             "as `temporal` or with a `timeUnit`, so every year renders as 1970. Encode "
             'them as `quantitative` (or `ordinal` for bars) with `"axis": {"format": "d"}` '
             "instead."
+        )
+
+    # A misplaced property (e.g. `color` inside `y`) is silently ignored by Vega-Lite, so
+    # the chart compiles and renders without it; only the schema reveals it.
+    unsupported = _collect_unsupported_encoding_properties(spec)
+    if unsupported:
+        errors.append(
+            f"Properties Vega-Lite does not allow here, which it would silently ignore: "
+            f"{unsupported}. Move each to where Vega-Lite expects it (e.g. a channel such as "
+            "`color` or `tooltip` belongs directly under `encoding`, not inside another "
+            'channel; a computed constant goes in `value: {"expr": ...}`).'
         )
 
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders

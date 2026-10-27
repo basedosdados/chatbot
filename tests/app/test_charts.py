@@ -27,6 +27,7 @@ from app.charts import (
     _collect_number_formats,
     _collect_scheme_names,
     _collect_temporal_fields,
+    _collect_unsupported_encoding_properties,
     _fetch_rows,
     _geo_stub_node,
     _geo_url_node,
@@ -411,6 +412,115 @@ class TestCollectDerivedFields:
         assert _collect_derived_fields(spec) == {"a", "rx", "ry"}
 
 
+class TestCollectUnsupportedEncodingProperties:
+    def test_valid_channels_have_no_problems(self):
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal", "axis": {"labelAngle": 0}},
+                "y": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "axis": {"format": "~s"},
+                },
+                "color": {"datum": "Homens", "type": "nominal"},
+                "opacity": {"value": 0.5},
+                "tooltip": [
+                    {"field": "total", "type": "quantitative", "format": ",.0f"}
+                ],
+                "text": {
+                    "condition": {
+                        "test": "datum.ano === 2020",
+                        "value": {"expr": "'x'"},
+                    },
+                    "value": "",
+                },
+            },
+        }
+
+        assert _collect_unsupported_encoding_properties(spec) == []
+
+    def test_channels_nested_inside_another_channel_are_reported(self):
+        """The production case: `color`/`tooltip` ended up inside `y`, so a series lost its color."""
+        spec = {
+            "layer": [
+                {"mark": "bar", "encoding": {"x": {"field": "ano", "type": "ordinal"}}},
+                {
+                    "mark": "bar",
+                    "encoding": {
+                        "y": {
+                            "field": "mulheres",
+                            "type": "quantitative",
+                            "color": {"datum": "Mulheres", "type": "nominal"},
+                            "tooltip": [{"field": "mulheres"}],
+                        }
+                    },
+                },
+            ]
+        }
+
+        assert _collect_unsupported_encoding_properties(spec) == [
+            "layer[1].encoding.y has unsupported ['color', 'tooltip']"
+        ]
+
+    def test_bare_expr_on_text_is_reported(self):
+        """`text: {"expr": ...}` is ignored; a computed text goes in `value: {"expr": ...}`."""
+        spec = {"mark": "text", "encoding": {"text": {"expr": "'R$ ' + datum.v"}}}
+
+        assert _collect_unsupported_encoding_properties(spec) == [
+            "encoding.text has unsupported ['expr']"
+        ]
+
+    def test_bare_expr_in_condition_is_reported_without_blaming_value(self):
+        """`value` beside a `condition` is valid; the misplaced `expr` is the problem."""
+        spec = {
+            "mark": "text",
+            "encoding": {
+                "text": {
+                    "condition": {
+                        "test": "datum.ano === 2020",
+                        "expr": "'R$ ' + datum.v",
+                    },
+                    "value": "",
+                }
+            },
+        }
+
+        problems = _collect_unsupported_encoding_properties(spec)
+
+        assert any(
+            "encoding.text.condition has unsupported ['expr']" in p for p in problems
+        )
+        assert not any("['value']" in p for p in problems)
+
+    def test_nested_unsupported_property_is_located(self):
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "y": {"field": "v", "type": "quantitative", "axis": {"tooltip": True}}
+            },
+        }
+
+        assert _collect_unsupported_encoding_properties(spec) == [
+            "encoding.y.axis has unsupported ['tooltip']"
+        ]
+
+    def test_unknown_channel_is_reported(self):
+        spec = {
+            "mark": "bar",
+            "encoding": {"config": {"axis": {"labelColor": "white"}}},
+        }
+
+        assert _collect_unsupported_encoding_properties(spec) == [
+            "encoding.config is not a Vega-Lite encoding channel"
+        ]
+
+    def test_facet_channels_are_allowed(self):
+        spec = {"mark": "bar", "encoding": {"row": {"field": "uf", "type": "nominal"}}}
+
+        assert _collect_unsupported_encoding_properties(spec) == []
+
+
 class TestCollectSchemeNames:
     def test_collects_a_string_scheme(self):
         spec = {"encoding": {"color": {"field": "v", "scale": {"scheme": "reds"}}}}
@@ -774,6 +884,24 @@ class TestValidateChartSpec:
         errors = _validate_chart_spec(spec, ["ano", "homens", "mulheres"])
 
         assert any("remuneracao" in error for error in errors)
+
+    def test_misplaced_channel_property_is_rejected(self):
+        """It compiles and renders, so only the schema check catches it."""
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {
+                    "field": "total",
+                    "type": "quantitative",
+                    "color": {"datum": "Total", "type": "nominal"},
+                },
+            },
+        }
+
+        errors = _validate_chart_spec(spec, ["ano", "total"])
+
+        assert any("encoding.y has unsupported ['color']" in error for error in errors)
 
     def test_invalid_mark_fails_to_compile(self):
         """A structurally invalid spec is caught by the vl-convert compile step."""
