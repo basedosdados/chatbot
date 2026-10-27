@@ -47,6 +47,7 @@ from app.charts import (
     fetch_chart_data,
     generate_chart_spec,
     inject_chart_data,
+    unbind_chart_spec,
 )
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired
@@ -343,6 +344,24 @@ class TestInjectChartData:
         svg = vlc.vegalite_to_svg(json.dumps(inject_chart_data(spec, rows)))
 
         assert "<path" in svg
+
+
+class TestUnbindChartSpec:
+    def test_round_trips_a_plain_chart(self):
+        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
+
+        unbound = unbind_chart_spec(inject_chart_data(spec, [{"ano": 2025}]))
+
+        assert unbound == {**spec, "data": {"name": "query_result"}}
+
+    def test_round_trips_a_choropleth(self):
+        unbound = unbind_chart_spec(
+            inject_chart_data(_choropleth_spec(), [{"sigla_uf": "SP", "valor": 1}])
+        )
+
+        assert unbound["data"] == {"name": "brazil_states"}
+        assert unbound["transform"][0]["from"]["data"] == {"name": "query_result"}
+        assert "datasets" not in unbound and "$schema" not in unbound
 
 
 class TestFetchChartData:
@@ -1258,7 +1277,7 @@ class TestValidateChartSpec:
 class TestChartSpecUserPrompt:
     def test_carries_task_data_on_the_first_attempt(self):
         prompt = _chart_spec_user_prompt(
-            "a bar chart", "pt", "Rows: 1 ... ano ... total", None, []
+            "a bar chart", "pt", "Rows: 1 ... ano ... total", None, None, []
         )
 
         assert "a bar chart" in prompt
@@ -1268,12 +1287,20 @@ class TestChartSpecUserPrompt:
 
     def test_echoes_the_rejected_spec_and_errors_on_retry(self):
         prompt = _chart_spec_user_prompt(
-            "a bar chart", "en", "Rows: 1", {"mark": "nope"}, ["bad column"]
+            "a bar chart", "en", "Rows: 1", None, {"mark": "nope"}, ["bad column"]
         )
 
         assert '"nope"' in prompt  # the model's own rejected spec, echoed back
         assert "bad column" in prompt  # the validator's reason
         assert "rejected" in prompt
+
+    def test_carries_the_chart_to_change(self):
+        prompt = _chart_spec_user_prompt(
+            "make the line blue", "pt", "Rows: 1", {"mark": "line"}, None, []
+        )
+
+        assert "Chart to change" in prompt
+        assert '"mark": "line"' in prompt
 
 
 class TestSpreadSample:
@@ -1428,6 +1455,25 @@ class TestGenerateChartSpec:
         assert system_message.content == _CHART_SPEC_INSTRUCTIONS
         assert '"nope"' in user_message.content  # its own rejected spec, echoed back
         assert "not in the result" in user_message.content  # the validator's reason
+
+    async def test_prompt_carries_the_chart_to_change(self, monkeypatch):
+        spec = {"mark": "line", "encoding": {"x": {"field": "ano"}}}
+        model = self._model(monkeypatch, _structured_reply(spec))
+        monkeypatch.setattr(
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
+        )
+
+        await generate_chart_spec(
+            {"ano": "INTEGER"},
+            [{"ano": 2025}],
+            "make the line blue",
+            "pt",
+            base_spec={"mark": "line", "title": "Antes"},
+        )
+
+        _, user_message = model.ainvoke.await_args.args[0]
+        assert "Chart to change" in user_message.content
+        assert '"title": "Antes"' in user_message.content
 
     async def test_prompt_carries_language_and_data_summary(self, monkeypatch):
         spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}

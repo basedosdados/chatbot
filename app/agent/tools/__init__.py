@@ -26,7 +26,7 @@ class BDToolkit:
                 - decode_table_values: Decode coded values using dictionary tables.
                 - list_query_results: List this conversation's exportable/chartable results.
                 - export_query_result: Offer a result as a downloadable file (AVRO/CSV/JSONL/PARQUET).
-                - chart_query_result: Render a chart from a result.
+                - chart_query_result: Render a chart from a result, or change an earlier one.
         """
         return [
             search_datasets,

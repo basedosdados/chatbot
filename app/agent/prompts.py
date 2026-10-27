@@ -48,6 +48,8 @@ A value that varies across Brazilian states or municipalities can be drawn as a 
 
 Use the same `query_ref` referencing rules as exports. If the tool reports the result is too large, aggregate further in SQL, chart the smaller result and state this in your response.
 
+To change a chart you already rendered (colors, labels, chart type, …), call `chart_query_result` again with `base_chart` set to that chart's `chart_ref` and describe only the change, so everything else stays as it was. Pass the `query_ref` of the data to plot, which may be a newer result.
+
 # Brazilian data landscape
 
 Main data sources available and starting keywords for the search:

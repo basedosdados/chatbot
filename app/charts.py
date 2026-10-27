@@ -211,6 +211,7 @@ You are a data visualization specialist. Given an already-aggregated query resul
 # Guidelines
 
 - Follow the description when it is specific. When it leaves the chart type open, pick the clearest form for the data's shape.
+- When a chart to change is given, start from it: apply only the requested changes and keep its other choices (chart type, encodings, colors, labels, sizes).
 - Add a short title, label both axes with human-readable text rather than the raw column names.
 - Add a legend whenever a view shows two or more series.
 - Write every title, axis label and legend in the language the request names.
@@ -551,6 +552,41 @@ def inject_chart_data(
     return _bind_rows(_resolve_named_data(spec, _geo_url_node), rows)
 
 
+def _unresolve_geo_urls(node: JsonValue) -> JsonValue:
+    """Turn every geometry URL node (see `_geo_url_node`) back into its `{"name": ...}`."""
+    if isinstance(node, dict):
+        url = node.get("url")
+        if isinstance(url, str):
+            filename = url.rsplit("/", 1)[-1]
+            for name, asset in _GEO_ASSETS.items():
+                if asset["file"] == filename:
+                    return {"name": name}
+        return {key: _unresolve_geo_urls(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_unresolve_geo_urls(item) for item in node]
+    return node
+
+
+def unbind_chart_spec(chart: dict[str, Any]) -> dict[str, Any]:
+    """Turn a render-ready chart back into the data-less spec it was made from.
+
+    Undoes `inject_chart_data` — drops the bound rows and turns geometry URLs back into
+    their names — so an earlier chart can be handed to the generator to change.
+
+    Args:
+        chart (dict[str, Any]): A chart from `inject_chart_data`.
+
+    Returns:
+        dict[str, Any]: The sanitized, data-less spec.
+    """
+    spec = {
+        key: value for key, value in chart.items() if key not in ("$schema", "datasets")
+    }
+    unbound = _sanitize_chart_spec(_unresolve_geo_urls(spec))
+    assert isinstance(unbound, dict)  # an object spec sanitizes to an object
+    return unbound
+
+
 # ===================================================================
 # CHART SPEC GENERATION
 # ===================================================================
@@ -660,6 +696,7 @@ def _chart_spec_user_prompt(
     instructions: str,
     language: LanguageCode,
     data_description: str,
+    base_spec: dict[str, Any] | None,
     previous_spec: dict[str, Any] | None,
     errors: list[str],
 ) -> str:
@@ -672,6 +709,7 @@ def _chart_spec_user_prompt(
         instructions (str): The natural-language description of the chart to produce.
         language (LanguageCode): The language of the chart's text (the user's language).
         data_description (str): The result's size, column summaries and sample rows.
+        base_spec (dict[str, Any] | None): An earlier chart to change, or None for a new one.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
 
@@ -683,6 +721,12 @@ def _chart_spec_user_prompt(
         f"Language of the chart's text: {language_name(language)}\n\n"
         f"{data_description}"
     )
+
+    if base_spec is not None:
+        prompt += (
+            "\n\nChart to change (keep everything the request does not ask to change):\n"
+            f"{json.dumps(base_spec, ensure_ascii=False, default=str)}"
+        )
 
     if errors:
         # Show the model its own rejected spec so it can edit that spec to fix the
@@ -1416,6 +1460,7 @@ async def generate_chart_spec(
     rows: list[dict[str, Any]],
     instructions: str,
     language: LanguageCode,
+    base_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate a sanitized Vega-Lite spec for a result, retrying until it validates.
 
@@ -1424,6 +1469,8 @@ async def generate_chart_spec(
         rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
         instructions (str): A natural-language description of the chart to produce.
         language (LanguageCode): The language of the chart's text (the user's language).
+        base_spec (dict[str, Any] | None): An earlier chart to change (see
+            `unbind_chart_spec`); None for a new chart.
 
     Returns:
         dict[str, Any]: A validated, sanitized spec (no data bound yet).
@@ -1442,7 +1489,12 @@ async def generate_chart_spec(
                 SystemMessage(_CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     _chart_spec_user_prompt(
-                        instructions, language, data_description, previous_spec, errors
+                        instructions,
+                        language,
+                        data_description,
+                        base_spec,
+                        previous_spec,
+                        errors,
                     )
                 ),
             ]

@@ -14,7 +14,7 @@ from app.agent.tools.dataviz import (
     export_query_result,
     list_query_results,
 )
-from app.charts import ChartResultTooLarge
+from app.charts import ChartResultTooLarge, inject_chart_data
 from app.db.models import QueryHandle
 from app.exports import ExportedFile, ResultTableExpired, ResultTooLarge
 
@@ -29,9 +29,11 @@ def _exported(size_bytes: int = 2048) -> ExportedFile:
     )
 
 
-def _runtime(thread_id: str = "test-thread") -> ToolRuntime[AgentContext]:
+def _runtime(
+    thread_id: str = "test-thread", messages: list | None = None
+) -> ToolRuntime[AgentContext]:
     return ToolRuntime(
-        state={},
+        state={"messages": messages or []},
         context=AgentContext(thread_id=thread_id, user_id="test-user", language="pt"),
         config={},
         stream_writer=None,
@@ -40,14 +42,14 @@ def _runtime(thread_id: str = "test-thread") -> ToolRuntime[AgentContext]:
     )
 
 
-async def _ainvoke(tool, args: dict) -> ToolMessage:
+async def _ainvoke(tool, args: dict, messages: list | None = None) -> ToolMessage:
     """Invoke an async tool the way the ToolNode does, returning the ToolMessage."""
     return await tool.ainvoke(
         {
             "type": "tool_call",
             "id": "1",
             "name": tool.name,
-            "args": {**args, "runtime": _runtime()},
+            "args": {**args, "runtime": _runtime(messages=messages)},
         }
     )
 
@@ -263,13 +265,75 @@ class TestChartQueryResult:
         content = json.loads(message.content)
         assert content["status"] == "rendered"
         assert content["row_count"] == 1
+        # The agent gets a reference to change this chart later; the artifact carries it too.
+        assert content["chart_ref"].startswith("ch_")
+        assert message.artifact["chart_ref"] == content["chart_ref"]
         # generate_chart_spec receives the columns/rows/instructions/language, not a spec.
         dataviz_module.generate_chart_spec.assert_awaited_once_with(
             {"ano": "INTEGER", "total": "INTEGER"},
             rows,
             "a bar chart of total by year",
             "pt",
+            None,
         )
+
+    async def test_changes_an_earlier_chart(self, monkeypatch):
+        """With `base_chart`, the earlier chart's data-less spec is the starting point."""
+        rows = [{"ano": 2025, "total": 10}]
+        earlier = {"mark": "line", "encoding": {"x": {"field": "ano"}}}
+        history = [
+            ToolMessage(
+                content="{}",
+                tool_call_id="0",
+                artifact={
+                    "type": "chart",
+                    "chart_ref": "ch_earlier",
+                    "query_ref": "qr_1",
+                    "spec": inject_chart_data(earlier, rows),
+                },
+            )
+        ]
+        monkeypatch.setattr(
+            dataviz_module,
+            "fetch_chart_data",
+            AsyncMock(
+                return_value=(_handle("qr_1", "vendas"), {"ano": "INTEGER"}, rows)
+            ),
+        )
+        monkeypatch.setattr(
+            dataviz_module, "generate_chart_spec", AsyncMock(return_value=earlier)
+        )
+
+        await _ainvoke(
+            chart_query_result,
+            {
+                "query_ref": "qr_1",
+                "instructions": "make it blue",
+                "base_chart": "ch_earlier",
+            },
+            messages=history,
+        )
+
+        base_spec = dataviz_module.generate_chart_spec.await_args.args[4]
+        assert base_spec == {**earlier, "data": {"name": "query_result"}}
+
+    async def test_unknown_base_chart_is_reported(self, monkeypatch):
+        fetch = AsyncMock()
+        monkeypatch.setattr(dataviz_module, "fetch_chart_data", fetch)
+
+        message = await _ainvoke(
+            chart_query_result,
+            {
+                "query_ref": "qr_1",
+                "instructions": "make it blue",
+                "base_chart": "ch_gone",
+            },
+        )
+        content = json.loads(message.content)
+
+        assert content["status"] == "error"
+        assert "ch_gone" in content["message"]
+        fetch.assert_not_awaited()
 
     async def test_too_large_result_is_reported(self, monkeypatch):
         monkeypatch.setattr(

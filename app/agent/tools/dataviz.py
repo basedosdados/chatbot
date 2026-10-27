@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 from typing import Any
 
 from langchain.tools import ToolRuntime
@@ -7,7 +8,12 @@ from langchain_core.tools import tool
 
 from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
-from app.charts import fetch_chart_data, generate_chart_spec, inject_chart_data
+from app.charts import (
+    fetch_chart_data,
+    generate_chart_spec,
+    inject_chart_data,
+    unbind_chart_spec,
+)
 from app.db.database import AsyncDatabase, sessionmaker
 from app.exports import (
     OFFERED_EXPORT_FORMATS,
@@ -135,37 +141,74 @@ async def export_query_result(
     return content, artifact
 
 
+def _find_chart(messages: list[Any], chart_ref: str) -> dict[str, Any] | None:
+    """The spec of an earlier chart in this conversation, by its `chart_ref`, if still there."""
+    for message in reversed(messages):
+        artifact = getattr(message, "artifact", None)
+        if (
+            isinstance(artifact, dict)
+            and artifact.get("type") == "chart"
+            and artifact.get("chart_ref") == chart_ref
+        ):
+            return artifact["spec"]
+    return None
+
+
 @tool(response_format="content_and_artifact")
 @handle_tool_errors(response_format="content_and_artifact")
 async def chart_query_result(
-    query_ref: str, instructions: str, runtime: ToolRuntime[AgentContext]
+    query_ref: str,
+    instructions: str,
+    runtime: ToolRuntime[AgentContext],
+    base_chart: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Render a chart from a query's result.
+    """Render a chart from a query's result, or change a chart rendered earlier.
 
     Args:
         query_ref (str): The handle of the result to chart.
-        instructions (str): A natural-language description of the chart.
+        instructions (str): A natural-language description of the chart, or, with
+            `base_chart`, of only the change to make.
+        base_chart (str | None): The `chart_ref` of an earlier chart to change; omit for a
+            new chart.
 
     Returns:
-        A confirmation that the chart was rendered, or an error describing what to fix.
+        A confirmation with the chart's `chart_ref`, or an error describing what to fix.
     """
+    base_spec = None
+    if base_chart is not None:
+        chart = _find_chart(runtime.state["messages"], base_chart)
+        if chart is None:
+            raise ValueError(
+                f"No chart found for '{base_chart}' in this conversation. "
+                "Describe the full chart instead, without `base_chart`."
+            )
+        base_spec = unbind_chart_spec(chart)
+
     handle, columns, rows = await fetch_chart_data(query_ref, runtime.context.thread_id)
 
     spec = await generate_chart_spec(
-        columns, rows, instructions, runtime.context.language
+        columns, rows, instructions, runtime.context.language, base_spec
     )
+
+    chart_ref = f"ch_{uuid.uuid4().hex[:12]}"
 
     # A client-facing artifact (not a `query_result` handle, so it is not redacted): the
     # interface renders it with Vega-Embed. The data is bound server-side from the exact
     # result rows, so the model cannot substitute the numbers.
     artifact = {
         "type": "chart",
+        "chart_ref": chart_ref,
         "query_ref": handle.query_ref,
         "spec": inject_chart_data(spec, rows),
     }
 
     content = json.dumps(
-        {"status": "rendered", "query_ref": query_ref, "row_count": len(rows)},
+        {
+            "status": "rendered",
+            "chart_ref": chart_ref,
+            "query_ref": query_ref,
+            "row_count": len(rows),
+        },
         ensure_ascii=False,
     )
 
