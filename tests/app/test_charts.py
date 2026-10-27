@@ -46,6 +46,7 @@ from app.charts import (
     _spread_sample,
     _summarize_column,
     _validate_chart_spec,
+    describe_chart,
     fetch_chart_data,
     generate_chart_spec,
     inject_chart_data,
@@ -381,6 +382,51 @@ class TestInjectChartData:
         svg = vlc.vegalite_to_svg(json.dumps(inject_chart_data(spec, rows)))
 
         assert "<path" in svg
+
+
+class TestDescribeChart:
+    def test_summarizes_title_marks_and_channels(self):
+        spec = {
+            "title": {"text": "Remuneração por sexo"},
+            "encoding": {"x": {"field": "ano", "type": "ordinal"}},
+            "layer": [
+                {
+                    "mark": "bar",
+                    "encoding": {
+                        "y": {"field": "valor", "type": "quantitative"},
+                        "color": {"datum": "Homens"},
+                        "tooltip": [{"field": "valor"}],
+                    },
+                },
+                {"mark": {"type": "rule"}, "encoding": {"y": {"datum": 0}}},
+            ],
+        }
+
+        assert describe_chart(spec) == {
+            "title": "Remuneração por sexo",
+            "views": [
+                {
+                    "mark": "bar",
+                    "encoding": {
+                        "x": "ano",
+                        "y": "valor",
+                        "color": {"datum": "Homens"},
+                    },
+                },
+                {"mark": "rule", "encoding": {"x": "ano", "y": {"datum": 0}}},
+            ],
+        }
+
+    def test_reports_facets(self):
+        spec = {
+            "facet": {"row": {"field": "grupo"}, "column": {"field": "ano"}},
+            "spec": {"mark": "point", "encoding": {"x": {"field": "renda"}}},
+        }
+
+        summary = describe_chart(spec)
+
+        assert summary["facet"] == {"row": "grupo", "column": "ano"}
+        assert summary["views"] == [{"mark": "point", "encoding": {"x": "renda"}}]
 
 
 class TestUnbindChartSpec:

@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 from app.agent.context import AgentContext
 from app.agent.tools.exceptions import handle_tool_errors
 from app.charts import (
+    describe_chart,
     fetch_chart_data,
     generate_chart_spec,
     inject_chart_data,
@@ -172,7 +173,8 @@ async def chart_query_result(
             new chart.
 
     Returns:
-        A confirmation with the chart's `chart_ref`, or an error describing what to fix.
+        A confirmation with the chart's `chart_ref` and a summary of what it draws, or
+        an error describing what to fix.
     """
     base_spec = None
     if base_chart is not None:
@@ -208,6 +210,7 @@ async def chart_query_result(
             "chart_ref": chart_ref,
             "query_ref": query_ref,
             "row_count": len(rows),
+            "chart": describe_chart(spec),
         },
         ensure_ascii=False,
     )

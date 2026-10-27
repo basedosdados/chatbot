@@ -561,6 +561,46 @@ def inject_chart_data(
     return _bind_rows(_resolve_named_data(spec, _geo_url_node), rows)
 
 
+def describe_chart(spec: dict[str, Any]) -> dict[str, Any]:
+    """Summarize what a chart draws, so the agent can describe it as it is.
+
+    Args:
+        spec (dict[str, Any]): A sanitized spec.
+
+    Returns:
+        dict[str, Any]: The title, any facet fields, and each view's mark with the field (or
+            constant datum) on each channel; tooltips are left out.
+    """
+    title = spec.get("title")
+    if isinstance(title, dict):
+        title = title.get("text")
+
+    views = []
+    for unit, encoding in _iter_units(spec):
+        channels = {}
+        for channel, definition in encoding.items():
+            if channel == "tooltip" or not isinstance(definition, dict):
+                continue
+            if isinstance(definition.get("field"), str):
+                channels[channel] = definition["field"]
+            elif "datum" in definition:
+                channels[channel] = {"datum": definition["datum"]}
+        views.append({"mark": _mark_type(unit["mark"]), "encoding": channels})
+
+    summary: dict[str, Any] = {"title": title, "views": views}
+    facet = spec.get("facet")
+    if isinstance(facet, dict):
+        if isinstance(facet.get("field"), str):
+            summary["facet"] = facet["field"]
+        else:
+            summary["facet"] = {
+                key: value["field"]
+                for key, value in facet.items()
+                if isinstance(value, dict) and isinstance(value.get("field"), str)
+            }
+    return summary
+
+
 def _unresolve_geo_urls(node: JsonValue) -> JsonValue:
     """Turn every geometry URL node (see `_geo_url_node`) back into its `{"name": ...}`."""
     if isinstance(node, dict):

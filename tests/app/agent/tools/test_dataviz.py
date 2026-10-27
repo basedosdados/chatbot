@@ -267,6 +267,8 @@ class TestChartQueryResult:
         assert content["row_count"] == 1
         # The agent gets a reference to change this chart later; the artifact carries it too.
         assert content["chart_ref"].startswith("ch_")
+        # ...and a summary of what was drawn, to describe it accurately.
+        assert content["chart"]["views"] == [{"mark": "bar", "encoding": {"x": "ano"}}]
         assert message.artifact["chart_ref"] == content["chart_ref"]
         # generate_chart_spec receives the columns/rows/instructions/language, not a spec.
         dataviz_module.generate_chart_spec.assert_awaited_once_with(
