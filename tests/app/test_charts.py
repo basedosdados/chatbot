@@ -1159,6 +1159,31 @@ class TestValidateChartSpec:
 
         assert any("splits it into pieces" in error for error in errors)
 
+    def test_geometry_fields_are_allowed_in_a_map(self):
+        spec = {
+            **_choropleth_spec(),
+            "encoding": {
+                "color": {"field": "valor", "type": "quantitative"},
+                "tooltip": [{"field": "properties.name"}, {"field": "id"}],
+            },
+        }
+
+        missing = [
+            e
+            for e in _validate_chart_spec(spec, ["sigla_uf", "valor"])
+            if "not in the result" in e
+        ]
+
+        assert missing == []
+
+    def test_id_is_flagged_outside_a_map(self):
+        """Only a map's geometry has an `id`; elsewhere it is a missing column."""
+        spec = {"mark": "bar", "encoding": {"x": {"field": "id"}}}
+
+        errors = _validate_chart_spec(spec, ["ano", "total"])
+
+        assert any("['id']" in error for error in errors)
+
     def test_invalid_mark_fails_to_compile(self):
         """A structurally invalid spec is caught by the vl-convert compile step."""
         spec = {"mark": "notamark", "encoding": {"x": {"field": "ano"}}}

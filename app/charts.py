@@ -1362,10 +1362,16 @@ def _validate_chart_spec(
 
     referenced = _collect(spec, "field")
     derived = _collect_derived_fields(spec)
-    # A geoshape references its geometry's own fields — the top-level `id` and its labels
-    # under `properties.*` — which are not result columns; we allow those and flag the rest.
-    unknown = referenced - set(columns) - derived - {"*", "id"}
-    missing = sorted(field for field in unknown if not field.startswith("properties."))
+    unknown = referenced - set(columns) - derived - {"*"}
+    # A map references its geometry's own fields — the top-level `id` and its labels under
+    # `properties.*` — which are not result columns; those are allowed only in a map.
+    if _collect(spec, "name") & set(_GEO_ASSETS):
+        unknown = {
+            field
+            for field in unknown
+            if field != "id" and not field.startswith("properties.")
+        }
+    missing = sorted(unknown)
 
     # A pivot names its new columns after the pivoted field's values, which the spec alone
     # does not reveal, so the check is skipped rather than reject a valid spec.
