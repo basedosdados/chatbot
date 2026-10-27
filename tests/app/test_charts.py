@@ -28,6 +28,7 @@ from app.charts import (
     _collect_scheme_names,
     _collect_temporal_fields,
     _collect_unsupported_encoding_properties,
+    _describe_result,
     _fetch_rows,
     _geo_stub_node,
     _geo_url_node,
@@ -35,6 +36,8 @@ from app.charts import (
     _is_valid_number_format,
     _resolve_named_data,
     _sanitize_chart_spec,
+    _spread_sample,
+    _summarize_column,
     _validate_chart_spec,
     fetch_chart_data,
     generate_chart_spec,
@@ -137,7 +140,9 @@ class TestFetchRows:
     def _client(self, rows, columns=("col1",)):
         client = MagicMock()
         client.get_table.return_value = SimpleNamespace(
-            schema=[SimpleNamespace(name=name) for name in columns],
+            schema=[
+                SimpleNamespace(name=name, field_type="STRING") for name in columns
+            ],
         )
         client.list_rows.return_value = iter(rows)
         return client
@@ -148,7 +153,7 @@ class TestFetchRows:
 
         columns, rows = _fetch_rows(DESTINATION)
 
-        assert columns == ["col1"]
+        assert columns == {"col1": "STRING"}
         assert rows == [{"col1": "a"}, {"col1": "b"}]
 
     def test_allows_a_dense_result_within_budget(self, mocker):
@@ -207,7 +212,7 @@ class TestFetchRows:
 
         assert got == [{"ano": 2019, "total": 10}]
         assert all(isinstance(value, int) for value in got[0].values())
-        assert _integer_year_columns(columns, got) == {"ano"}
+        assert _integer_year_columns(list(columns), got) == {"ano"}
 
     def test_missing_table_maps_to_expired(self, mocker):
         client = MagicMock()
@@ -352,13 +357,13 @@ class TestFetchChartData:
         handle = _handle(age=timedelta(hours=1))
         self._patch_db(monkeypatch, handle)
         monkeypatch.setattr(
-            charts, "_fetch_rows", lambda dest: (["ano"], [{"ano": 2025}])
+            charts, "_fetch_rows", lambda dest: ({"ano": "INTEGER"}, [{"ano": 2025}])
         )
 
         got_handle, columns, rows = await fetch_chart_data("qr_1", "test-thread")
 
         assert got_handle is handle
-        assert columns == ["ano"]
+        assert columns == {"ano": "INTEGER"}
         assert rows == [{"ano": 2025}]
 
     async def test_missing_handle_raises(self, monkeypatch):
@@ -1051,21 +1056,96 @@ class TestValidateChartSpec:
 class TestChartSpecUserPrompt:
     def test_carries_task_data_on_the_first_attempt(self):
         prompt = _chart_spec_user_prompt(
-            ["ano", "total"], [{"ano": 2025, "total": 10}], "a bar chart", None, []
+            "a bar chart", "pt", "Rows: 1 ... ano ... total", None, []
         )
 
         assert "a bar chart" in prompt
+        assert "Portuguese" in prompt
         assert "ano" in prompt and "total" in prompt
         assert "rejected" not in prompt  # no retry feedback on the first attempt
 
     def test_echoes_the_rejected_spec_and_errors_on_retry(self):
         prompt = _chart_spec_user_prompt(
-            ["ano"], [{"ano": 2025}], "a bar chart", {"mark": "nope"}, ["bad column"]
+            "a bar chart", "en", "Rows: 1", {"mark": "nope"}, ["bad column"]
         )
 
         assert '"nope"' in prompt  # the model's own rejected spec, echoed back
         assert "bad column" in prompt  # the validator's reason
         assert "rejected" in prompt
+
+
+class TestSpreadSample:
+    def test_returns_every_row_when_few(self):
+        rows = [{"i": i} for i in range(3)]
+
+        assert _spread_sample(rows, 10) == rows
+
+    def test_spreads_across_the_whole_result(self):
+        """A result sorted by group shows every group, not just the first one."""
+        rows = [{"grupo": "pobres", "i": i} for i in range(50)] + [
+            {"grupo": "ricos", "i": i} for i in range(50)
+        ]
+
+        sample = _spread_sample(rows, 10)
+
+        assert len(sample) == 10
+        assert sample[0] == rows[0] and sample[-1] == rows[-1]
+        assert {row["grupo"] for row in sample} == {"pobres", "ricos"}
+
+
+class TestSummarizeColumn:
+    def test_numbers_get_a_range(self):
+        summary = _summarize_column("FLOAT", [96.25, None, 1731.84, 715.52])
+
+        assert summary == {
+            "type": "FLOAT",
+            "distinct": 3,
+            "nulls": 1,
+            "min": 96.25,
+            "max": 1731.84,
+        }
+
+    def test_dates_get_a_range(self):
+        summary = _summarize_column("DATE", ["2025-03-01", "2024-01-01"])
+
+        assert summary["min"] == "2024-01-01" and summary["max"] == "2025-03-01"
+
+    def test_low_cardinality_text_lists_every_value(self):
+        summary = _summarize_column("STRING", ["SP", "MG", "SP"])
+
+        assert summary["distinct"] == 2
+        assert summary["values"] == ["MG", "SP"]
+
+    def test_high_cardinality_text_shows_a_few_examples(self):
+        summary = _summarize_column("STRING", [f"m{i:04d}" for i in range(5570)])
+
+        assert summary["distinct"] == 5570
+        assert summary["examples"] == ["m0000", "m0001", "m0002"]
+        assert "values" not in summary
+
+    def test_booleans_are_listed_not_ranged(self):
+        summary = _summarize_column("BOOLEAN", [True, False, True])
+
+        assert summary["values"] == [False, True]
+
+    def test_all_null_column(self):
+        assert _summarize_column("STRING", [None, None]) == {
+            "type": "STRING",
+            "distinct": 0,
+            "nulls": 2,
+        }
+
+
+class TestDescribeResult:
+    def test_carries_row_count_types_summary_and_sample(self):
+        rows = [{"uf": "SP", "valor": 1}, {"uf": "MG", "valor": 3}]
+
+        description = _describe_result({"uf": "STRING", "valor": "INTEGER"}, rows)
+
+        assert "Rows: 2" in description
+        assert '"type": "STRING"' in description and '"type": "INTEGER"' in description
+        assert '"min": 1, "max": 3' in description
+        assert '"MG"' in description
 
 
 def _structured_reply(spec: dict | None) -> dict:
@@ -1096,7 +1176,9 @@ class TestGenerateChartSpec:
             else ["bad column"],
         )
 
-        result = await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
+        result = await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+        )
 
         assert result["encoding"] == good["encoding"]
         assert model.ainvoke.await_count == 2
@@ -1113,7 +1195,9 @@ class TestGenerateChartSpec:
         )
         rows = [{"ano": 2000 + i, "n": 1} for i in range(10)] + [{"ano": 1, "n": 1}]
 
-        await generate_chart_spec(["ano", "n"], rows, "a bar chart")
+        await generate_chart_spec(
+            {"ano": "INTEGER", "n": "INTEGER"}, rows, "a bar chart", "pt"
+        )
 
         assert seen == [frozenset()]  # the 11th row is not a year, so `ano` is not one
 
@@ -1132,7 +1216,9 @@ class TestGenerateChartSpec:
             else ["column 'nope' is not in the result"],
         )
 
-        await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
+        await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+        )
 
         system_message, user_message = model.ainvoke.await_args_list[1].args[0]
         # The durable how-to is a system message; the retry data rides the user message.
@@ -1140,6 +1226,22 @@ class TestGenerateChartSpec:
         assert system_message.content == _CHART_SPEC_INSTRUCTIONS
         assert '"nope"' in user_message.content  # its own rejected spec, echoed back
         assert "not in the result" in user_message.content  # the validator's reason
+
+    async def test_prompt_carries_language_and_data_summary(self, monkeypatch):
+        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
+        model = self._model(monkeypatch, _structured_reply(spec))
+        monkeypatch.setattr(
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+        )
+
+        await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2024}, {"ano": 2025}], "a bar chart", "es"
+        )
+
+        _, user_message = model.ainvoke.await_args.args[0]
+        assert "Spanish" in user_message.content
+        assert "Rows: 2" in user_message.content
+        assert '"min": 2024, "max": 2025' in user_message.content
 
     async def test_model_supplied_data_is_stripped(self, monkeypatch):
         """A model spec carrying data/url is sanitized (not rejected) before returning."""
@@ -1153,7 +1255,9 @@ class TestGenerateChartSpec:
             charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
         )
 
-        result = await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
+        result = await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+        )
 
         assert "data" not in result
         assert "url" not in json.dumps(result)
@@ -1168,7 +1272,9 @@ class TestGenerateChartSpec:
             charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
         )
 
-        result = await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
+        result = await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+        )
 
         assert result["mark"] == "bar"
         assert model.ainvoke.await_count == 2
@@ -1184,6 +1290,8 @@ class TestGenerateChartSpec:
         )
 
         with pytest.raises(ChartSpecInvalid):
-            await generate_chart_spec(["ano"], [{"ano": 2025}], "a bar chart")
+            await generate_chart_spec(
+                {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+            )
 
         assert model.ainvoke.await_count == MAX_CHART_SPEC_ATTEMPTS

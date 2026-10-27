@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, JsonValue
 from app.db.database import AsyncDatabase, sessionmaker
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired, is_result_expired
+from app.i18n import LanguageCode, language_name
 from app.settings import settings
 
 VEGA_LITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
@@ -29,9 +30,18 @@ _VEGA_LITE_SCHEMA_FILE = (
     Path(__file__).parent / "assets" / "vega-lite-v6.4.1.schema.json"
 )
 
-# Rows shown to the spec generator. It only needs the shape (columns + a few
-# example values); the full result is bound afterwards by inject_chart_data.
+# Rows shown to the spec generator, evenly spaced across the result. It also gets a
+# per-column summary over every row; the full result is bound afterwards by
+# inject_chart_data.
 CHART_SPEC_SAMPLE_ROWS = 10
+
+# A text column's distinct values are listed in full up to this many; beyond it, only a
+# few examples are shown.
+_SUMMARY_MAX_LISTED_VALUES = 12
+_SUMMARY_EXAMPLES = 3
+
+# Temporal BigQuery types arrive as ISO strings, which order like the dates they encode.
+_TEMPORAL_TYPES = frozenset({"DATE", "DATETIME", "TIMESTAMP", "TIME"})
 
 # How many times the generator may retry after a spec fails validation before giving up.
 MAX_CHART_SPEC_ATTEMPTS = 3
@@ -165,13 +175,15 @@ _DEFAULT_TRANSFORM_OUTPUTS = {
 
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
-You are a data visualization specialist. Given a small, already-aggregated query result and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
+You are a data visualization specialist. Given an already-aggregated query result — its row count, each column's BigQuery type with a summary over every row, and an evenly spaced sample of rows — and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
 
 # Guidelines
 
 - Follow the description when it is specific. When it leaves the chart type open, pick the clearest form for the data's shape.
 - Add a short title, label both axes with human-readable text rather than the raw column names.
 - Add a legend whenever a view shows two or more series.
+- Write every title, axis label and legend in the language the request names.
+- Base scale, size and layout choices on the column summaries (ranges, distinct counts), not just the sample rows. For example, panels whose value ranges barely overlap should not share an axis.
 
 ## Color
 
@@ -191,7 +203,7 @@ Use a named `scheme` only when the request names or clearly maps to one of the b
 
 ## Number formatting
 
-Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the response's language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
+Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the requested language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
 
 ## Years
 
@@ -211,7 +223,7 @@ In a `layer`, layers that share an axis are merged into one axis, and a property
 
 ## Size
 
-The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis, set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
+The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis (see that column's distinct count), set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
 
 ## Long labels
 
@@ -303,7 +315,7 @@ def _json_default(value: Any) -> Any:
 
 def _fetch_rows(
     destination_table: dict[str, Any],
-) -> tuple[list[str], list[dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Fetch a result table's rows for charting, capped at settings.CHART_MAX_BYTES.
 
     Fetches row by row and stops as soon as the JSON that would be bound into the spec
@@ -313,7 +325,8 @@ def _fetch_rows(
         destination_table (dict[str, Any]): `TableReference.to_api_repr()` of the result table.
 
     Returns:
-        tuple[list[str], list[dict[str, Any]]]: Column names and row dicts.
+        tuple[dict[str, str], list[dict[str, Any]]]: Column names mapped to their BigQuery
+            types, in schema order, and row dicts.
 
     Raises:
         ChartResultTooLarge: The bound data would exceed settings.CHART_MAX_BYTES.
@@ -324,7 +337,7 @@ def _fetch_rows(
     try:
         table = _bq_client().get_table(table_ref)
 
-        columns = [field.name for field in table.schema]
+        columns = {field.name: field.field_type for field in table.schema}
 
         rows = []
         size = 0
@@ -351,7 +364,7 @@ def _fetch_rows(
 
 async def fetch_chart_data(
     query_ref: str, thread_id: str
-) -> tuple[QueryHandle, list[str], list[dict[str, Any]]]:
+) -> tuple[QueryHandle, dict[str, str], list[dict[str, Any]]]:
     """Resolve a chartable result: authorize the handle, then read its capped rows.
 
     Args:
@@ -359,7 +372,8 @@ async def fetch_chart_data(
         thread_id (str): The thread the handle must belong to (authorization).
 
     Returns:
-        tuple[QueryHandle, list[str], list[dict[str, Any]]]: The handle, its columns, and rows.
+        tuple[QueryHandle, dict[str, str], list[dict[str, Any]]]: The handle, its columns
+            (mapped to their BigQuery types), and rows.
 
     Raises:
         ChartHandleNotFound: No such result in this thread.
@@ -530,10 +544,91 @@ def _chart_spec_model():  # pragma: no cover
     )
 
 
+def _spread_sample(rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
+    """Pick `size` rows evenly spaced across the result, first and last included.
+
+    A result is usually sorted by its grouping columns, so the first rows often all share
+    one group; an even spread shows every part of it.
+
+    Args:
+        rows (list[dict[str, Any]]): The result rows.
+        size (int): How many rows to pick.
+
+    Returns:
+        list[dict[str, Any]]: The sample, in result order.
+    """
+    if len(rows) <= size:
+        return rows
+    step = (len(rows) - 1) / (size - 1)
+    return [rows[round(i * step)] for i in range(size)]
+
+
+def _summarize_column(bq_type: str, values: list[Any]) -> dict[str, Any]:
+    """Summarize one column over every row, for the spec generator.
+
+    Args:
+        bq_type (str): The column's BigQuery type.
+        values (list[Any]): The column's value in every row.
+
+    Returns:
+        dict[str, Any]: The type, distinct and null counts, plus min/max for numbers and
+            dates, or the distinct values (all of them, or a few examples) for other columns.
+    """
+    present = [value for value in values if value is not None]
+    distinct = sorted({json.dumps(value, sort_keys=True) for value in present})
+    summary: dict[str, Any] = {
+        "type": bq_type,
+        "distinct": len(distinct),
+        "nulls": len(values) - len(present),
+    }
+
+    if not present:
+        return summary
+
+    numeric = all(
+        isinstance(value, int | float) and not isinstance(value, bool)
+        for value in present
+    )
+    if numeric or bq_type in _TEMPORAL_TYPES:
+        summary["min"], summary["max"] = min(present), max(present)
+    elif len(distinct) <= _SUMMARY_MAX_LISTED_VALUES:
+        summary["values"] = [json.loads(value) for value in distinct]
+    else:
+        summary["examples"] = [
+            json.loads(value) for value in distinct[:_SUMMARY_EXAMPLES]
+        ]
+
+    return summary
+
+
+def _describe_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
+    """Describe a result for the spec generator: size, column summaries, and a sample.
+
+    Args:
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        str: The data section of the spec generator's user message.
+    """
+    summary = {
+        column: _summarize_column(bq_type, [row[column] for row in rows])
+        for column, bq_type in columns.items()
+    }
+    sample = _spread_sample(rows, CHART_SPEC_SAMPLE_ROWS)
+    return (
+        f"Rows: {len(rows)}\n\n"
+        "Columns (BigQuery type, then a summary over every row): "
+        f"{json.dumps(summary, ensure_ascii=False, default=str)}\n\n"
+        "Sample rows (evenly spaced across the result): "
+        f"{json.dumps(sample, ensure_ascii=False, default=str)}"
+    )
+
+
 def _chart_spec_user_prompt(
-    columns: list[str],
-    sample_rows: list[dict[str, Any]],
     instructions: str,
+    language: LanguageCode,
+    data_description: str,
     previous_spec: dict[str, Any] | None,
     errors: list[str],
 ) -> str:
@@ -543,9 +638,9 @@ def _chart_spec_user_prompt(
     can fix that spec rather than regenerate from scratch.
 
     Args:
-        columns (list[str]): The result's column names.
-        sample_rows (list[dict[str, Any]]): A few example rows, for shape only.
         instructions (str): The natural-language description of the chart to produce.
+        language (LanguageCode): The language of the chart's text (the user's language).
+        data_description (str): The result's size, column summaries and sample rows.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
 
@@ -554,8 +649,8 @@ def _chart_spec_user_prompt(
     """
     prompt = (
         f"What to chart: {instructions}\n\n"
-        f"Columns: {json.dumps(columns, ensure_ascii=False)}\n\n"
-        f"Sample rows: {json.dumps(sample_rows, ensure_ascii=False, default=str)}"
+        f"Language of the chart's text: {language_name(language)}\n\n"
+        f"{data_description}"
     )
 
     if errors:
@@ -992,14 +1087,18 @@ def _validate_chart_spec(
 
 
 async def generate_chart_spec(
-    columns: list[str], rows: list[dict[str, Any]], instructions: str
+    columns: dict[str, str],
+    rows: list[dict[str, Any]],
+    instructions: str,
+    language: LanguageCode,
 ) -> dict[str, Any]:
     """Generate a sanitized Vega-Lite spec for a result, retrying until it validates.
 
     Args:
-        columns (list[str]): The result's column names.
-        rows (list[dict[str, Any]]): The result rows; only a sample is shown to the model.
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
         instructions (str): A natural-language description of the chart to produce.
+        language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
         dict[str, Any]: A validated, sanitized spec (no data bound yet).
@@ -1007,8 +1106,8 @@ async def generate_chart_spec(
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
-    sample_rows = rows[:CHART_SPEC_SAMPLE_ROWS]
-    year_columns = frozenset(_integer_year_columns(columns, rows))
+    data_description = _describe_result(columns, rows)
+    year_columns = frozenset(_integer_year_columns(list(columns), rows))
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -1018,7 +1117,7 @@ async def generate_chart_spec(
                 SystemMessage(_CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     _chart_spec_user_prompt(
-                        columns, sample_rows, instructions, previous_spec, errors
+                        instructions, language, data_description, previous_spec, errors
                     )
                 ),
             ]
@@ -1033,7 +1132,7 @@ async def generate_chart_spec(
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
             previous_spec = spec  # feed the spec back if it fails to validate
             errors = await asyncio.to_thread(
-                _validate_chart_spec, spec, columns, year_columns
+                _validate_chart_spec, spec, list(columns), year_columns
             )
             if not errors:
                 return spec

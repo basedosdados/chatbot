@@ -233,7 +233,9 @@ class TestChartQueryResult:
         monkeypatch.setattr(
             dataviz_module,
             "fetch_chart_data",
-            AsyncMock(return_value=(handle, ["ano", "total"], rows)),
+            AsyncMock(
+                return_value=(handle, {"ano": "INTEGER", "total": "INTEGER"}, rows)
+            ),
         )
         # The spec generator (validate-and-repair loop) is exercised in test_charts;
         # here it stands in for the returned, already-validated spec.
@@ -261,9 +263,12 @@ class TestChartQueryResult:
         content = json.loads(message.content)
         assert content["status"] == "rendered"
         assert content["row_count"] == 1
-        # generate_chart_spec receives the columns/rows/instructions, not a spec.
+        # generate_chart_spec receives the columns/rows/instructions/language, not a spec.
         dataviz_module.generate_chart_spec.assert_awaited_once_with(
-            ["ano", "total"], rows, "a bar chart of total by year"
+            {"ano": "INTEGER", "total": "INTEGER"},
+            rows,
+            "a bar chart of total by year",
+            "pt",
         )
 
     async def test_too_large_result_is_reported(self, monkeypatch):
