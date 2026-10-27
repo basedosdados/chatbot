@@ -24,9 +24,12 @@ from app.charts import (
     _chart_spec_user_prompt,
     _collect,
     _collect_derived_fields,
+    _collect_invisible_white_marks,
     _collect_number_formats,
     _collect_scheme_names,
+    _collect_split_lines,
     _collect_temporal_fields,
+    _collect_unlabeled_layer_series,
     _collect_unsupported_encoding_properties,
     _describe_result,
     _fetch_rows,
@@ -34,6 +37,8 @@ from app.charts import (
     _geo_url_node,
     _integer_year_columns,
     _is_valid_number_format,
+    _is_whiteish,
+    _normalize_chart_spec,
     _resolve_named_data,
     _sanitize_chart_spec,
     _spread_sample,
@@ -554,6 +559,191 @@ class TestCollectUnsupportedEncodingProperties:
         assert _collect_unsupported_encoding_properties(spec) == []
 
 
+class TestNormalizeChartSpec:
+    def test_drops_the_point_overlay_of_a_dashed_line(self):
+        """Its legend would draw point symbols, which cannot show the dash."""
+        spec = {
+            "mark": {"type": "line", "point": True},
+            "encoding": {"strokeDash": {"field": "indicador", "type": "nominal"}},
+        }
+
+        assert _normalize_chart_spec(spec)["mark"] == {"type": "line"}
+
+    def test_keeps_the_point_overlay_without_a_dash(self):
+        spec = {
+            "mark": {"type": "line", "point": True},
+            "encoding": {"color": {"field": "governo", "type": "nominal"}},
+        }
+
+        assert _normalize_chart_spec(spec)["mark"] == {"type": "line", "point": True}
+
+    def test_a_dash_inherited_from_the_layer_counts(self):
+        spec = {
+            "encoding": {"strokeDash": {"field": "grupo", "type": "nominal"}},
+            "layer": [{"mark": {"type": "line", "point": True}}],
+        }
+
+        assert _normalize_chart_spec(spec)["layer"][0]["mark"] == {"type": "line"}
+
+
+def _line_by(field: str) -> dict:
+    return {
+        "mark": "line",
+        "encoding": {
+            "x": {"field": "ano", "type": "ordinal"},
+            "y": {"field": "valor", "type": "quantitative"},
+            "color": {"field": field, "type": "nominal"},
+        },
+    }
+
+
+class TestCollectSplitLines:
+    def test_a_highlight_category_inside_the_span_splits_the_line(self):
+        """The production case: the one surplus year dropped out of the deficit line."""
+        rows = [
+            {"ano": ano, "valor": -1, "tipo": "Déficit" if ano != 2022 else "Superávit"}
+            for ano in range(2019, 2026)
+        ]
+
+        assert _collect_split_lines(_line_by("tipo"), rows) == ["tipo"]
+
+    def test_groups_side_by_side_are_not_split(self):
+        """Two governments, one after the other, are two intentional lines."""
+        rows = [
+            {"ano": ano, "valor": 1, "governo": "A" if ano < 2023 else "B"}
+            for ano in range(2019, 2027)
+        ]
+
+        assert _collect_split_lines(_line_by("governo"), rows) == []
+
+    def test_parallel_series_over_the_same_x_are_not_split(self):
+        rows = [
+            {"ano": ano, "valor": 1, "uf": uf}
+            for ano in range(2019, 2026)
+            for uf in "AB"
+        ]
+
+        assert _collect_split_lines(_line_by("uf"), rows) == []
+
+    def test_derived_grouping_fields_are_not_checked(self):
+        rows = [{"ano": 2020, "valor": 1}]
+
+        assert _collect_split_lines(_line_by("calculado"), rows) == []
+
+
+class TestCollectUnlabeledLayerSeries:
+    def test_layers_with_fixed_colors_and_no_color_encoding_are_reported(self):
+        spec = {
+            "encoding": {"x": {"field": "mes", "type": "ordinal"}},
+            "layer": [
+                {
+                    "mark": {"type": "line", "color": "#1f77b4"},
+                    "encoding": {"y": {"field": "abertas"}},
+                },
+                {
+                    "mark": {"type": "line", "color": "#d62728"},
+                    "encoding": {"y": {"field": "fechadas"}},
+                },
+            ],
+        }
+
+        assert _collect_unlabeled_layer_series(spec) == [["abertas", "fechadas"]]
+
+    def test_layers_labeled_with_a_color_datum_are_fine(self):
+        spec = {
+            "layer": [
+                {
+                    "mark": "line",
+                    "encoding": {
+                        "y": {"field": "abertas"},
+                        "color": {"datum": "Abertas"},
+                    },
+                },
+                {
+                    "mark": "line",
+                    "encoding": {
+                        "y": {"field": "fechadas"},
+                        "color": {"datum": "Fechadas"},
+                    },
+                },
+            ]
+        }
+
+        assert _collect_unlabeled_layer_series(spec) == []
+
+    def test_a_series_with_a_reference_rule_is_fine(self):
+        spec = {
+            "layer": [
+                {"mark": "bar", "encoding": {"y": {"field": "valor"}}},
+                {"mark": "rule", "encoding": {"y": {"datum": 0}}},
+                {
+                    "mark": "text",
+                    "encoding": {"y": {"field": "valor"}, "text": {"field": "valor"}},
+                },
+            ]
+        }
+
+        assert _collect_unlabeled_layer_series(spec) == []
+
+
+class TestIsWhiteish:
+    @pytest.mark.parametrize(
+        "color", ["white", "#fff", "#FFFFFF", "#f5f5f5", "rgb(255, 255, 255)"]
+    )
+    def test_white_like_colors(self, color):
+        assert _is_whiteish(color)
+
+    @pytest.mark.parametrize(
+        "color", ["#2B8C4D", "black", "#1f2937", "red", None, {"expr": "x"}]
+    )
+    def test_visible_colors(self, color):
+        assert not _is_whiteish(color)
+
+
+class TestCollectInvisibleWhiteMarks:
+    def test_a_white_line_on_the_default_background_is_reported(self):
+        spec = {"mark": {"type": "line", "stroke": "white"}}
+
+        assert _collect_invisible_white_marks(spec) == ["line"]
+
+    def test_a_white_color_value_is_reported(self):
+        spec = {"mark": "bar", "encoding": {"color": {"value": "#ffffff"}}}
+
+        assert _collect_invisible_white_marks(spec) == ["bar"]
+
+    def test_a_dark_background_makes_white_visible(self):
+        spec = {"background": "#1f2937", "mark": {"type": "line", "color": "white"}}
+
+        assert _collect_invisible_white_marks(spec) == []
+
+    def test_white_text_over_bars_is_fine(self):
+        """Labels inside bars are commonly white."""
+        spec = {
+            "layer": [
+                {"mark": "bar", "encoding": {"y": {"field": "v"}}},
+                {
+                    "mark": {"type": "text", "color": "white"},
+                    "encoding": {"text": {"field": "v"}},
+                },
+            ]
+        }
+
+        assert _collect_invisible_white_marks(spec) == []
+
+    def test_white_text_over_a_line_is_reported(self):
+        spec = {
+            "layer": [
+                {"mark": "line"},
+                {
+                    "mark": {"type": "text", "color": "white"},
+                    "encoding": {"text": {"field": "v"}},
+                },
+            ]
+        }
+
+        assert _collect_invisible_white_marks(spec) == ["text"]
+
+
 class TestCollectSchemeNames:
     def test_collects_a_string_scheme(self):
         spec = {"encoding": {"color": {"field": "v", "scale": {"scheme": "reds"}}}}
@@ -936,6 +1126,18 @@ class TestValidateChartSpec:
 
         assert any("encoding.y has unsupported ['color']" in error for error in errors)
 
+    def test_split_line_is_rejected_with_the_rows(self):
+        rows = [
+            {"ano": ano, "valor": 1, "tipo": "A" if ano != 2021 else "B"}
+            for ano in range(2019, 2024)
+        ]
+
+        errors = _validate_chart_spec(
+            _line_by("tipo"), ["ano", "valor", "tipo"], rows=rows
+        )
+
+        assert any("splits it into pieces" in error for error in errors)
+
     def test_invalid_mark_fails_to_compile(self):
         """A structurally invalid spec is caught by the vl-convert compile step."""
         spec = {"mark": "notamark", "encoding": {"x": {"field": "ano"}}}
@@ -1171,7 +1373,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: []
+            lambda spec, columns, year_columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["bad column"],
         )
@@ -1191,7 +1393,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: seen.append(year_columns) or [],
+            lambda spec, columns, year_columns, rows: seen.append(year_columns) or [],
         )
         rows = [{"ano": 2000 + i, "n": 1} for i in range(10)] + [{"ano": 1, "n": 1}]
 
@@ -1211,7 +1413,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: []
+            lambda spec, columns, year_columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["column 'nope' is not in the result"],
         )
@@ -1231,7 +1433,7 @@ class TestGenerateChartSpec:
         spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
         model = self._model(monkeypatch, _structured_reply(spec))
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         await generate_chart_spec(
@@ -1252,7 +1454,7 @@ class TestGenerateChartSpec:
         }
         model = self._model(monkeypatch, _structured_reply(spec))
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         result = await generate_chart_spec(
@@ -1269,7 +1471,7 @@ class TestGenerateChartSpec:
         good = _structured_reply({"mark": "bar", "encoding": {"x": {"field": "ano"}}})
         model = self._model(monkeypatch, empty, good)
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         result = await generate_chart_spec(
@@ -1286,7 +1488,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: ["always bad"],
+            lambda spec, columns, year_columns, rows: ["always bad"],
         )
 
         with pytest.raises(ChartSpecInvalid):

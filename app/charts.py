@@ -166,6 +166,37 @@ _D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
 # Whole-number values in this range are read as calendar years (e.g. `ano` = 2019).
 _YEAR_RANGE = range(1000, 3001)
 
+# Marks one series is commonly drawn with, one layer per series.
+_SERIES_MARKS = frozenset(
+    {"line", "area", "bar", "point", "circle", "square", "trail", "tick"}
+)
+
+# Channels that tell series apart, and so give a chart its legend.
+_SERIES_CHANNELS = ("color", "fill", "stroke", "strokeDash", "shape")
+
+# Marks with an area other marks (e.g. white labels) can sit on.
+_FILLED_MARKS = frozenset({"bar", "area", "rect", "arc"})
+
+# The properties that carry a mark's visible color, by mark type (default: `color`).
+_MARK_COLOR_KEYS: dict[str, tuple[str, ...]] = {
+    "line": ("color", "stroke"),
+    "rule": ("color", "stroke"),
+    "trail": ("color", "stroke"),
+    "bar": ("color", "fill"),
+    "area": ("color", "fill"),
+    "rect": ("color", "fill"),
+    "arc": ("color", "fill"),
+    "circle": ("color", "fill"),
+    "square": ("color", "fill"),
+    "tick": ("color", "fill"),
+    "text": ("color", "fill"),
+}
+
+# Colors that vanish on the chat panel's white background: white-like names, and any color
+# whose darkest RGB channel is at least this light.
+_WHITE_COLOR_NAMES = frozenset({"white", "snow", "ghostwhite", "whitesmoke", "ivory"})
+_MIN_INVISIBLE_CHANNEL = 235
+
 # Fields a transform creates when its `as` is omitted (Vega-Lite's defaults).
 _DEFAULT_TRANSFORM_OUTPUTS = {
     "fold": ("key", "value"),
@@ -995,10 +1026,278 @@ def _is_valid_number_format(specifier: str) -> bool:
     return format_type is None or format_type in _D3_NUMBER_FORMAT_TYPES
 
 
+def _mark_type(mark: JsonValue) -> str | None:
+    """The type of a `mark`, written either as a string or as a mark definition."""
+    if isinstance(mark, str):
+        return mark
+    if isinstance(mark, dict) and isinstance(mark.get("type"), str):
+        return mark["type"]
+    return None
+
+
+def _iter_units(
+    node: JsonValue, inherited: dict[str, Any] | None = None
+) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    """Yield every unit view (a node with a `mark`) with its effective encoding.
+
+    A layer's views inherit the layer's encoding; facets, repeats and concatenations
+    do not share theirs with the views inside.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+        inherited (dict[str, Any] | None): The encoding inherited from enclosing layers.
+
+    Yields:
+        tuple[dict[str, Any], dict[str, Any]]: A unit view and its effective encoding.
+    """
+    if isinstance(node, list):
+        for item in node:
+            yield from _iter_units(item, inherited)
+        return
+    if not isinstance(node, dict):
+        return
+
+    own = node.get("encoding")
+    encoding = {**(inherited or {}), **(own if isinstance(own, dict) else {})}
+    if "mark" in node:
+        yield node, encoding
+    if "layer" in node:
+        yield from _iter_units(node["layer"], encoding)
+    for key in ("spec", "concat", "hconcat", "vconcat"):
+        if key in node:
+            yield from _iter_units(node[key])
+
+
+def _normalize_chart_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Fix, instead of rejecting, mistakes that have one obvious correction.
+
+    - A line with a point overlay (`"point": true`) and a `strokeDash` encoding: the
+      legend draws the overlay's point symbols, which cannot show a dash, so the dashed
+      series look identical in it. The overlay is dropped so the legend draws lines.
+
+    Args:
+        spec (dict[str, Any]): A sanitized spec; it is changed in place.
+
+    Returns:
+        dict[str, Any]: The same spec, normalized.
+    """
+    for unit, encoding in _iter_units(spec):
+        mark = unit["mark"]
+        dash = encoding.get("strokeDash")
+        if (
+            _mark_type(mark) == "line"
+            and isinstance(mark, dict)
+            and mark.get("point")
+            and isinstance(dash, dict)
+            and dash.get("field")
+        ):
+            del mark["point"]
+    return spec
+
+
+def _groups_interleave(groups: list[set[Any]]) -> bool:
+    """Whether disjoint groups of x values take turns along the axis.
+
+    Args:
+        groups (list[set[Any]]): Each group's x values.
+
+    Returns:
+        bool: True when no x value is shared and some group has another group's value
+            strictly inside its range (e.g. a highlighted year inside the others' span).
+    """
+    if len(groups) < 2:
+        return False
+    seen: set[Any] = set()
+    for group in groups:
+        if seen & group:
+            return False  # parallel series over shared x values, not one split line
+        seen |= group
+    try:
+        return any(
+            min(group) < x < max(group)
+            for group in groups
+            for other in groups
+            if other is not group
+            for x in other
+        )
+    except TypeError:  # x values that cannot be ordered
+        return False
+
+
+def _collect_split_lines(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Find lines that a grouping channel breaks into pieces taking turns along x.
+
+    Coloring a line by a per-point category (e.g. "maior crescimento" vs "demais anos")
+    makes each category its own series, so the line skips every point of the other
+    categories and the highlighted points float unconnected. Only grouping and x fields
+    that are result columns are checked, against the bound rows.
+
+    Args:
+        spec (dict[str, Any]): The candidate spec.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        list[str]: The grouping fields that split a line.
+    """
+    if not rows:
+        return []
+    found: list[str] = []
+    for unit, encoding in _iter_units(spec):
+        if _mark_type(unit["mark"]) not in ("line", "trail", "area"):
+            continue
+        x = encoding.get("x")
+        x_field = x.get("field") if isinstance(x, dict) else None
+        if not isinstance(x_field, str) or x_field not in rows[0]:
+            continue
+        for channel in ("color", "strokeDash", "detail"):
+            definition = encoding.get(channel)
+            field = definition.get("field") if isinstance(definition, dict) else None
+            if not isinstance(field, str) or field not in rows[0] or field == x_field:
+                continue
+            groups: dict[str, set[Any]] = {}
+            try:
+                for row in rows:
+                    if row[x_field] is not None:
+                        key = json.dumps(row[field], sort_keys=True)
+                        groups.setdefault(key, set()).add(row[x_field])
+            except TypeError:  # unhashable x values
+                continue
+            if _groups_interleave(list(groups.values())) and field not in found:
+                found.append(field)
+    return found
+
+
+def _collect_unlabeled_layer_series(spec: JsonValue) -> list[list[str]]:
+    """Find layers that draw several series with no channel telling them apart.
+
+    One layer per column (e.g. one line for `abertas`, one for `fechadas`), each with a
+    fixed color and no color encoding, gives the chart no legend, so readers cannot tell
+    the series apart. Series drawn with different marks (a bar and a line) or on
+    independent y axes (each with its own title) can be told apart, so they are not
+    reported.
+
+    Args:
+        spec (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        list[list[str]]: For each such layer, the y fields of its unlabeled series.
+    """
+    found: list[list[str]] = []
+    if isinstance(spec, dict):
+        if isinstance(spec.get("layer"), list):
+            own = spec.get("encoding")
+            units = list(
+                _iter_units(spec["layer"], own if isinstance(own, dict) else {})
+            )
+            labeled = any(
+                isinstance(encoding.get(channel), dict)
+                and ("field" in encoding[channel] or "datum" in encoding[channel])
+                for _, encoding in units
+                for channel in _SERIES_CHANNELS
+            )
+            resolve = spec.get("resolve")
+            independent_y = (
+                isinstance(resolve, dict)
+                and isinstance(resolve.get("scale"), dict)
+                and resolve["scale"].get("y") == "independent"
+            )
+            if not labeled and not independent_y:
+                y_fields_by_mark: dict[str, set[str]] = {}
+                for unit, encoding in units:
+                    mark_type = _mark_type(unit["mark"])
+                    y = encoding.get("y")
+                    if (
+                        mark_type in _SERIES_MARKS
+                        and isinstance(y, dict)
+                        and isinstance(y.get("field"), str)
+                    ):
+                        y_fields_by_mark.setdefault(mark_type, set()).add(y["field"])
+                found += [
+                    sorted(fields)
+                    for fields in y_fields_by_mark.values()
+                    if len(fields) >= 2
+                ]
+        for value in spec.values():
+            found += _collect_unlabeled_layer_series(value)
+    elif isinstance(spec, list):
+        for item in spec:
+            found += _collect_unlabeled_layer_series(item)
+    return found
+
+
+def _is_whiteish(color: JsonValue) -> bool:
+    """Whether a CSS color is white or close enough to vanish on a white background."""
+    if not isinstance(color, str):
+        return False
+    value = color.strip().lower()
+    if value in _WHITE_COLOR_NAMES:
+        return True
+    match = re.fullmatch(r"#([0-9a-f]{3}|[0-9a-f]{6})", value) or re.fullmatch(
+        r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+).*\)", value
+    )
+    if match is None:
+        return False
+    if value.startswith("#"):
+        digits = match.group(1)
+        if len(digits) == 3:
+            digits = "".join(digit * 2 for digit in digits)
+        channels = [int(digits[i : i + 2], 16) for i in (0, 2, 4)]
+    else:
+        channels = [int(group) for group in match.groups()]
+    return min(channels) >= _MIN_INVISIBLE_CHANNEL
+
+
+def _collect_invisible_white_marks(spec: dict[str, Any]) -> list[str]:
+    """Find marks drawn in white on the chat's default white background.
+
+    White text is allowed when the chart has a filled mark (bars, areas, …) it can sit on,
+    as labels inside bars commonly are.
+
+    Args:
+        spec (dict[str, Any]): The candidate spec.
+
+    Returns:
+        list[str]: The types of the white marks; empty when a dark background is set.
+    """
+    config = spec.get("config")
+    background = spec.get("background") or (
+        config.get("background") if isinstance(config, dict) else None
+    )
+    if (
+        isinstance(background, str)
+        and background.strip().lower() != "transparent"
+        and not _is_whiteish(background)
+    ):
+        return []
+
+    units = list(_iter_units(spec))
+    has_filled_mark = any(
+        _mark_type(unit["mark"]) in _FILLED_MARKS for unit, _ in units
+    )
+
+    found: list[str] = []
+    for unit, encoding in units:
+        mark = unit["mark"]
+        mark_type = _mark_type(mark)
+        if mark_type is None or (mark_type == "text" and has_filled_mark):
+            continue
+        keys = _MARK_COLOR_KEYS.get(mark_type, ("color",))
+        colors = [mark.get(key) for key in keys] if isinstance(mark, dict) else []
+        colors += [
+            encoding[key].get("value")
+            for key in keys
+            if isinstance(encoding.get(key), dict)
+        ]
+        if any(_is_whiteish(color) for color in colors) and mark_type not in found:
+            found.append(mark_type)
+    return found
+
+
 def _validate_chart_spec(
     spec: dict[str, Any],
     columns: list[str],
     year_columns: frozenset[str] = frozenset(),
+    rows: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
@@ -1006,6 +1305,7 @@ def _validate_chart_spec(
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
         year_columns (frozenset[str]): Columns holding whole-number years (see `_integer_year_columns`).
+        rows (list[dict[str, Any]] | None): The result rows, for the checks that need data.
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
@@ -1072,6 +1372,31 @@ def _validate_chart_spec(
             'channel; a computed constant goes in `value: {"expr": ...}`).'
         )
 
+    # The checks below catch charts that compile and render without error but read wrong.
+    for field in _collect_split_lines(spec, rows or []):
+        errors.append(
+            f"Grouping the line by {field!r} splits it into pieces that take turns along "
+            "the x axis, so each piece skips the other groups' points (a highlighted point "
+            "drops out of the line). Draw one unsplit line, and mark the highlighted points "
+            f"with a separate point layer colored by {field!r}."
+        )
+
+    for y_fields in _collect_unlabeled_layer_series(spec):
+        errors.append(
+            f"The series {y_fields} are drawn as separate layers with no color encoding, "
+            "so the chart has no legend and readers cannot tell them apart. Fold those "
+            "columns into one series field and encode color by it, or give each layer "
+            '`"color": {"datum": "<series name>"}`.'
+        )
+
+    white_marks = _collect_invisible_white_marks(spec)
+    if white_marks:
+        errors.append(
+            f"White {white_marks} mark(s) are invisible on the chat's white background. "
+            "Use a visible color, or, if the user asked for a dark theme, also set a dark "
+            "top-level `background`."
+        )
+
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
     # its geometry; a normal chart just gets empty data. Rendering (not just VL→Vega compiling)
     # is the only way to validate expression strings in the spec.
@@ -1130,9 +1455,10 @@ async def generate_chart_spec(
         else:
             spec = _sanitize_chart_spec(parsed.spec)
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
+            spec = _normalize_chart_spec(spec)
             previous_spec = spec  # feed the spec back if it fails to validate
             errors = await asyncio.to_thread(
-                _validate_chart_spec, spec, list(columns), year_columns
+                _validate_chart_spec, spec, list(columns), year_columns, rows
             )
             if not errors:
                 return spec
