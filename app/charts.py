@@ -306,6 +306,10 @@ class ChartSpecInvalid(Exception):
     """The generator could not produce a spec that passes validation."""
 
 
+class ChartSpecTimeout(Exception):
+    """The generator did not produce a valid spec within the deadline."""
+
+
 class ChartSpec(BaseModel):
     """The tool the charting model calls: a free-form Vega-Lite spec."""
 
@@ -596,14 +600,14 @@ def _chart_spec_model():  # pragma: no cover
 
     `method="function_calling"` (not strict json_schema, which 400s on the open spec) and
     `include_raw=True` (a bad call surfaces as `parsed=None`, not a raise) are required.
+    A request that hangs is cut off by the timeout and retried once.
     """
     return ChatOpenAI(
         api_key=settings.OPENAI_API_KEY,
         model=settings.MODEL_URI,
-        reasoning={
-            "effort": "medium",
-            "summary": "auto",
-        },
+        reasoning={"effort": "medium"},
+        timeout=settings.CHART_SPEC_REQUEST_TIMEOUT_SECONDS,
+        max_retries=1,
     ).with_structured_output(
         ChartSpec,
         method="function_calling",
@@ -1456,6 +1460,43 @@ def _validate_chart_spec(
 
 
 async def generate_chart_spec(
+    columns: dict[str, str],
+    rows: list[dict[str, Any]],
+    instructions: str,
+    language: LanguageCode,
+    base_spec: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Generate a sanitized Vega-Lite spec for a result, within a deadline.
+
+    Bounds `_generate_chart_spec` by settings.CHART_SPEC_TIMEOUT_SECONDS.
+
+    Args:
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
+        instructions (str): A natural-language description of the chart to produce.
+        language (LanguageCode): The language of the chart's text (the user's language).
+        base_spec (dict[str, Any] | None): An earlier chart to change; None for a new chart.
+
+    Returns:
+        dict[str, Any]: A validated, sanitized spec (no data bound yet).
+
+    Raises:
+        ChartSpecInvalid: No attempt produced a spec that validates.
+        ChartSpecTimeout: No valid spec within the deadline.
+    """
+    try:
+        async with asyncio.timeout(settings.CHART_SPEC_TIMEOUT_SECONDS):
+            return await _generate_chart_spec(
+                columns, rows, instructions, language, base_spec
+            )
+    except TimeoutError as e:
+        raise ChartSpecTimeout(
+            f"Generating the chart took over {settings.CHART_SPEC_TIMEOUT_SECONDS:.0f} "
+            "seconds and was stopped. Try again, or describe a simpler chart."
+        ) from e
+
+
+async def _generate_chart_spec(
     columns: dict[str, str],
     rows: list[dict[str, Any]],
     instructions: str,

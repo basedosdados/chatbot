@@ -136,6 +136,22 @@ class Settings(BaseSettings):
             "Defaults to where the website serves the files statically (public/chatbot/geo/)."
         ),
     )
+    CHART_SPEC_REQUEST_TIMEOUT_SECONDS: float = Field(
+        default=60,
+        gt=0,
+        description=(
+            "Timeout of each chart-spec model request; a timed-out request is retried once. "
+            "Normal requests take under ~40 s, but a request has hung for over 20 minutes."
+        ),
+    )
+    CHART_SPEC_TIMEOUT_SECONDS: float = Field(
+        default=150,
+        gt=0,
+        description=(
+            "Deadline for generating a chart spec, across all attempts and retries. "
+            "Normal generations finish within ~80 s."
+        ),
+    )
 
     # ============================================================
     # ==                      LLM settings                      ==

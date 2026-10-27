@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from app.charts import (
     ChartResultTooLarge,
     ChartSpec,
     ChartSpecInvalid,
+    ChartSpecTimeout,
     _chart_spec_user_prompt,
     _collect,
     _collect_derived_fields,
@@ -1526,6 +1528,26 @@ class TestGenerateChartSpec:
 
         assert result["mark"] == "bar"
         assert model.ainvoke.await_count == 2
+
+    async def test_raises_when_generation_exceeds_the_deadline(self, monkeypatch):
+        """A hung model call is cut off instead of blocking the turn indefinitely."""
+        monkeypatch.setattr(
+            charts,
+            "settings",
+            charts.settings.model_copy(update={"CHART_SPEC_TIMEOUT_SECONDS": 0.05}),
+        )
+
+        async def hang(messages):
+            await asyncio.sleep(10)
+
+        model = MagicMock()
+        model.ainvoke = hang
+        monkeypatch.setattr(charts, "_chart_spec_model", lambda: model)
+
+        with pytest.raises(ChartSpecTimeout):
+            await generate_chart_spec(
+                {"ano": "INTEGER"}, [{"ano": 2025}], "a bar chart", "pt"
+            )
 
     async def test_raises_after_max_attempts(self, monkeypatch):
         spec = {"mark": "bar", "encoding": {}}
