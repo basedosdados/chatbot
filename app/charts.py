@@ -258,6 +258,10 @@ Never write `null` inside a literal `scale.domain` array (e.g. `{"domain": [0, n
 
 In a `layer`, layers that share an axis are merged into one axis, and a property hidden on any layer is hidden on the merged axis. Never set `"labels": false`, `"ticks": false`, `"title": null` or `"axis": null` on a secondary layer to avoid duplicates — that removes the labels from the whole chart. Define each axis once, on the first layer or in a shared top-level `encoding`, and leave the other layers' axes unset.
 
+## Value labels
+
+To show values on bars, lines or points, add a separate layer with a `text` mark; a `text` channel on any other mark is ignored, so the labels silently disappear.
+
 ## Size
 
 The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis (see that column's distinct count), set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
