@@ -152,11 +152,11 @@ _DEFAULT_TRANSFORM_OUTPUTS = {
 
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
-You are a data visualization specialist. Given an already-aggregated query result — its row count, each column's BigQuery type with a summary over every row, and an evenly spaced sample of rows — and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
+You are a data visualization specialist. You receive instructions on what to chart and how, and a profile of an already-aggregated BigQuery query result: its row count, each column's BigQuery type and a summary computed over every row, and sample rows spread evenly across the result. Return one complete Vega-Lite v6 spec that charts the result as instructed. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
 
 # Guidelines
 
-- Follow the description when it is specific. When it leaves the chart type open, pick the clearest form for the data's shape.
+- Follow the instructions where they are specific. When they leave the chart type open, pick the clearest form for the data's shape.
 - Add a short title, label both axes with human-readable text rather than the raw column names.
 - Add a legend whenever a view shows two or more series.
 - Write every title, axis label and legend in the language the request names.
@@ -166,7 +166,7 @@ You are a data visualization specialist. Given an already-aggregated query resul
 
 By default, set no color-related property — no `scale`, `scheme`, `sort`, `range`, or explicit color value — on any encoding, mark, or config, whether the field is categorical, quantitative, or there's only one series. Just map the field to the color channel and leave everything else about its color to the frontend's brand palette.
 
-The one exception is when the description explicitly asks for a specific color. Then honor exactly what was asked, choosing the encoding that fits the chart and the number of series being colored, and set only that — leave every other color to the frontend. Do not invent a color, scheme, or palette the description did not ask for.
+The one exception is when the instructions explicitly ask for a specific color. Then honor exactly what was asked, choosing the encoding that fits the chart and the number of series being colored, and set only that — leave every other color to the frontend. Do not invent a color, scheme, or palette the instructions did not ask for.
 
 Give the color as explicit CSS colors (a hex string or a standard color keyword) whenever the request names a color rather than a palette: a single fixed color as a constant color `value`, and specific per-category colors as a `range` on the color encoding's `scale`. For a gradient over a quantitative or ordinal field, give a `range` of two or more explicit colors, e.g. light-to-dark for low-to-high.
 
@@ -558,15 +558,15 @@ def _summarize_column(bq_type: str, values: list[Any]) -> dict[str, Any]:
     return summary
 
 
-def _describe_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
-    """Describe a result for the spec generator: size, column summaries, and a sample.
+def _profile_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
+    """Profile a result for the spec generator: size, column summaries, and a sample.
 
     Args:
         columns (dict[str, str]): The result's columns mapped to their BigQuery types.
         rows (list[dict[str, Any]]): The result rows.
 
     Returns:
-        str: The data section of the spec generator's user message.
+        str: The data profile section of the spec generator's user message.
     """
     summary = {
         column: _summarize_column(bq_type, [row[column] for row in rows])
@@ -575,9 +575,9 @@ def _describe_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str
     sample = _spread_sample(rows, CHART_SPEC_SAMPLE_ROWS)
     return (
         f"Rows: {len(rows)}\n\n"
-        "Columns (BigQuery type, then a summary over every row): "
+        "Columns (BigQuery type and a summary computed over every row): "
         f"{json.dumps(summary, ensure_ascii=False, default=str)}\n\n"
-        "Sample rows (evenly spaced across the result): "
+        "Sample rows (spread evenly across the result): "
         f"{json.dumps(sample, ensure_ascii=False, default=str)}"
     )
 
@@ -585,7 +585,7 @@ def _describe_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str
 def _chart_spec_user_prompt(
     instructions: str,
     language: LanguageCode,
-    data_description: str,
+    data_profile: str,
     previous_spec: dict[str, Any] | None,
     errors: list[str],
 ) -> str:
@@ -595,9 +595,9 @@ def _chart_spec_user_prompt(
     can fix that spec rather than regenerate from scratch.
 
     Args:
-        instructions (str): The natural-language description of the chart to produce.
+        instructions (str): What to chart and how, in natural language.
         language (LanguageCode): The language of the chart's text (the user's language).
-        data_description (str): The result's size, column summaries and sample rows.
+        data_profile (str): The result's size, column summaries and sample rows.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
 
@@ -605,9 +605,9 @@ def _chart_spec_user_prompt(
         str: The user message for the chart-spec model.
     """
     prompt = (
-        f"# What to chart:\n\n{instructions}\n\n"
+        f"# What to chart and how\n\n{instructions}\n\n"
         f"Language of the chart's text: {language_name(language)}\n\n"
-        f"# Data profiling:\n\n{data_description}"
+        f"# Data profile\n\n{data_profile}"
     )
 
     if errors:
@@ -809,7 +809,7 @@ async def generate_chart_spec(
     Args:
         columns (dict[str, str]): The result's columns mapped to their BigQuery types.
         rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
-        instructions (str): A natural-language description of the chart to produce.
+        instructions (str): What to chart and how, in natural language.
         language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
@@ -840,7 +840,7 @@ async def _generate_chart_spec(
     Args:
         columns (dict[str, str]): The result's columns mapped to their BigQuery types.
         rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
-        instructions (str): A natural-language description of the chart to produce.
+        instructions (str): What to chart and how, in natural language.
         language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
@@ -849,7 +849,7 @@ async def _generate_chart_spec(
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
-    data_description = _describe_result(columns, rows)
+    data_profile = _profile_result(columns, rows)
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -859,7 +859,7 @@ async def _generate_chart_spec(
                 SystemMessage(_CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     _chart_spec_user_prompt(
-                        instructions, language, data_description, previous_spec, errors
+                        instructions, language, data_profile, previous_spec, errors
                     )
                 ),
             ]

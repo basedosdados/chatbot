@@ -25,10 +25,10 @@ from app.charts import (
     _collect,
     _collect_derived_fields,
     _collect_scheme_names,
-    _describe_result,
     _fetch_rows,
     _geo_stub_node,
     _geo_url_node,
+    _profile_result,
     _resolve_named_data,
     _sanitize_chart_spec,
     _spread_sample,
@@ -767,16 +767,16 @@ class TestSummarizeColumn:
         }
 
 
-class TestDescribeResult:
+class TestProfileResult:
     def test_carries_row_count_types_summary_and_sample(self):
         rows = [{"uf": "SP", "valor": 1}, {"uf": "MG", "valor": 3}]
 
-        description = _describe_result({"uf": "STRING", "valor": "INTEGER"}, rows)
+        profile = _profile_result({"uf": "STRING", "valor": "INTEGER"}, rows)
 
-        assert "Rows: 2" in description
-        assert '"type": "STRING"' in description and '"type": "INTEGER"' in description
-        assert '"min": 1, "max": 3' in description
-        assert '"MG"' in description
+        assert "Rows: 2" in profile
+        assert '"type": "STRING"' in profile and '"type": "INTEGER"' in profile
+        assert '"min": 1, "max": 3' in profile
+        assert '"MG"' in profile
 
 
 def _structured_reply(spec: dict | None) -> dict:
