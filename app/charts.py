@@ -161,7 +161,7 @@ _D3_NUMBER_FORMAT = re.compile(
 )
 _D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
 
-# Whole-number values in this range are read as calendar years (e.g. `ano` = 2019).
+# Whole-number values in this range are read as calendar years.
 _YEAR_RANGE = range(1000, 3001)
 
 # System prompt for the chart spec generation.
@@ -800,8 +800,8 @@ def _collect_number_formats(node: JsonValue) -> set[str]:
 def _collect_temporal_fields(node: JsonValue) -> set[str]:
     """Collect every field a spec treats as a date, anywhere within it.
 
-    A field is treated as a date when its definition is `temporal` or carries a
-    `timeUnit` (which also covers a `timeUnit` transform).
+    A field is treated as a date when its definition is `temporal` or
+    carries a `timeUnit` (which also covers a `timeUnit` transform).
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.
@@ -820,6 +820,27 @@ def _collect_temporal_fields(node: JsonValue) -> set[str]:
     elif isinstance(node, list):
         for item in node:
             found |= _collect_temporal_fields(item)
+    return found
+
+
+def _collect_calculated_fields(node: JsonValue) -> set[str]:
+    """Collect every field a `calculate` transform writes, anywhere within a spec.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every `as` name of a `calculate` transform.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if "calculate" in node and isinstance(node.get("as"), str):
+            found.add(node["as"])
+        for value in node.values():
+            found |= _collect_calculated_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_calculated_fields(item)
     return found
 
 
@@ -919,7 +940,12 @@ def _validate_chart_spec(
 
     # An integer year in a temporal field is read as epoch milliseconds, so every year
     # lands on 1970 — the chart renders without any error, so no render check catches it.
-    temporal_years = sorted(_collect_temporal_fields(spec) & year_columns)
+    # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
+    # as `ano`) is a real date by then, so it is not flagged.
+    temporal_years = sorted(
+        (_collect_temporal_fields(spec) & year_columns)
+        - _collect_calculated_fields(spec)
+    )
     if temporal_years:
         errors.append(
             f"Column(s) {temporal_years} hold integer years, not dates, but are encoded "

@@ -672,6 +672,41 @@ class TestValidateChartSpec:
             == []
         )
 
+    def test_year_converted_to_a_date_in_place_passes(self):
+        """A `calculate` that rewrites the year as a date under its own name is valid."""
+        spec = {
+            "mark": "line",
+            "transform": [{"calculate": "datetime(datum.ano, 0, 1)", "as": "ano"}],
+            "encoding": {
+                "x": {"field": "ano", "type": "temporal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        assert (
+            _validate_chart_spec(
+                spec, ["ano", "total"], year_columns=frozenset({"ano"})
+            )
+            == []
+        )
+
+    def test_year_time_unit_transform_in_place_is_rejected(self):
+        """A `timeUnit` transform still reads the integer year as epoch milliseconds."""
+        spec = {
+            "mark": "line",
+            "transform": [{"timeUnit": "year", "field": "ano", "as": "ano"}],
+            "encoding": {
+                "x": {"field": "ano", "type": "temporal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        errors = _validate_chart_spec(
+            spec, ["ano", "total"], year_columns=frozenset({"ano"})
+        )
+
+        assert any("ano" in error and "temporal" in error for error in errors)
+
     def test_valid_spec_has_no_errors(self):
         spec = {
             "mark": "bar",
