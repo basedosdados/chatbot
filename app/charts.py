@@ -939,7 +939,9 @@ def _validate_chart_spec(
         )
 
     # An integer year in a temporal field is read as epoch milliseconds, so every year
-    # lands on 1970 — the chart renders without any error, so no render check catches it.
+    # lands in the first seconds of 1970 UTC, one tick labeled with the viewer's local
+    # year: 1969 west of UTC, as in Brazil. The chart renders without any error, so no
+    # render check catches it.
     # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
     # as `ano`) is a real date by then, so it is not flagged.
     temporal_years = sorted(
@@ -949,9 +951,9 @@ def _validate_chart_spec(
     if temporal_years:
         errors.append(
             f"Column(s) {temporal_years} hold integer years, not dates, but are encoded "
-            "as `temporal` or with a `timeUnit`, so every year renders as 1970. Encode "
-            'them as `quantitative` (or `ordinal` for bars) with `"axis": {"format": "d"}` '
-            "instead."
+            "as `temporal` or with a `timeUnit`, so every year collapses onto a single "
+            '"1969"/"1970" tick. Encode them as `quantitative` (or `ordinal` for bars) '
+            'with `"axis": {"format": "d"}` instead.'
         )
 
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders

@@ -640,7 +640,7 @@ class TestValidateChartSpec:
         assert _validate_chart_spec(spec, ["data", "total"]) == []
 
     def test_temporal_integer_year_is_rejected(self):
-        """An integer year as `temporal` renders every year as 1970, with no render error."""
+        """An integer year as `temporal` collapses every year onto one 1969/1970 tick."""
         spec = {
             "mark": "line",
             "encoding": {
