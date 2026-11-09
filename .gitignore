@@ -19,6 +19,9 @@ wheels/
 .env.*
 !.env.example
 
+# Spreadsheet exports (e.g. analytics/cli.py --out); can hold personal data
+*.xlsx
+
 # Virtual environments
 .venv/
 

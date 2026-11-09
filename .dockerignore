@@ -39,3 +39,6 @@ wheels/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Spreadsheet exports (can hold personal data)
+*.xlsx
