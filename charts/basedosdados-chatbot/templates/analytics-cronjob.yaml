@@ -24,6 +24,7 @@ spec:
             app.kubernetes.io/component: basedosdados-chatbot
             app.kubernetes.io/name: "{{ .Values.chatbot.name }}-analytics"
         spec:
+          serviceAccountName: "{{ .Values.chatbot.name }}-analytics"
           containers:
             - name: basedosdados-chatbot-analytics
               image: "{{ .Values.chatbot.image.name }}:{{ .Values.chatbot.image.tag }}"
@@ -34,14 +35,7 @@ spec:
                 - analytics.cli
                 - --bigquery-dataset
                 - {{ required "chatbot.analytics.bigqueryDataset is required when chatbot.analytics.enabled is true" .Values.chatbot.analytics.bigqueryDataset | quote }}
-              volumeMounts:
-                - name: chatbot-sa
-                  mountPath: /var/secrets/
-                  readOnly: true
               env:
-                # analytics/ authenticates with Application Default Credentials,
-                - name: GOOGLE_APPLICATION_CREDENTIALS
-                  value: /var/secrets/chatbot-sa.json
                 # Chatbot database: the same ConfigMap and Secret the API uses,
                 # renamed to the CHATBOT_DB_* names analytics/settings.py expects.
                 - name: CHATBOT_DB_HOST
@@ -94,12 +88,5 @@ spec:
                       key: password
               resources:
                 {{- toYaml .Values.chatbot.analytics.resources | nindent 16 }}
-          volumes:
-            - name: chatbot-sa
-              secret:
-                secretName: {{ .Values.chatbot.envSecret | quote }}
-                items:
-                  - key: CHATBOT_SA
-                    path: chatbot-sa.json
           restartPolicy: Never
 {{- end }}

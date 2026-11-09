@@ -40,6 +40,11 @@ chatbot:
     # full each run. It must already exist, in the analytics GCP project.
     bigqueryDataset: ""
 
+    # Google service account the job's Kubernetes service account impersonates
+    # through Workload Identity. It needs BigQuery Data Editor on the dataset
+    # above and Job User on its project; the IAM binding lives in the iac repo.
+    gcpServiceAccount: ""
+
     # Backend (Django) database, read to map account uuids to emails. It shares
     # the Cloud SQL instance and proxy with the chatbot DB, so its host and port
     # come from envConfigMap; only the database, user and password differ.

@@ -28,7 +28,10 @@
               "minLength": 1
             }
           },
-          "required": ["name", "tag"],
+          "required": [
+            "name",
+            "tag"
+          ],
           "additionalProperties": false
         },
         "replicas": {
@@ -89,7 +92,10 @@
                   "description": "Backend database user; required when enabled"
                 }
               },
-              "required": ["name", "user"],
+              "required": [
+                "name",
+                "user"
+              ],
               "additionalProperties": false
             },
             "envSharedDatabaseSecret": {
@@ -99,6 +105,10 @@
             "resources": {
               "type": "object",
               "description": "Kubernetes resource requests and limits for the job"
+            },
+            "gcpServiceAccount": {
+              "type": "string",
+              "description": "Google service account impersonated via Workload Identity; required when enabled"
             }
           },
           "required": [
@@ -107,7 +117,8 @@
             "timezone",
             "bigqueryDataset",
             "backendDb",
-            "envSharedDatabaseSecret"
+            "envSharedDatabaseSecret",
+            "gcpServiceAccount"
           ],
           "additionalProperties": false
         }
@@ -121,6 +132,8 @@
       "additionalProperties": false
     }
   },
-  "required": ["chatbot"],
+  "required": [
+    "chatbot"
+  ],
   "additionalProperties": false
 }

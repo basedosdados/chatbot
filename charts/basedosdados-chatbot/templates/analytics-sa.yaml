@@ -1,0 +1,14 @@
+{{- if .Values.chatbot.analytics.enabled }}
+# Identity for the analytics CronJob. Workload Identity binds it to the Google
+# service account below, so the job authenticates from the metadata server and
+# needs no key file. The matching IAM binding lives in the iac repo.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "{{ .Values.chatbot.name }}-analytics"
+  labels:
+    app.kubernetes.io/component: basedosdados-chatbot
+    app.kubernetes.io/name: "{{ .Values.chatbot.name }}-analytics"
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.chatbot.analytics.gcpServiceAccount | quote }}
+{{- end }}
