@@ -15,7 +15,6 @@ from langchain_core.messages import SystemMessage
 from app import charts
 from app.charts import (
     _CHART_SPEC_INSTRUCTIONS,
-    _D3_NUMBER_FORMAT,
     MAX_CHART_SPEC_ATTEMPTS,
     VEGA_LITE_SCHEMA,
     ChartHandleNotFound,
@@ -23,18 +22,20 @@ from app.charts import (
     ChartSpec,
     ChartSpecInvalid,
     ChartSpecTimeout,
+    _apply_server_config,
     _chart_spec_user_prompt,
     _collect,
     _collect_derived_fields,
-    _collect_number_formats,
-    _collect_scheme_names,
+    _collect_marks,
     _collect_temporal_fields,
     _fetch_rows,
+    _geo_stub_ids,
     _geo_stub_node,
     _geo_url_node,
     _integer_year_columns,
-    _is_valid_number_format,
     _profile_result,
+    _render_problems,
+    _rendered_text,
     _resolve_named_data,
     _sanitize_chart_spec,
     _spread_sample,
@@ -242,19 +243,71 @@ class TestGeoUrlNode:
 
 
 class TestGeoStubNode:
-    def test_is_a_minimal_single_feature_topojson(self):
-        node = _geo_stub_node("brazil_states")
+    def test_has_one_feature_per_id(self):
+        node = _geo_stub_node("brazil_states", ["SP", "RJ", "MG"])
         geometries = node["values"]["objects"]["uf"]["geometries"]
 
         assert node["format"] == {"type": "topojson", "feature": "uf"}
         assert node["values"]["type"] == "Topology"
-        assert len(geometries) == 1
+        assert [g["id"] for g in geometries] == ["SP", "RJ", "MG"]
+        assert [g["arcs"] for g in geometries] == [[[0]], [[1]], [[2]]]
+        assert len(node["values"]["arcs"]) == 3
+
+    def test_features_sit_inside_brazil(self):
+        """Each square winds clockwise, so its centroid is its own middle, not the
+        far side of the globe's."""
+        spec = {
+            "data": _geo_stub_node("brazil_states", ["SP", "RJ"]),
+            "transform": [{"calculate": "geoCentroid(null, datum)[0]", "as": "lon"}],
+            "mark": "text",
+            "encoding": {"text": {"field": "lon", "type": "quantitative"}},
+        }
+
+        scenegraph = vlc.vegalite_to_scenegraph(json.dumps(spec))["scenegraph"]
+        longitudes = [
+            float(text.replace("−", "-"))
+            for mark in _collect_marks(scenegraph)
+            if mark.get("role") == "mark"
+            for text in _rendered_text(mark)
+        ]
+
+        assert len(longitudes) == 2 and all(-75 < lon < -30 for lon in longitudes)
 
     def test_keys_the_stub_by_the_assets_feature(self):
-        node = _geo_stub_node("brazil_municipalities")
+        node = _geo_stub_node("brazil_municipalities", ["3550308"])
 
         assert node["format"]["feature"] == "Munic"
         assert set(node["values"]["objects"]) == {"Munic"}
+
+
+class TestGeoStubIds:
+    def test_states_are_the_real_27(self):
+        ids = _geo_stub_ids("brazil_states", _choropleth_spec(), [])
+
+        assert len(ids) == 27 and "SP" in ids
+
+    def test_municipalities_are_the_joined_codes_plus_one_without_data(self):
+        spec = {
+            "transform": [
+                {
+                    "lookup": "id",
+                    "from": {
+                        "data": {"name": "query_result"},
+                        "key": "id_municipio",
+                        "fields": ["valor"],
+                    },
+                }
+            ]
+        }
+        rows = [
+            {"id_municipio": 3550308, "valor": 1, "outro": "x"},
+            {"id_municipio": 3304557, "valor": 2, "outro": "y"},
+            {"id_municipio": None, "valor": 3, "outro": "z"},
+        ]
+
+        ids = _geo_stub_ids("brazil_municipalities", spec, rows)
+
+        assert ids == ["3304557", "3550308", "0"]
 
 
 class TestResolveNamedData:
@@ -418,110 +471,6 @@ class TestCollectDerivedFields:
         assert _collect_derived_fields(spec) == {"a", "rx", "ry"}
 
 
-class TestCollectSchemeNames:
-    def test_collects_a_string_scheme(self):
-        spec = {"encoding": {"color": {"field": "v", "scale": {"scheme": "reds"}}}}
-
-        assert _collect_scheme_names(spec) == {"reds"}
-
-    def test_collects_a_scheme_params_object_by_name(self):
-        # `scale.scheme` may be a SchemeParams object; the name lives under `name`.
-        spec = {
-            "encoding": {
-                "color": {
-                    "field": "v",
-                    "scale": {"scheme": {"name": "viridis", "extent": [0.2, 1]}},
-                }
-            }
-        }
-
-        assert _collect_scheme_names(spec) == {"viridis"}
-
-    def test_collects_every_scheme_across_layers(self):
-        spec = {
-            "layer": [
-                {"encoding": {"color": {"scale": {"scheme": "reds"}}}},
-                {"encoding": {"color": {"scale": {"scheme": {"name": "blues"}}}}},
-            ]
-        }
-
-        assert _collect_scheme_names(spec) == {"reds", "blues"}
-
-    def test_returns_empty_when_no_scheme(self):
-        spec = {
-            "mark": "bar",
-            "encoding": {"color": {"scale": {"range": ["red", "blue"]}}},
-        }
-
-        assert _collect_scheme_names(spec) == set()
-
-    def test_ignores_a_scheme_object_without_a_string_name(self):
-        # A malformed scheme object (no usable name) yields nothing, not a crash.
-        spec = {"encoding": {"color": {"scale": {"scheme": {"extent": [0, 1]}}}}}
-
-        assert _collect_scheme_names(spec) == set()
-
-
-class TestCollectNumberFormats:
-    def test_collects_formats_on_a_quantitative_field_its_axis_and_legend(self):
-        spec = {
-            "encoding": {
-                "y": {"field": "v", "type": "quantitative", "axis": {"format": "~s"}},
-                "color": {
-                    "field": "v",
-                    "type": "quantitative",
-                    "legend": {"format": ".1%"},
-                },
-                "tooltip": [{"field": "v", "type": "quantitative", "format": ",.0f"}],
-            }
-        }
-
-        assert _collect_number_formats(spec) == {"~s", ".1%", ",.0f"}
-
-    def test_ignores_formats_on_temporal_fields(self):
-        # `%b %Y` is a d3-time-format string, not a number format.
-        spec = {
-            "encoding": {
-                "x": {"field": "data", "type": "temporal", "axis": {"format": "%b %Y"}},
-                "tooltip": [
-                    {"field": "data", "type": "temporal", "format": "%B de %Y"}
-                ],
-            }
-        }
-
-        assert _collect_number_formats(spec) == set()
-
-    def test_ignores_a_quantitative_field_with_a_time_format_type(self):
-        spec = {
-            "field": "ts",
-            "type": "quantitative",
-            "formatType": "time",
-            "format": "%Y",
-        }
-
-        assert _collect_number_formats(spec) == set()
-
-    def test_collects_an_explicit_number_format_type(self):
-        spec = {
-            "field": "v",
-            "type": "ordinal",
-            "formatType": "number",
-            "format": ".2f",
-        }
-
-        assert _collect_number_formats(spec) == {".2f"}
-
-    def test_collects_across_layers(self):
-        spec = {
-            "layer": [
-                {"encoding": {"y": {"type": "quantitative", "format": ".1f"}}},
-                {"encoding": {"text": {"type": "quantitative", "format": "d"}}},
-            ]
-        }
-
-        assert _collect_number_formats(spec) == {".1f", "d"}
-
-
 class TestCollectTemporalFields:
     def test_collects_temporal_and_time_unit_fields_across_views(self):
         spec = {
@@ -561,83 +510,8 @@ class TestIntegerYearColumns:
         assert _integer_year_columns(["ano"], [{"ano": None}]) == set()
 
 
-class TestIsValidNumberFormat:
-    @pytest.mark.parametrize(
-        "specifier", ["", ".1f", ",.0f", "~s", ".1%", "$,.2f", "+.1f", "08.2f", ",.2~f"]
-    )
-    def test_accepts_d3_specifiers(self, specifier):
-        assert _is_valid_number_format(specifier)
-
-    @pytest.mark.parametrize("specifier", [".2f%", ".1F", "%Y", ".2f mil", "abc"])
-    def test_rejects_invalid_specifiers(self, specifier):
-        assert not _is_valid_number_format(specifier)
-
-    @pytest.mark.parametrize(
-        "specifier",
-        [
-            *("", ".1f", ",.0f", "~s", ".1%", "$,.2f", "+.1f", "08.2f", ",.2~f"),
-            *("*^10", "(.2f", "#x", ".1F", ".1z"),
-            *(".2f%", "%Y", ".2f mil", "abc", ".f", "1.2.3f", ",,d"),
-        ],
-    )
-    def test_grammar_matches_the_bundled_d3_format(self, specifier):
-        """The grammar must reject exactly what vl-convert's bundled d3-format throws on.
-
-        Guards against a vl-convert upgrade shipping a d3-format with a different grammar.
-        """
-        spec = {
-            "$schema": VEGA_LITE_SCHEMA,
-            "data": {"values": [{"ano": 2019, "total": 1234.5}]},
-            "mark": "bar",
-            "encoding": {
-                "x": {"field": "ano", "type": "ordinal"},
-                "y": {
-                    "field": "total",
-                    "type": "quantitative",
-                    "axis": {"format": specifier},
-                },
-            },
-        }
-        try:
-            vlc.vegalite_to_svg(json.dumps(spec))
-            d3_throws = False
-        except ValueError:
-            d3_throws = True
-
-        assert d3_throws == (_D3_NUMBER_FORMAT.match(specifier) is None)
-
-
 class TestValidateChartSpec:
     """Uses the real vl-convert compiler (in-process)."""
-
-    def test_invalid_legend_number_format_is_rejected(self):
-        """The `.2f%` legend format that shipped on a choropleth.
-
-        d3 throws on it only when a scale with data formats a label, which the empty-data
-        render never does — so the format check, not the compile step, must catch it.
-        """
-        spec = _choropleth_spec()
-        spec["encoding"]["color"]["legend"] = {"format": ".2f%"}
-
-        errors = _validate_chart_spec(spec, ["sigla_uf", "valor"])
-
-        assert any(".2f%" in error and "format" in error for error in errors)
-        assert not any("compile" in error for error in errors)
-
-    def test_valid_number_formats_pass(self):
-        spec = {
-            "mark": "line",
-            "encoding": {
-                "x": {"field": "data", "type": "temporal", "axis": {"format": "%b %Y"}},
-                "y": {
-                    "field": "total",
-                    "type": "quantitative",
-                    "axis": {"format": "~s"},
-                },
-            },
-        }
-
-        assert _validate_chart_spec(spec, ["data", "total"]) == []
 
     def test_temporal_integer_year_is_rejected(self):
         """An integer year as `temporal` collapses every year onto one 1969/1970 tick."""
@@ -825,95 +699,7 @@ class TestValidateChartSpec:
 
         assert any("compile" in error for error in errors)
 
-    def test_unknown_color_scheme_is_rejected(self):
-        """A scheme name outside Vega's built-in set (here d3's `RdBu`) is flagged."""
-        spec = {
-            "mark": "rect",
-            "encoding": {
-                "x": {"field": "ano", "type": "ordinal"},
-                "y": {"field": "mes", "type": "ordinal"},
-                "color": {
-                    "field": "temp",
-                    "type": "quantitative",
-                    "scale": {"scheme": "RdBu"},
-                },
-            },
-        }
-
-        errors = _validate_chart_spec(spec, ["ano", "mes", "temp"])
-
-        assert any("RdBu" in error and "scheme" in error for error in errors)
-
-    def test_unknown_scheme_in_choropleth_is_caught_by_the_allowlist(self):
-        """The regression that shipped a blank chart.
-
-        A geoshape's bad scheme does not raise in vl-convert (it logs to stderr but still
-        returns an SVG), so the compile step alone never catches it — the allowlist does.
-        """
-        spec = _choropleth_spec()
-        spec["encoding"]["color"]["scale"] = {"scheme": "lightpinkdark"}
-
-        errors = _validate_chart_spec(spec, ["sigla_uf", "valor"])
-
-        assert any("lightpinkdark" in error for error in errors)
-        # The compile step swallows this one, so it is not what caught it.
-        assert not any("compile" in error for error in errors)
-
-    def test_unknown_scheme_params_object_is_rejected(self):
-        """A bad scheme given as a SchemeParams object is caught too."""
-        spec = {
-            "mark": "bar",
-            "encoding": {
-                "x": {"field": "ano", "type": "ordinal"},
-                "y": {"field": "total", "type": "quantitative"},
-                "color": {
-                    "field": "total",
-                    "type": "quantitative",
-                    "scale": {"scheme": {"name": "notarealscheme"}},
-                },
-            },
-        }
-
-        errors = _validate_chart_spec(spec, ["ano", "total"])
-
-        assert any("notarealscheme" in error for error in errors)
-
-    def test_valid_scheme_passes(self):
-        """A real Vega scheme (`reds`) is accepted."""
-        spec = {
-            "mark": "rect",
-            "encoding": {
-                "x": {"field": "ano", "type": "ordinal"},
-                "y": {"field": "mes", "type": "ordinal"},
-                "color": {
-                    "field": "temp",
-                    "type": "quantitative",
-                    "scale": {"scheme": "reds"},
-                },
-            },
-        }
-
-        assert _validate_chart_spec(spec, ["ano", "mes", "temp"]) == []
-
-    def test_valid_scheme_params_object_passes(self):
-        """A real scheme given as a SchemeParams object is accepted."""
-        spec = {
-            "mark": "bar",
-            "encoding": {
-                "x": {"field": "ano", "type": "ordinal"},
-                "y": {"field": "total", "type": "quantitative"},
-                "color": {
-                    "field": "total",
-                    "type": "quantitative",
-                    "scale": {"scheme": {"name": "viridis"}},
-                },
-            },
-        }
-
-        assert _validate_chart_spec(spec, ["ano", "total"]) == []
-
-    def test_explicit_color_range_needs_no_scheme(self):
-        """Explicit `range` colors (no scheme) pass the scheme check."""
+    def test_explicit_color_range_passes(self):
         spec = {
             "mark": "bar",
             "encoding": {
@@ -928,6 +714,62 @@ class TestValidateChartSpec:
         }
 
         assert _validate_chart_spec(spec, ["ano", "total"]) == []
+
+    def test_rows_are_rendered_and_their_problems_returned(self):
+        spec = _line_spec(
+            color={"field": "sigla_uf", "type": "nominal", "scale": {"scheme": "RdBu"}}
+        )
+
+        assert _validate_chart_spec(spec, _ROW_COLUMNS) == []  # builds without rows
+        errors = _validate_chart_spec(spec, _ROW_COLUMNS, rows=_ROWS)
+
+        assert errors == [charts._NO_MARKS_PROBLEM]
+
+    def test_large_result_is_rendered_with_a_sample(self, monkeypatch):
+        rows = [{"ano": i, "total": i} for i in range(charts._VALIDATION_MAX_ROWS * 3)]
+        rendered = []
+        monkeypatch.setattr(
+            charts, "_render_problems", lambda spec, rows: rendered.append(rows) or []
+        )
+
+        assert _validate_chart_spec({"mark": "bar"}, ["ano", "total"], rows=rows) == []
+        assert [len(r) for r in rendered] == [charts._VALIDATION_MAX_ROWS]
+        assert rendered[0][0] == rows[0] and rendered[0][-1] == rows[-1]
+
+    def test_filter_keeping_rows_the_sample_misses_passes(self):
+        """A sample with none of the rows a filter keeps draws no marks; every row
+        decides then."""
+        rows = [{"ano": i, "total": i} for i in range(charts._VALIDATION_MAX_ROWS * 3)]
+        spec = {
+            "transform": [{"filter": "datum.ano == 7"}],
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        assert _spread_sample(rows, charts._VALIDATION_MAX_ROWS).count(rows[7]) == 0
+        assert _validate_chart_spec(spec, ["ano", "total"], rows=rows) == []
+
+    def test_only_a_chart_without_marks_is_rendered_again_with_every_row(
+        self, monkeypatch
+    ):
+        """Any other problem does not come from sampling, and every row could take
+        many seconds to draw."""
+        rows = [{"ano": i, "total": i} for i in range(charts._VALIDATION_MAX_ROWS * 3)]
+        rendered = []
+
+        def render_problems(spec, rows):
+            rendered.append(len(rows))
+            return ["shows 'undefined' as text"]
+
+        monkeypatch.setattr(charts, "_render_problems", render_problems)
+
+        errors = _validate_chart_spec({"mark": "bar"}, ["ano", "total"], rows=rows)
+
+        assert errors == ["shows 'undefined' as text"]
+        assert rendered == [charts._VALIDATION_MAX_ROWS]
 
     def test_choropleth_spec_is_valid(self):
         """A choropleth compiles (real geometry) and its geo properties are allowed."""
@@ -1029,6 +871,390 @@ class TestProfileResult:
         assert '"MG"' in profile
 
 
+# Rows for the render checks: one value per year and state.
+_ROWS = [
+    {"ano": ano, "sigla_uf": uf, "total": (ano - 2000) * (index + 1) * 1000.5}
+    for ano in range(2015, 2024)
+    for index, uf in enumerate(["SP", "RJ", "MG"])
+]
+_ROW_COLUMNS = ["ano", "sigla_uf", "total"]
+
+
+def _line_spec(**encoding) -> dict:
+    return {
+        "mark": "line",
+        "encoding": {
+            "x": {"field": "ano", "type": "quantitative"},
+            "y": {"field": "total", "type": "quantitative"},
+            "color": {"field": "sigla_uf", "type": "nominal"},
+            **encoding,
+        },
+    }
+
+
+class TestRenderProblems:
+    """What only shows once the spec is drawn with the result's rows."""
+
+    def test_valid_spec_has_no_problems(self):
+        assert _render_problems(_line_spec(), _ROWS) == []
+
+    def test_valid_spec_without_rows_has_no_problems(self):
+        assert _render_problems(_line_spec(), []) == []
+
+    def test_unknown_color_scheme_draws_nothing(self):
+        """A scheme outside Vega's built-in set (here d3's `RdBu`) fails on real rows."""
+        spec = _line_spec(
+            color={"field": "sigla_uf", "type": "nominal", "scale": {"scheme": "RdBu"}}
+        )
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert len(problems) == 1
+        assert problems == [charts._NO_MARKS_PROBLEM] and "scheme" in problems[0]
+
+    def test_invalid_axis_number_format_draws_nothing(self):
+        spec = _line_spec(
+            y={"field": "total", "type": "quantitative", "axis": {"format": ".2f%"}}
+        )
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert charts._NO_MARKS_PROBLEM in problems
+
+    def test_invalid_tooltip_format_leaves_marks_undrawn(self):
+        """The `R$,.2f` tooltip format that shipped a blank map: the items exist but
+        the failed encoding never placed them."""
+        spec = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "tooltip": [
+                    {"field": "total", "type": "quantitative", "format": "R$,.2f"}
+                ],
+            },
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("none of the chart's marks are drawn" in p for p in problems)
+        assert charts._NO_MARKS_PROBLEM not in problems
+
+    def test_one_failed_layer_is_reported_as_partial(self):
+        spec = {
+            "layer": [
+                {"mark": "bar"},
+                {
+                    "mark": "text",
+                    "encoding": {
+                        "text": {
+                            "field": "total",
+                            "type": "quantitative",
+                            "format": ".2f%",
+                        }
+                    },
+                },
+            ],
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("only part of the chart's marks" in p for p in problems)
+
+    def test_layer_with_no_rows_beside_a_drawn_one_passes(self):
+        """A layer whose filter keeps no row is not a failure while others draw."""
+        spec = {
+            "layer": [
+                {"mark": "bar"},
+                {"mark": "point", "transform": [{"filter": "datum.total < 0"}]},
+            ],
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        assert _render_problems(spec, _ROWS) == []
+
+    def test_filter_removing_every_row_draws_nothing(self):
+        spec = {**_line_spec(), "transform": [{"filter": "datum.sigla_uf == 'XX'"}]}
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert problems == [charts._NO_MARKS_PROBLEM] and "filter" in problems[0]
+
+    def test_failed_dataflow_is_an_empty_frame(self):
+        spec = {
+            **_line_spec(),
+            "transform": [{"calculate": "datum.nope.x * 2", "as": "z"}],
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert len(problems) == 1 and "fails when it runs" in problems[0]
+
+    def test_invalid_mark_fails_to_compile(self):
+        spec = {"mark": "notamark", "encoding": {"x": {"field": "ano"}}}
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert len(problems) == 1 and "compile" in problems[0]
+
+    def test_undefined_text_is_rejected(self):
+        """A misspelled field in a text expression shows "undefined" on the chart."""
+        spec = {
+            "transform": [{"calculate": "'Ano ' + datum.anno", "as": "rotulo"}],
+            "mark": "text",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "text": {"field": "rotulo"},
+            },
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("undefined" in p for p in problems)
+
+    def test_transparent_text_is_not_read(self):
+        spec = {
+            "transform": [{"calculate": "'Ano ' + datum.anno", "as": "rotulo"}],
+            "mark": {"type": "text", "opacity": 0},
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+                "text": {"field": "rotulo"},
+            },
+        }
+
+        assert _render_problems(spec, _ROWS) == []
+
+    def test_axis_with_one_label_on_every_tick_is_rejected(self):
+        """A `labelExpr` that discards the value labels every tick alike."""
+        spec = _line_spec(
+            y={
+                "field": "total",
+                "type": "quantitative",
+                "axis": {"labelExpr": "format(datum.valu | 0, 'd')"},
+            }
+        )
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("same label '0'" in p for p in problems)
+
+    def test_log_scale_over_zero_has_no_tick_labels(self):
+        rows = [*_ROWS, {"ano": 2014, "sigla_uf": "SP", "total": 0}]
+        spec = _line_spec(
+            y={"field": "total", "type": "quantitative", "scale": {"type": "log"}}
+        )
+
+        problems = _render_problems(spec, rows)
+
+        assert any("no tick labels" in p for p in problems)
+
+    def test_axis_without_labels_by_choice_passes(self):
+        spec = _line_spec(
+            x={"field": "ano", "type": "quantitative", "axis": {"labels": False}}
+        )
+
+        assert _render_problems(spec, _ROWS) == []
+
+    def test_fixed_domain_far_from_the_values_has_no_tick_labels(self):
+        """Values in the thousands on a domain fixed at [0, 8.8] leave the axis bare."""
+        spec = _line_spec(
+            y={"field": "total", "type": "quantitative", "scale": {"domain": [0, 8.8]}}
+        )
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("no tick labels" in p and "domain" in p for p in problems)
+
+    def test_chart_far_too_large_is_rejected(self):
+        problems = _render_problems({**_line_spec(), "height": 20000}, _ROWS)
+
+        assert any("far too large" in p for p in problems)
+
+    def test_chart_without_size_is_rejected(self):
+        """A facet beside a top-level layer is drawn 0 pixels wide."""
+        bars = {
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+        spec = {
+            "facet": {"row": {"field": "sigla_uf", "type": "nominal"}},
+            "spec": {"width": "container", **bars},
+            "layer": [{"mark": "bar"}],
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("no size" in p for p in problems)
+
+    def test_bar_without_an_x_encoding_passes(self):
+        """A position the spec does not encode is absent from every item."""
+        spec = {
+            "mark": "bar",
+            "encoding": {"y": {"field": "total", "type": "quantitative"}},
+        }
+
+        assert _render_problems(spec, _ROWS[:1]) == []
+
+    def test_text_layer_that_writes_nothing_is_rejected(self):
+        """A `text` channel given as `{"expr": ...}` is ignored: the labels the request
+        asked for are silently missing."""
+        spec = {
+            "layer": [
+                {"mark": "bar"},
+                {
+                    "mark": "text",
+                    "encoding": {"text": {"expr": "format(datum.total, '.1f')"}},
+                },
+            ],
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        problems = _render_problems(spec, _ROWS)
+
+        assert any("only part of the chart's marks" in p for p in problems)
+
+    def test_choropleth_joined_to_its_rows_is_valid(self):
+        rows = [{"sigla_uf": "SP", "valor": 10.5}, {"sigla_uf": "RJ", "valor": 7.25}]
+
+        assert _render_problems(_choropleth_spec(), rows) == []
+
+    def test_choropleth_with_labels_at_each_states_centroid_is_valid(self):
+        """The stub geometry has a real shape per state, so centroids and labels work."""
+        rows = [{"sigla_uf": uf, "valor": 1.5} for uf in charts._BRAZIL_STATES]
+        choropleth = _choropleth_spec()
+        spec = {
+            "data": choropleth["data"],
+            "transform": [
+                *choropleth["transform"],
+                {"calculate": "geoCentroid(null, datum)[0]", "as": "lon"},
+                {"calculate": "geoCentroid(null, datum)[1]", "as": "lat"},
+                {"calculate": "format(datum.valor, '.1f') + '%'", "as": "rotulo"},
+            ],
+            "projection": choropleth["projection"],
+            "layer": [
+                {"mark": "geoshape", "encoding": choropleth["encoding"]},
+                {
+                    "mark": "text",
+                    "encoding": {
+                        "longitude": {"field": "lon", "type": "quantitative"},
+                        "latitude": {"field": "lat", "type": "quantitative"},
+                        "text": {"field": "rotulo"},
+                    },
+                },
+            ],
+        }
+
+        assert _render_problems(spec, rows) == []
+
+    def test_choropleth_label_from_a_misspelled_field_is_rejected(self):
+        rows = [{"sigla_uf": uf, "valor": 1.5} for uf in charts._BRAZIL_STATES]
+        choropleth = _choropleth_spec()
+        spec = {
+            **choropleth,
+            "transform": [
+                *choropleth["transform"],
+                {"calculate": "format(datum.valr, '.1f')", "as": "rotulo"},
+            ],
+        }
+        spec["encoding"] = {
+            **choropleth["encoding"],
+            "tooltip": [{"field": "rotulo", "type": "nominal"}],
+        }
+        labels = {
+            "data": choropleth["data"],
+            "transform": spec["transform"],
+            "mark": "text",
+            "encoding": {"text": {"field": "rotulo"}},
+        }
+
+        problems = _render_problems({"vconcat": [choropleth, labels]}, rows)
+
+        assert any("NaN" in p for p in problems)
+
+    def test_municipality_choropleth_joins_integer_codes(self):
+        """The real geometry's ids are text; an integer code column still joins."""
+        spec = json.loads(
+            json.dumps(_choropleth_spec())
+            .replace("brazil_states", "brazil_municipalities")
+            .replace("sigla_uf", "id_municipio")
+        )
+        rows = [
+            {"id_municipio": 3550308, "valor": 10.5},
+            {"id_municipio": 3304557, "valor": 7.25},
+        ]
+
+        assert _render_problems(spec, rows) == []
+
+
+class TestServerConfig:
+    def test_sets_locale_and_tooltips(self):
+        spec = _apply_server_config({"mark": "bar"}, "pt")
+
+        assert spec["config"]["locale"]["number"]["decimal"] == ","
+        assert spec["config"]["locale"]["time"]["shortMonths"][1] == "Fev"
+        assert spec["config"]["bar"] == {"tooltip": {"content": "encoding"}}
+        assert "line" not in spec["config"]
+
+    def test_english_keeps_default_dates(self):
+        spec = _apply_server_config({"mark": "bar"}, "en")
+
+        assert spec["config"]["locale"] == {"number": charts._NUMBER_LOCALES["en"]}
+
+    def test_keeps_the_models_other_config_and_overrides_its_locale(self):
+        spec = {
+            "mark": "bar",
+            "config": {
+                "background": "#111111",
+                "bar": {"cornerRadius": 2},
+                "locale": {"number": {"decimal": "."}},
+            },
+        }
+
+        configured = _apply_server_config(spec, "pt")
+
+        assert configured["config"]["background"] == "#111111"
+        assert configured["config"]["bar"] == {
+            "cornerRadius": 2,
+            "tooltip": {"content": "encoding"},
+        }
+        assert configured["config"]["locale"]["number"]["decimal"] == ","
+        assert spec["config"]["locale"] == {"number": {"decimal": "."}}  # not mutated
+
+    def test_numbers_are_drawn_in_the_languages_format(self):
+        spec = _apply_server_config(
+            _line_spec(
+                y={"field": "total", "type": "quantitative", "axis": {"format": ",.1f"}}
+            ),
+            "pt",
+        )
+        spec["data"] = {"values": _ROWS}
+
+        scenegraph = vlc.vegalite_to_scenegraph(json.dumps(spec))["scenegraph"]
+        labels = [
+            text
+            for mark in _collect_marks(scenegraph)
+            if mark.get("role") == "axis-label"
+            for text in _rendered_text(mark)
+        ]
+
+        assert "10.000,0" in labels
+
+
 def _structured_reply(spec: dict | None) -> dict:
     """A `with_structured_output(include_raw=True)` result: a parsed spec, or a parse miss."""
     parsed = ChartSpec(spec=spec) if spec is not None else None
@@ -1052,7 +1278,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: []
+            lambda spec, columns, year_columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["bad column"],
         )
@@ -1072,7 +1298,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: seen.append(year_columns) or [],
+            lambda spec, columns, year_columns, rows: seen.append(year_columns) or [],
         )
         rows = [{"ano": 2000 + i, "n": 1} for i in range(10)] + [{"ano": 1, "n": 1}]
 
@@ -1081,6 +1307,45 @@ class TestGenerateChartSpec:
         )
 
         assert seen == [frozenset()]  # the 11th row is not a year, so `ano` is not one
+
+    async def test_spec_is_validated_and_returned_with_the_server_config(
+        self, monkeypatch
+    ):
+        """The chart is checked as it ships: with the server's config and the rows."""
+        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
+        self._model(monkeypatch, _structured_reply(spec))
+        seen = []
+        monkeypatch.setattr(
+            charts,
+            "_validate_chart_spec",
+            lambda spec, columns, year_columns, rows: seen.append((spec, rows)) or [],
+        )
+        rows = [{"ano": 2025}]
+
+        result = await generate_chart_spec(
+            {"ano": "INTEGER"}, rows, "a bar chart", "pt"
+        )
+
+        assert result == _apply_server_config(spec, "pt")
+        assert seen == [(result, rows)]
+
+    async def test_spec_drawing_nothing_with_the_rows_is_retried(self, monkeypatch):
+        """End to end with the real validator: a bad scheme only fails on real rows."""
+        good = _line_spec()
+        bad = _line_spec(
+            color={"field": "sigla_uf", "type": "nominal", "scale": {"scheme": "RdBu"}}
+        )
+        model = self._model(
+            monkeypatch, _structured_reply(bad), _structured_reply(good)
+        )
+        columns = {"ano": "INTEGER", "sigla_uf": "STRING", "total": "FLOAT"}
+
+        result = await generate_chart_spec(columns, _ROWS, "a line chart", "pt")
+
+        retry_prompt = model.ainvoke.await_args_list[1].args[0][1].content
+        assert result["encoding"] == good["encoding"]
+        assert "draws no marks at all" in retry_prompt
+        assert "locale" not in retry_prompt  # the model is shown only what it wrote
 
     async def test_rejected_spec_is_fed_back_on_retry(self, monkeypatch):
         """The retry prompt carries the model's own rejected spec plus the errors."""
@@ -1092,7 +1357,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: []
+            lambda spec, columns, year_columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["column 'nope' is not in the result"],
         )
@@ -1112,7 +1377,7 @@ class TestGenerateChartSpec:
         spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
         model = self._model(monkeypatch, _structured_reply(spec))
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         await generate_chart_spec(
@@ -1133,7 +1398,7 @@ class TestGenerateChartSpec:
         }
         model = self._model(monkeypatch, _structured_reply(spec))
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         result = await generate_chart_spec(
@@ -1150,7 +1415,7 @@ class TestGenerateChartSpec:
         good = _structured_reply({"mark": "bar", "encoding": {"x": {"field": "ano"}}})
         model = self._model(monkeypatch, empty, good)
         monkeypatch.setattr(
-            charts, "_validate_chart_spec", lambda spec, columns, year_columns: []
+            charts, "_validate_chart_spec", lambda spec, columns, year_columns, rows: []
         )
 
         result = await generate_chart_spec(
@@ -1187,7 +1452,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             charts,
             "_validate_chart_spec",
-            lambda spec, columns, year_columns: ["always bad"],
+            lambda spec, columns, year_columns, rows: ["always bad"],
         )
 
         with pytest.raises(ChartSpecInvalid):

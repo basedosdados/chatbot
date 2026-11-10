@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import re
 from collections.abc import Callable
 from decimal import Decimal
@@ -61,89 +62,6 @@ _RESULT_SOURCE = "query_result"
 # Every data-source name a spec may reference; anything else in a `data` node is dropped.
 _ALLOWED_SOURCES = frozenset({_RESULT_SOURCE, *_GEO_ASSETS})
 
-# Vega's built-in color scheme names (https://vega.github.io/vega/docs/schemes/). A scheme
-# name outside this set is rejected. Includes the dark-/light-background ramp variants for
-# completeness, though the prompt steers away from them. Keep in sync with the scheme list
-# in _CHART_SPEC_INSTRUCTIONS.
-_VEGA_COLOR_SCHEMES = frozenset(
-    {
-        # Categorical
-        "accent",
-        "category10",
-        "category20",
-        "category20b",
-        "category20c",
-        "observable10",
-        "dark2",
-        "paired",
-        "pastel1",
-        "pastel2",
-        "set1",
-        "set2",
-        "set3",
-        "tableau10",
-        "tableau20",
-        # Sequential single-hue
-        "blues",
-        "tealblues",
-        "teals",
-        "greens",
-        "browns",
-        "oranges",
-        "reds",
-        "purples",
-        "warmgreys",
-        "greys",
-        # Sequential multi-hue
-        "viridis",
-        "magma",
-        "inferno",
-        "plasma",
-        "cividis",
-        "turbo",
-        "bluegreen",
-        "bluepurple",
-        "goldgreen",
-        "goldorange",
-        "goldred",
-        "greenblue",
-        "orangered",
-        "purplebluegreen",
-        "purpleblue",
-        "purplered",
-        "redpurple",
-        "yellowgreenblue",
-        "yellowgreen",
-        "yelloworangebrown",
-        "yelloworangered",
-        # Sequential multi-hue for dark / light backgrounds
-        "darkblue",
-        "darkgold",
-        "darkgreen",
-        "darkmulti",
-        "darkred",
-        "lightgreyred",
-        "lightgreyteal",
-        "lightmulti",
-        "lightorange",
-        "lighttealblue",
-        # Diverging
-        "blueorange",
-        "brownbluegreen",
-        "purplegreen",
-        "pinkyellowgreen",
-        "purpleorange",
-        "redblue",
-        "redgrey",
-        "redyellowblue",
-        "redyellowgreen",
-        "spectral",
-        # Cyclical
-        "rainbow",
-        "sinebow",
-    }
-)
-
 # Fields a transform creates when its `as` is omitted (Vega-Lite's defaults).
 _DEFAULT_TRANSFORM_OUTPUTS = {
     "fold": ("key", "value"),
@@ -151,18 +69,101 @@ _DEFAULT_TRANSFORM_OUTPUTS = {
     "quantile": ("prob", "value"),
 }
 
-# d3-format's specifier grammar ([[fill]align][sign][symbol][0][width][,][.precision][~][type]),
-# copied from d3-format 3.1.0 as bundled by vl-convert; a string outside it makes d3 throw
-# "invalid format" at render. d3 does not throw on an unknown type letter (e.g. ".1F") but
-# silently falls back to ".12~g" (labels like "2e+2"), so its real types are checked too.
-_D3_NUMBER_FORMAT = re.compile(
-    pattern=r"^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$",
-    flags=re.IGNORECASE,
-)
-_D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
-
 # Whole-number values in this range are read as calendar years.
 _YEAR_RANGE = range(1000, 3001)
+
+# Most rows a spec is validated with; a larger result is validated with an even spread
+# of this many. Render time grows with the marks drawn, and renders in a process run one
+# at a time: a bar and a text label per row took 1.2 s at 500 rows, 11 s at 5,000 and
+# 44 s at 20,000. Most charts draw far fewer marks and render in about 40 ms.
+_VALIDATION_MAX_ROWS = 500
+
+# What to check when an encoding fails on the rows, for the spec generator.
+_ENCODING_HINT = (
+    "Check that every color `scheme` is an exact Vega scheme name, that every number "
+    "`format` is a d3-format specifier such as '.1f', ',.0f', '~s' or '.1%' (to add a "
+    "unit or a '%' sign use a `labelExpr`, not the format), and that dates are parsed "
+    "from the values the column really holds."
+)
+
+# The one render problem a sample of the rows can cause by itself: it may hold none of
+# the rows a filter keeps.
+_NO_MARKS_PROBLEM = (
+    "With the result's rows, the chart draws no marks at all: every row is filtered "
+    f"out, or an encoding fails. Check that no `filter` removes every row. {_ENCODING_HINT}"
+)
+
+# The width a spec is validated at: about the chat panel's, where the website draws
+# every chart at its container's width.
+_VALIDATION_WIDTH = 560
+
+# A chart larger than this, in pixels on either side, is rejected: no screen shows it
+# and a browser canvas cannot hold it (e.g. a fixed scale domain far from the data).
+_MAX_CHART_PIXELS = 10_000
+
+# Text a chart shows where an expression or field produced no value (`format(undefined)`
+# renders "NaN", a missing field "undefined"). `null` is left out: a NULL category in the
+# data legitimately shows as "null", and no spec change can fix it.
+_MISSING_VALUE_TEXT = re.compile(r"\b(?:undefined|NaN|Infinity)\b")
+
+# What a drawn item of each mark type carries in the scenegraph: at least one of these.
+# An encoding that fails on the real rows (an invalid format, an unknown scheme, a broken
+# expression) stops before the item gets any, so it is drawn nowhere. A position the
+# spec does not encode (e.g. a bar with only `y`) is legitimately absent.
+_DRAWN_ITEM_KEYS = {"shape": {"shape"}, "text": {"text"}}
+_DRAWN_ITEM_DEFAULT_KEYS = {"x", "y"}
+
+# The 27 federative units' codes: the feature ids of the `brazil_states` geometry.
+_BRAZIL_STATES = (
+    "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA",
+    "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+)  # fmt: skip
+
+# Number and date formats per language, set on every chart (see `_server_config`).
+_NUMBER_LOCALES: dict[LanguageCode, dict[str, Any]] = {
+    "pt": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["R$ ", ""]},
+    "es": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["$", ""]},
+    "en": {"decimal": ".", "thousands": ",", "grouping": [3], "currency": ["$", ""]},
+}
+
+_TIME_LOCALES: dict[LanguageCode, dict[str, Any]] = {
+    "pt": {
+        "dateTime": "%A, %e de %B de %Y. %X",
+        "date": "%d/%m/%Y",
+        "time": "%H:%M:%S",
+        "periods": ["AM", "PM"],
+        "days": ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"],
+        "shortDays": ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"],
+        "months": [
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+        ],
+        "shortMonths": [
+            "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+            "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+        ],
+    },
+    "es": {
+        "dateTime": "%A, %e de %B de %Y, %X",
+        "date": "%d/%m/%Y",
+        "time": "%H:%M:%S",
+        "periods": ["AM", "PM"],
+        "days": ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"],
+        "shortDays": ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"],
+        "months": [
+            "enero", "febrero", "marzo", "abril", "mayo", "junio",
+            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+        ],
+        "shortMonths": [
+            "ene", "feb", "mar", "abr", "may", "jun",
+            "jul", "ago", "sep", "oct", "nov", "dic",
+        ],
+    },
+}  # fmt: skip
+
+# Marks that show a tooltip of their encoded fields unless the spec sets its own. Lines
+# and areas are left out: one mark spans many rows, so its tooltip would show only one.
+_TOOLTIP_MARKS = ("bar", "point", "circle", "square", "rect", "arc", "geoshape")
 
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
@@ -420,27 +421,72 @@ def _geo_url_node(name: str) -> dict[str, Any]:
     }
 
 
-def _geo_stub_node(name: str) -> dict[str, Any]:
-    """Build a minimal single-feature TopoJSON node for offline spec validation.
+def _geo_stub_ids(
+    name: str, spec: dict[str, Any], rows: list[dict[str, Any]]
+) -> list[str]:
+    """Pick the feature ids a stub geometry needs, so a map's joins behave as in the browser.
+
+    The states' ids are the real ones, all 27. The municipalities are too many to list,
+    so they are the ones the rows join on, plus one no row matches, as the real geometry
+    almost always has places without data.
 
     Args:
         name (str): A geo source name from `_GEO_ASSETS` (e.g. "brazil_states").
+        spec (dict[str, Any]): The spec, whose `lookup` transforms name the join columns.
+        rows (list[dict[str, Any]]): The rows the spec is rendered with.
 
     Returns:
-        dict[str, Any]: A `data` node with a tiny inline TopoJSON and its topojson `format`.
+        list[str]: The feature ids, as text like the real geometry's.
+    """
+    if name == "brazil_states":
+        return list(_BRAZIL_STATES)
+    join_columns = _collect(spec, "lookup") | _collect(spec, "key")
+    ids = {
+        str(row[column])
+        for row in rows
+        for column in join_columns & row.keys()
+        if row[column] is not None
+    }
+    return [*sorted(ids), "0"]
+
+
+def _geo_stub_node(name: str, ids: list[str]) -> dict[str, Any]:
+    """Build a small inline TopoJSON node for offline spec validation.
+
+    Each id gets its own square, laid out on a grid inside Brazil's bounding box, so
+    the stub projects and draws like the real geometry at a fraction of its size.
+
+    Args:
+        name (str): A geo source name from `_GEO_ASSETS` (e.g. "brazil_states").
+        ids (list[str]): The feature ids (see `_geo_stub_ids`).
+
+    Returns:
+        dict[str, Any]: A `data` node with the inline TopoJSON and its topojson `format`.
     """
     feature = _GEO_ASSETS[name]["feature"]
+    per_side = math.isqrt(max(len(ids) - 1, 0)) + 1
+    cell, size = 30 / per_side, 20 / per_side
+    arcs, geometries = [], []
+    for index, feature_id in enumerate(ids):
+        x = -70 + (index % per_side) * cell
+        y = -30 + (index // per_side) * cell
+        # Clockwise, as spherical geometry winds a polygon's outer ring; the other way
+        # round it would cover the rest of the globe.
+        arcs.append(
+            [[x, y], [x, y + size], [x + size, y + size], [x + size, y], [x, y]]
+        )
+        geometries.append(
+            {
+                "type": "Polygon",
+                "id": feature_id,
+                "properties": {"name": feature_id},
+                "arcs": [[index]],
+            }
+        )
     stub = {
         "type": "Topology",
-        "objects": {
-            feature: {
-                "type": "GeometryCollection",
-                "geometries": [
-                    {"type": "Polygon", "id": "0", "properties": {}, "arcs": [[0]]}
-                ],
-            }
-        },
-        "arcs": [[[0, 0], [1, 0], [0, 1], [0, 0]]],
+        "objects": {feature: {"type": "GeometryCollection", "geometries": geometries}},
+        "arcs": arcs,
     }
     return {"values": stub, "format": {"type": "topojson", "feature": feature}}
 
@@ -738,65 +784,6 @@ def _collect_derived_fields(node: JsonValue) -> set[str]:
     return found
 
 
-def _collect_scheme_names(node: JsonValue) -> set[str]:
-    """Collect every color-scheme name a spec references, anywhere within it.
-
-    A `scheme` is either a string (`"scheme": "reds"`) or a `SchemeParams` object whose
-    `name` holds the scheme (`"scheme": {"name": "reds", "extent": [...]}`); this collects
-    the name from both forms so `_validate_chart_spec` can reject an unknown one.
-
-    Args:
-        node (JsonValue): A spec, or any node within it, to walk.
-
-    Returns:
-        set[str]: Every scheme name found under a `scheme` key.
-    """
-    found: set[str] = set()
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "scheme":
-                if isinstance(value, str):
-                    found.add(value)
-                elif isinstance(value, dict) and isinstance(value.get("name"), str):
-                    found.add(value["name"])
-            found |= _collect_scheme_names(value)
-    elif isinstance(node, list):
-        for item in node:
-            found |= _collect_scheme_names(item)
-    return found
-
-
-def _collect_number_formats(node: JsonValue) -> set[str]:
-    """Collect every number-format string a spec applies, anywhere within it.
-
-    A format is a number format when it sits on a quantitative field definition (or one
-    with `formatType: "number"`), either directly or under that definition's `axis` or
-    `legend`. Formats on temporal fields, or with a time `formatType`, are date formats
-    and are not collected.
-
-    Args:
-        node (JsonValue): A spec, or any node within it, to walk.
-
-    Returns:
-        set[str]: Every number-format string found.
-    """
-    found: set[str] = set()
-    if isinstance(node, dict):
-        format_type = node.get("formatType")
-        if format_type == "number" or (
-            node.get("type") == "quantitative" and format_type not in ("time", "utc")
-        ):
-            for holder in (node, node.get("axis"), node.get("legend")):
-                if isinstance(holder, dict) and isinstance(holder.get("format"), str):
-                    found.add(holder["format"])
-        for value in node.values():
-            found |= _collect_number_formats(value)
-    elif isinstance(node, list):
-        for item in node:
-            found |= _collect_number_formats(item)
-    return found
-
-
 def _collect_temporal_fields(node: JsonValue) -> set[str]:
     """Collect every field a spec treats as a date, anywhere within it.
 
@@ -867,26 +854,232 @@ def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set
     return year_columns
 
 
-def _is_valid_number_format(specifier: str) -> bool:
-    """Return whether d3-format accepts a number-format specifier.
+def _server_config(language: LanguageCode) -> dict[str, Any]:
+    """Build the Vega-Lite `config` the server sets on every chart.
+
+    It holds what does not depend on the chart and the model should not have to get
+    right: number and date formats in the user's language, and a tooltip on marks that
+    stand for one row. Colors, fonts and sizes stay with the website, which merges its
+    own config under the spec's.
 
     Args:
-        specifier (str): The format string (e.g. ".1f", ",.0f", "~s").
+        language (LanguageCode): The language of the chart's text.
 
     Returns:
-        bool: True if d3-format can parse it.
+        dict[str, Any]: The config.
     """
-    match = _D3_NUMBER_FORMAT.match(specifier)
-    if match is None:
-        return False
-    format_type = match.group(10)
-    return format_type is None or format_type in _D3_NUMBER_FORMAT_TYPES
+    locale: dict[str, Any] = {"number": _NUMBER_LOCALES[language]}
+    if language in _TIME_LOCALES:
+        locale["time"] = _TIME_LOCALES[language]
+    tooltips = {mark: {"tooltip": {"content": "encoding"}} for mark in _TOOLTIP_MARKS}
+    return {"locale": locale, **tooltips}
+
+
+def _merge_config(base: Any, override: Any) -> Any:
+    """Merge two config objects key by key; `override` wins where both set a value.
+
+    Args:
+        base (Any): The config to start from.
+        override (Any): The config whose values take precedence.
+
+    Returns:
+        Any: The merged config.
+    """
+    if not isinstance(base, dict) or not isinstance(override, dict):
+        return override
+    merged = dict(base)
+    for key, value in override.items():
+        merged[key] = _merge_config(base[key], value) if key in base else value
+    return merged
+
+
+def _apply_server_config(
+    spec: dict[str, Any], language: LanguageCode
+) -> dict[str, Any]:
+    """Set the server's config on a spec, over any value the model gave the same keys.
+
+    Args:
+        spec (dict[str, Any]): A sanitized spec.
+        language (LanguageCode): The language of the chart's text.
+
+    Returns:
+        dict[str, Any]: The spec with the server's config merged into its own.
+    """
+    config = _merge_config(spec.get("config") or {}, _server_config(language))
+    return {**spec, "config": config}
+
+
+def _collect_marks(node: JsonValue) -> list[dict[str, Any]]:
+    """Collect every mark a rendered chart draws, from its Vega scenegraph.
+
+    Args:
+        node (JsonValue): A scenegraph (from `vlc.vegalite_to_scenegraph`), or any node
+            within it.
+
+    Returns:
+        list[dict[str, Any]]: Each mark that is not a group, in drawing order: its
+            `marktype`, its `role` (e.g. "mark", "axis-label") and its `items`.
+    """
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        if node.get("marktype") not in (None, "group"):
+            found.append(node)
+        items = node.get("items")
+        if isinstance(items, list):
+            for item in items:
+                found += _collect_marks(item)
+    return found
+
+
+def _is_drawn(mark: dict[str, Any]) -> bool:
+    """Return whether a mark has at least one item with a property that draws it."""
+    needed = _DRAWN_ITEM_KEYS.get(mark["marktype"], _DRAWN_ITEM_DEFAULT_KEYS)
+    return any(not needed.isdisjoint(item) for item in mark.get("items") or [])
+
+
+def _rendered_text(mark: dict[str, Any]) -> list[str]:
+    """Return the visible text of a text mark's items, leaving out transparent ones."""
+    texts = []
+    for item in mark.get("items") or []:
+        if "text" not in item:
+            continue
+        if item.get("opacity", 1) == 0 or item.get("fillOpacity", 1) == 0:
+            continue
+        text = item["text"]
+        texts.append(" ".join(map(str, text)) if isinstance(text, list) else str(text))
+    return texts
+
+
+def _render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Render a spec with rows and return what is wrong with the chart it draws.
+
+    Rendering, not just compiling Vega-Lite to Vega, is the only way to run the spec's
+    expressions, and the rows show what the user would see. A dataflow that fails does
+    not raise: Vega logs the error and draws what it had, so the checks read the
+    scenegraph. They look at the output only, whatever in the spec caused it.
+
+    Args:
+        spec (dict[str, Any]): The candidate spec (already sanitized).
+        rows (list[dict[str, Any]]): The rows to render it with. Without any, only the
+            checks that hold for an empty chart run.
+
+    Returns:
+        list[str]: Human-readable problems to feed back to the generator; empty if none.
+    """
+    render_spec = _resolve_named_data(
+        spec,
+        rows,
+        lambda name: _geo_stub_node(name, _geo_stub_ids(name, spec, rows)),
+    )
+    assert isinstance(render_spec, dict)  # an object spec resolves to an object
+    # Drawn as the website draws it: at the chat panel's width, fitted to it.
+    render_spec = {
+        **render_spec,
+        "$schema": VEGA_LITE_SCHEMA,
+        "width": _VALIDATION_WIDTH,
+        "autosize": {
+            "type": "fit",
+            "contains": "padding",
+            **(spec.get("autosize") if isinstance(spec.get("autosize"), dict) else {}),
+        },
+    }
+    render_spec.setdefault("data", {"values": rows})
+
+    try:
+        rendered = vlc.vegalite_to_scenegraph(json.dumps(render_spec))
+    except Exception as e:
+        # vl-convert raises on any spec the renderer rejects at build time
+        return [f"The chart spec does not compile: {e}"]
+
+    root = rendered["scenegraph"]
+    if not any(group.get("items") for group in root.get("items") or []):
+        return [
+            "The chart compiles but fails when it runs, so it would show nothing at "
+            "all: one of its transforms, lookups or expressions errors. Check each "
+            "against the columns and their types, use only operations Vega-Lite "
+            "supports in that place, and simplify where you can."
+        ]
+
+    problems: list[str] = []
+
+    width, height = rendered.get("width") or 0, rendered.get("height") or 0
+    if width <= 0 or height <= 0:
+        problems.append(
+            "The chart has no size when drawn at its container's width, so nothing "
+            "would show. Do not mix `facet` (or a `row`/`column` encoding) with a "
+            "top-level `mark` or `layer`: put the marks inside the facet's `spec`."
+        )
+    elif max(width, height) > _MAX_CHART_PIXELS:
+        problems.append(
+            f"The chart would be {width:.0f}x{height:.0f} pixels, far too large to "
+            "show. Use a smaller `height` or `step`, or fewer facet panels."
+        )
+
+    if not rows:
+        return problems
+
+    marks = _collect_marks(root)
+    data_marks = [mark for mark in marks if mark.get("role") == "mark"]
+    drawn = [mark for mark in data_marks if _is_drawn(mark)]
+    # Items an encoding failed on exist, but carry nothing that draws them.
+    failed = [mark for mark in data_marks if mark.get("items") and not _is_drawn(mark)]
+    if failed:
+        problems.append(
+            "With the result's rows, "
+            + ("none" if not drawn else "only part")
+            + " of the chart's marks are drawn: an encoding fails on the others, or "
+            f"a text mark has no text to write. {_ENCODING_HINT}"
+        )
+    elif not drawn:
+        problems.append(_NO_MARKS_PROBLEM)
+
+    text_marks = [
+        (mark.get("role"), _rendered_text(mark))
+        for mark in marks
+        if mark["marktype"] == "text"
+    ]
+
+    missing = sorted(
+        {
+            text
+            for _, texts in text_marks
+            for text in texts
+            if _MISSING_VALUE_TEXT.search(text)
+        }
+    )
+    if missing:
+        problems.append(
+            f"The rendered chart shows {missing} as text (in an axis, legend or label): "
+            "a field or expression yields no value for the real rows. Check every field "
+            "name and every `calculate`, `labelExpr` and text expression against the "
+            "columns and their values."
+        )
+
+    for role, labels in text_marks:
+        if role != "axis-label":
+            continue
+        if len(labels) >= 3 and len(set(labels)) == 1:
+            problems.append(
+                f"An axis shows the same label {labels[0]!r} on all of its {len(labels)} "
+                "ticks, so its `labelExpr` or `format` discards the value. Fix that axis."
+            )
+        elif not labels and drawn:
+            problems.append(
+                "An axis has no tick labels with the result's rows: its scale has no valid "
+                "domain, or the values fall far outside it (e.g. a log scale over zero "
+                "or negative values, a fixed `domain` that does not fit the values, "
+                "series in different units on one scale, or values that are not valid "
+                "dates or numbers). Fix that axis's scale."
+            )
+
+    return problems
 
 
 def _validate_chart_spec(
     spec: dict[str, Any],
     columns: list[str],
     year_columns: frozenset[str] = frozenset(),
+    rows: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
@@ -894,6 +1087,9 @@ def _validate_chart_spec(
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
         year_columns (frozenset[str]): Columns holding whole-number years (see `_integer_year_columns`).
+        rows (list[dict[str, Any]] | None): The result rows the chart is rendered with
+            (an even spread of `_VALIDATION_MAX_ROWS` of them, for a larger result);
+            None renders it with no data, which checks only that it builds.
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
@@ -915,33 +1111,10 @@ def _validate_chart_spec(
             f"Available columns: {sorted(columns)}."
         )
 
-    # A `scheme` name outside Vega's built-in set errors only once real data instantiates the
-    # scale — which vl_convert swallows below (it logs to stderr but still returns an SVG), so
-    # the render check never catches it and the chart ships blank. Reject unknown names here.
-    unknown_schemes = sorted(_collect_scheme_names(spec) - _VEGA_COLOR_SCHEMES)
-    if unknown_schemes:
-        errors.append(
-            f"Unknown color scheme(s): {unknown_schemes}. Use an exact Vega scheme name, "
-            "or set explicit colors via a `range` instead."
-        )
-
-    # An invalid number format (e.g. ".2f%") also throws only once a scale has data — the
-    # empty-data render below never formats a tick or legend label — so check the grammar here.
-    invalid_formats = sorted(
-        f for f in _collect_number_formats(spec) if not _is_valid_number_format(f)
-    )
-    if invalid_formats:
-        errors.append(
-            f"Invalid number format(s): {invalid_formats}. Use a d3-format specifier such "
-            "as '.1f', ',.0f', '~s' or '.1%' (the '%' type multiplies by 100, so use it "
-            "only on fractions). To append a unit or a '%' sign to values that are already "
-            "percentages, use a `labelExpr` instead."
-        )
-
     # An integer year in a temporal field is read as epoch milliseconds, so every year
     # lands in the first seconds of 1970 UTC, one tick labeled with the viewer's local
-    # year: 1969 west of UTC, as in Brazil. The chart renders without any error, so no
-    # render check catches it.
+    # year: 1969 west of UTC, as in Brazil. The chart renders without any error, and its
+    # output looks like any chart with a single date, so the render check cannot tell.
     # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
     # as `ano`) is a real date by then, so it is not flagged.
     temporal_years = sorted(
@@ -956,20 +1129,16 @@ def _validate_chart_spec(
             'with `"axis": {"format": "d"}` instead.'
         )
 
-    # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
-    # its geometry; a normal chart just gets empty data. Rendering (not just VL→Vega compiling)
-    # is the only way to validate expression strings in the spec.
-    compile_spec = _resolve_named_data(spec, [], _geo_stub_node)
-    compile_spec = {**compile_spec, "$schema": VEGA_LITE_SCHEMA}
-    compile_spec.setdefault("data", {"values": []})
+    rows = rows or []
+    sample = _spread_sample(rows, _VALIDATION_MAX_ROWS)
+    problems = _render_problems(spec, sample)
+    if _NO_MARKS_PROBLEM in problems and len(sample) < len(rows):
+        # The sample may hold none of the rows a filter keeps, so every row decides.
+        # That render is cheap: either few rows pass the filter, or the encoding fails
+        # before anything is drawn. No other problem comes from sampling.
+        problems = _render_problems(spec, rows)
 
-    try:
-        vlc.vegalite_to_svg(json.dumps(compile_spec))
-    except Exception as e:
-        # vl-convert raises on any spec the renderer rejects at build time
-        errors.append(f"The chart spec does not compile: {e}")
-
-    return errors
+    return errors + problems
 
 
 async def generate_chart_spec(
@@ -989,7 +1158,8 @@ async def generate_chart_spec(
         language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
-        dict[str, Any]: A validated, sanitized spec (no data bound yet).
+        dict[str, Any]: A validated, sanitized spec carrying the server's config (no
+            data bound yet).
 
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
@@ -1020,7 +1190,8 @@ async def _generate_chart_spec(
         language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
-        dict[str, Any]: A validated, sanitized spec (no data bound yet).
+        dict[str, Any]: A validated, sanitized spec carrying the server's config (no
+            data bound yet).
 
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
@@ -1050,11 +1221,14 @@ async def _generate_chart_spec(
             spec = _sanitize_chart_spec(parsed.spec)
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
             previous_spec = spec  # feed the spec back if it fails to validate
+            # Validated as it ships, with the server's config; the model is shown only
+            # what it wrote.
+            chart = _apply_server_config(spec, language)
             errors = await asyncio.to_thread(
-                _validate_chart_spec, spec, list(columns), year_columns
+                _validate_chart_spec, chart, list(columns), year_columns, rows
             )
             if not errors:
-                return spec
+                return chart
 
     raise ChartSpecInvalid(
         f"Could not produce a valid chart after {MAX_CHART_SPEC_ATTEMPTS} attempts: "
