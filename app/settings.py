@@ -145,7 +145,7 @@ class Settings(BaseSettings):
         ),
     )
     CHART_SPEC_TIMEOUT_SECONDS: float = Field(
-        default=150,
+        default=180,
         gt=0,
         description=(
             "Deadline for generating a chart spec, across all attempts and retries. "
