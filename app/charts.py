@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import Callable
 from decimal import Decimal
 from functools import cache
@@ -15,13 +16,23 @@ from pydantic import BaseModel, Field, JsonValue
 from app.db.database import AsyncDatabase, sessionmaker
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired, is_result_expired
+from app.i18n import LanguageCode, language_name
 from app.settings import settings
 
 VEGA_LITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
 
-# Rows shown to the spec generator. It only needs the shape (columns + a few
-# example values); the full result is bound afterwards by inject_chart_data.
+# Rows shown to the spec generator, evenly spaced across the result. It also gets
+# a per-column summary over every row; the full result is bound afterwards by
+# inject_chart_data.
 CHART_SPEC_SAMPLE_ROWS = 10
+
+# A text column's distinct values are listed in full up to this many.
+# Beyond it, only a few examples are shown.
+_SUMMARY_MAX_LISTED_VALUES = 12
+_SUMMARY_EXAMPLES = 3
+
+# Temporal BigQuery types arrive as ISO strings, which order like the dates they encode.
+_TEMPORAL_TYPES = frozenset({"DATE", "DATETIME", "TIMESTAMP", "TIME"})
 
 # How many times the generator may retry after a spec fails validation before giving up.
 MAX_CHART_SPEC_ATTEMPTS = 3
@@ -133,21 +144,44 @@ _VEGA_COLOR_SCHEMES = frozenset(
     }
 )
 
+# Fields a transform creates when its `as` is omitted (Vega-Lite's defaults).
+_DEFAULT_TRANSFORM_OUTPUTS = {
+    "fold": ("key", "value"),
+    "density": ("value", "density"),
+    "quantile": ("prob", "value"),
+}
+
+# d3-format's specifier grammar ([[fill]align][sign][symbol][0][width][,][.precision][~][type]),
+# copied from d3-format 3.1.0 as bundled by vl-convert; a string outside it makes d3 throw
+# "invalid format" at render. d3 does not throw on an unknown type letter (e.g. ".1F") but
+# silently falls back to ".12~g" (labels like "2e+2"), so its real types are checked too.
+_D3_NUMBER_FORMAT = re.compile(
+    pattern=r"^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$",
+    flags=re.IGNORECASE,
+)
+_D3_NUMBER_FORMAT_TYPES = frozenset("%bcdefgnoprsXx")
+
+# Whole-number values in this range are read as calendar years.
+_YEAR_RANGE = range(1000, 3001)
+
 # System prompt for the chart spec generation.
 _CHART_SPEC_INSTRUCTIONS = """\
-You are a data visualization specialist. Given a small, already-aggregated query result and a description of the chart to build, return one complete Vega-Lite v6 spec. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
+You are a data visualization specialist. You receive instructions on what to chart and how, and a profile of an already-aggregated BigQuery query result: its row count, each column's BigQuery type and a summary computed over every row, and sample rows spread evenly across the result. Return one complete Vega-Lite v6 spec that charts the result as instructed. Reference the result's columns by their exact names, and never include a data source, dataset, or URL — the exact rows are injected separately. You may use composite views and transforms when they make the chart clearer.
 
 # Guidelines
 
-- Follow the description when it is specific. When it leaves the chart type open, pick the clearest form for the data's shape.
+- Follow the instructions where they are specific. When they leave the chart type open, pick the clearest form for the data's shape.
 - Add a short title, label both axes with human-readable text rather than the raw column names.
+- A `fold` turns column names into values, which then appear as they are in the legend and labels. Map each to a human-readable label with a `calculate` after the `fold`, and encode that field instead.
 - Add a legend whenever a view shows two or more series.
+- Write every title, axis label and legend in the language the request names.
+- Base scale, size and layout choices on the column summaries (ranges, distinct counts), not just the sample rows. For example, panels whose value ranges barely overlap should not share an axis.
 
 ## Color
 
 By default, set no color-related property — no `scale`, `scheme`, `sort`, `range`, or explicit color value — on any encoding, mark, or config, whether the field is categorical, quantitative, or there's only one series. Just map the field to the color channel and leave everything else about its color to the frontend's brand palette.
 
-The one exception is when the description explicitly asks for a specific color. Then honor exactly what was asked, choosing the encoding that fits the chart and the number of series being colored, and set only that — leave every other color to the frontend. Do not invent a color, scheme, or palette the description did not ask for.
+The one exception is when the instructions explicitly ask for a specific color. Then honor exactly what was asked, choosing the encoding that fits the chart and the number of series being colored, and set only that — leave every other color to the frontend. Do not invent a color, scheme, or palette the instructions did not ask for.
 
 Give the color as explicit CSS colors (a hex string or a standard color keyword) whenever the request names a color rather than a palette: a single fixed color as a constant color `value`, and specific per-category colors as a `range` on the color encoding's `scale`. For a gradient over a quantitative or ordinal field, give a `range` of two or more explicit colors, e.g. light-to-dark for low-to-high.
 
@@ -161,7 +195,11 @@ Use a named `scheme` only when the request names or clearly maps to one of the b
 
 ## Number formatting
 
-Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the response's language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
+Abbreviate any large-magnitude axis or label with SI notation (the `~s` / `s` format), then rewrite its prefix letters (k, M, G, T) to follow the naming convention the measured quantity uses in the requested language, via an axis `labelExpr` that reformats `datum.value`. Do this on every axis whose numbers reach the thousands or beyond.
+
+## Years
+
+A year stored as a plain integer (e.g. `2019`) is not a date: Vega-Lite reads a number in a `temporal` field as milliseconds since 1970, so every year collapses onto one "1969"/"1970" tick. Never encode an integer year column as `temporal` or give it a `timeUnit`; encode it as `quantitative` (or `ordinal` for bars) with the integer label format on its axis, `"axis": {"format": "d"}` — a `format` on the field itself does not reach axis labels — and never abbreviate it with SI notation. Use `temporal` only for real date or datetime columns.
 
 ## Log scales
 
@@ -171,9 +209,13 @@ A log scale is undefined at zero and below, so a single non-positive value in th
 
 Never write `null` inside a literal `scale.domain` array (e.g. `{"domain": [0, null]}`) — Vega-Lite treats a literal domain as authoritative and does not fill a `null` entry in from the data, so the scale silently collapses to a zero-width range and the chart renders empty (no bars, no marks) with no error. To pin one end while leaving the other data-driven, use `domainMin`/`domainMax` instead (e.g. `{"domainMin": 0}`). Quantitative scales already default to including zero, so most of the time no domain override is needed at all.
 
+## Layered charts
+
+In a `layer`, layers that share an axis are merged into one axis, and a property hidden on any layer is hidden on the merged axis. Never set `"labels": false`, `"ticks": false`, `"title": null` or `"axis": null` on a secondary layer to avoid duplicates — that removes the labels from the whole chart. Define each axis once, on the first layer or in a shared top-level `encoding`, and leave the other layers' axes unset.
+
 ## Size
 
-The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis, set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
+The chart is rendered at the container's width, so never set a width. For any chart with many categories along one axis (see that column's distinct count), set an explicit height so the cells or bands are not overly tall — a height noticeably smaller than the chart's width reads best. Otherwise leave the height to default.
 
 ## Long labels
 
@@ -224,6 +266,10 @@ class ChartSpecInvalid(Exception):
     """The generator could not produce a spec that passes validation."""
 
 
+class ChartSpecTimeout(Exception):
+    """The generator did not produce a valid spec within the deadline."""
+
+
 class ChartSpec(BaseModel):
     """The tool the charting model calls: a free-form Vega-Lite spec."""
 
@@ -265,7 +311,7 @@ def _json_default(value: Any) -> Any:
 
 def _fetch_rows(
     destination_table: dict[str, Any],
-) -> tuple[list[str], list[dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Fetch a result table's rows for charting, capped at settings.CHART_MAX_BYTES.
 
     Fetches row by row and stops as soon as the JSON that would be bound into the spec
@@ -275,7 +321,8 @@ def _fetch_rows(
         destination_table (dict[str, Any]): `TableReference.to_api_repr()` of the result table.
 
     Returns:
-        tuple[list[str], list[dict[str, Any]]]: Column names and row dicts.
+        tuple[dict[str, str], list[dict[str, Any]]]: Column names mapped to their BigQuery
+            types, in schema order, and row dicts.
 
     Raises:
         ChartResultTooLarge: The bound data would exceed settings.CHART_MAX_BYTES.
@@ -286,7 +333,7 @@ def _fetch_rows(
     try:
         table = _bq_client().get_table(table_ref)
 
-        columns = [field.name for field in table.schema]
+        columns = {field.name: field.field_type for field in table.schema}
 
         rows = []
         size = 0
@@ -313,7 +360,7 @@ def _fetch_rows(
 
 async def fetch_chart_data(
     query_ref: str, thread_id: str
-) -> tuple[QueryHandle, list[str], list[dict[str, Any]]]:
+) -> tuple[QueryHandle, dict[str, str], list[dict[str, Any]]]:
     """Resolve a chartable result: authorize the handle, then read its capped rows.
 
     Args:
@@ -321,7 +368,8 @@ async def fetch_chart_data(
         thread_id (str): The thread the handle must belong to (authorization).
 
     Returns:
-        tuple[QueryHandle, list[str], list[dict[str, Any]]]: The handle, its columns, and rows.
+        tuple[QueryHandle, dict[str, str], list[dict[str, Any]]]: The handle,
+            its columns (mapped to their BigQuery types), and rows.
 
     Raises:
         ChartHandleNotFound: No such result in this thread.
@@ -461,14 +509,14 @@ def _chart_spec_model():  # pragma: no cover
 
     `method="function_calling"` (not strict json_schema, which 400s on the open spec) and
     `include_raw=True` (a bad call surfaces as `parsed=None`, not a raise) are required.
+    A request that hangs is cut off by the timeout and retried once.
     """
     return ChatOpenAI(
         api_key=settings.OPENAI_API_KEY,
         model=settings.MODEL_URI,
-        reasoning={
-            "effort": "medium",
-            "summary": "auto",
-        },
+        reasoning={"effort": "medium"},
+        timeout=settings.CHART_SPEC_REQUEST_TIMEOUT_SECONDS,
+        max_retries=1,
     ).with_structured_output(
         ChartSpec,
         method="function_calling",
@@ -476,10 +524,91 @@ def _chart_spec_model():  # pragma: no cover
     )
 
 
+def _spread_sample(rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
+    """Pick `size` rows evenly spaced across the result, first and last included.
+
+    A result is usually sorted by its grouping columns, so the first rows often
+    all share one group; an even spread shows every part of it.
+
+    Args:
+        rows (list[dict[str, Any]]): The result rows.
+        size (int): How many rows to pick.
+
+    Returns:
+        list[dict[str, Any]]: The sample, in result order.
+    """
+    if len(rows) <= size:
+        return rows
+    step = (len(rows) - 1) / (size - 1)
+    return [rows[round(i * step)] for i in range(size)]
+
+
+def _summarize_column(bq_type: str, values: list[Any]) -> dict[str, Any]:
+    """Summarize one column over every row, for the spec generator.
+
+    Args:
+        bq_type (str): The column's BigQuery type.
+        values (list[Any]): The column's value in every row.
+
+    Returns:
+        dict[str, Any]: The type, distinct and null counts, plus min/max for numbers and
+            dates, or the distinct values (all of them, or a few examples) for other columns.
+    """
+    present = [value for value in values if value is not None]
+    distinct = sorted({json.dumps(value, sort_keys=True) for value in present})
+    summary: dict[str, Any] = {
+        "type": bq_type,
+        "distinct": len(distinct),
+        "null_pct": round(100 * (len(values) - len(present)) / len(values), 2),
+    }
+
+    if not present:
+        return summary
+
+    numeric = all(
+        isinstance(value, int | float) and not isinstance(value, bool)
+        for value in present
+    )
+    if numeric or bq_type in _TEMPORAL_TYPES:
+        summary["min"], summary["max"] = min(present), max(present)
+    elif len(distinct) <= _SUMMARY_MAX_LISTED_VALUES:
+        summary["values"] = [json.loads(value) for value in distinct]
+    else:
+        summary["examples"] = [
+            json.loads(value) for value in distinct[:_SUMMARY_EXAMPLES]
+        ]
+
+    return summary
+
+
+def _profile_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
+    """Profile a result for the spec generator: size, column summaries, and a sample.
+
+    Args:
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        str: The data profile section of the spec generator's user message.
+    """
+    summary = {
+        column: _summarize_column(bq_type, [row[column] for row in rows])
+        for column, bq_type in columns.items()
+    }
+    sample = _spread_sample(rows, CHART_SPEC_SAMPLE_ROWS)
+    return (
+        f"Rows: {len(rows)}\n\n"
+        "Columns (BigQuery type and a summary computed over every row): "
+        f"{json.dumps(summary, ensure_ascii=False, default=str)}\n\n"
+        "Sample rows (spread evenly across the result): "
+        f"{json.dumps(sample, ensure_ascii=False, default=str)}"
+    )
+
+
 def _chart_spec_user_prompt(
-    columns: list[str],
-    sample_rows: list[dict[str, Any]],
     instructions: str,
+    language: LanguageCode,
+    data_profile: str,
     previous_spec: dict[str, Any] | None,
     errors: list[str],
 ) -> str:
@@ -489,9 +618,9 @@ def _chart_spec_user_prompt(
     can fix that spec rather than regenerate from scratch.
 
     Args:
-        columns (list[str]): The result's column names.
-        sample_rows (list[dict[str, Any]]): A few example rows, for shape only.
-        instructions (str): The natural-language description of the chart to produce.
+        instructions (str): What to chart and how, in natural language.
+        language (LanguageCode): The language of the chart's text (the user's language).
+        data_profile (str): The result's size, column summaries and sample rows.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
 
@@ -499,9 +628,9 @@ def _chart_spec_user_prompt(
         str: The user message for the chart-spec model.
     """
     prompt = (
-        f"What to chart: {instructions}\n\n"
-        f"Columns: {json.dumps(columns, ensure_ascii=False)}\n\n"
-        f"Sample rows: {json.dumps(sample_rows, ensure_ascii=False, default=str)}"
+        f"# What to chart and how\n\n{instructions}\n\n"
+        f"Language of the chart's text: {language_name(language)}\n\n"
+        f"# Data profile\n\n{data_profile}"
     )
 
     if errors:
@@ -575,6 +704,40 @@ def _collect(node: JsonValue, key: str) -> set[str]:
     return found
 
 
+def _collect_derived_fields(node: JsonValue) -> set[str]:
+    """Collect every field a spec's transforms create, anywhere within it.
+
+    A transform names its outputs in `as`: a string (`calculate`, `aggregate`, `window`, …)
+    or a list (`fold`, `stack`, `regression`, …). A bin transform also creates `<as>_end`,
+    and `fold`, `density` and `quantile` fall back to default names when `as` is omitted.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every field name a transform creates.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        output = node.get("as")
+        if isinstance(output, str):
+            found.add(output)
+            if "bin" in node:
+                found.add(f"{output}_end")
+        elif isinstance(output, list):
+            found |= {name for name in output if isinstance(name, str)}
+        else:
+            for transform, defaults in _DEFAULT_TRANSFORM_OUTPUTS.items():
+                if transform in node:
+                    found.update(defaults)
+        for value in node.values():
+            found |= _collect_derived_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_derived_fields(item)
+    return found
+
+
 def _collect_scheme_names(node: JsonValue) -> set[str]:
     """Collect every color-scheme name a spec references, anywhere within it.
 
@@ -603,12 +766,134 @@ def _collect_scheme_names(node: JsonValue) -> set[str]:
     return found
 
 
-def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
+def _collect_number_formats(node: JsonValue) -> set[str]:
+    """Collect every number-format string a spec applies, anywhere within it.
+
+    A format is a number format when it sits on a quantitative field definition (or one
+    with `formatType: "number"`), either directly or under that definition's `axis` or
+    `legend`. Formats on temporal fields, or with a time `formatType`, are date formats
+    and are not collected.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every number-format string found.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        format_type = node.get("formatType")
+        if format_type == "number" or (
+            node.get("type") == "quantitative" and format_type not in ("time", "utc")
+        ):
+            for holder in (node, node.get("axis"), node.get("legend")):
+                if isinstance(holder, dict) and isinstance(holder.get("format"), str):
+                    found.add(holder["format"])
+        for value in node.values():
+            found |= _collect_number_formats(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_number_formats(item)
+    return found
+
+
+def _collect_temporal_fields(node: JsonValue) -> set[str]:
+    """Collect every field a spec treats as a date, anywhere within it.
+
+    A field is treated as a date when its definition is `temporal` or
+    carries a `timeUnit` (which also covers a `timeUnit` transform).
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every field name treated as a date.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if isinstance(node.get("field"), str) and (
+            node.get("type") == "temporal" or "timeUnit" in node
+        ):
+            found.add(node["field"])
+        for value in node.values():
+            found |= _collect_temporal_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_temporal_fields(item)
+    return found
+
+
+def _collect_calculated_fields(node: JsonValue) -> set[str]:
+    """Collect every field a `calculate` transform writes, anywhere within a spec.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        set[str]: Every `as` name of a `calculate` transform.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if "calculate" in node and isinstance(node.get("as"), str):
+            found.add(node["as"])
+        for value in node.values():
+            found |= _collect_calculated_fields(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _collect_calculated_fields(item)
+    return found
+
+
+def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[str]:
+    """Find the columns whose every non-null value is a whole-number calendar year.
+
+    Args:
+        columns (list[str]): The result's column names.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        set[str]: Columns holding only integers within `_YEAR_RANGE` (and at least one).
+    """
+    year_columns: set[str] = set()
+    for column in columns:
+        values = [row[column] for row in rows if row[column] is not None]
+        if values and all(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value in _YEAR_RANGE
+            for value in values
+        ):
+            year_columns.add(column)
+    return year_columns
+
+
+def _is_valid_number_format(specifier: str) -> bool:
+    """Return whether d3-format accepts a number-format specifier.
+
+    Args:
+        specifier (str): The format string (e.g. ".1f", ",.0f", "~s").
+
+    Returns:
+        bool: True if d3-format can parse it.
+    """
+    match = _D3_NUMBER_FORMAT.match(specifier)
+    if match is None:
+        return False
+    format_type = match.group(10)
+    return format_type is None or format_type in _D3_NUMBER_FORMAT_TYPES
+
+
+def _validate_chart_spec(
+    spec: dict[str, Any],
+    columns: list[str],
+    year_columns: frozenset[str] = frozenset(),
+) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
     Args:
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
+        year_columns (frozenset[str]): Columns holding whole-number years (see `_integer_year_columns`).
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
@@ -616,13 +901,15 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
     errors: list[str] = []
 
     referenced = _collect(spec, "field")
-    derived = _collect(spec, "as")  # fields produced by transforms
+    derived = _collect_derived_fields(spec)
     # A geoshape references its geometry's own fields — the top-level `id` and its labels
     # under `properties.*` — which are not result columns; we allow those and flag the rest.
     unknown = referenced - set(columns) - derived - {"*", "id"}
     missing = sorted(field for field in unknown if not field.startswith("properties."))
 
-    if missing:
+    # A pivot names its new columns after the pivoted field's values, which the spec alone
+    # does not reveal, so the check is skipped rather than reject a valid spec.
+    if missing and not _collect(spec, "pivot"):
         errors.append(
             f"Encoding references column(s) not in the result: {missing}. "
             f"Available columns: {sorted(columns)}."
@@ -636,6 +923,37 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
         errors.append(
             f"Unknown color scheme(s): {unknown_schemes}. Use an exact Vega scheme name, "
             "or set explicit colors via a `range` instead."
+        )
+
+    # An invalid number format (e.g. ".2f%") also throws only once a scale has data — the
+    # empty-data render below never formats a tick or legend label — so check the grammar here.
+    invalid_formats = sorted(
+        f for f in _collect_number_formats(spec) if not _is_valid_number_format(f)
+    )
+    if invalid_formats:
+        errors.append(
+            f"Invalid number format(s): {invalid_formats}. Use a d3-format specifier such "
+            "as '.1f', ',.0f', '~s' or '.1%' (the '%' type multiplies by 100, so use it "
+            "only on fractions). To append a unit or a '%' sign to values that are already "
+            "percentages, use a `labelExpr` instead."
+        )
+
+    # An integer year in a temporal field is read as epoch milliseconds, so every year
+    # lands in the first seconds of 1970 UTC, one tick labeled with the viewer's local
+    # year: 1969 west of UTC, as in Brazil. The chart renders without any error, so no
+    # render check catches it.
+    # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
+    # as `ano`) is a real date by then, so it is not flagged.
+    temporal_years = sorted(
+        (_collect_temporal_fields(spec) & year_columns)
+        - _collect_calculated_fields(spec)
+    )
+    if temporal_years:
+        errors.append(
+            f"Column(s) {temporal_years} hold integer years, not dates, but are encoded "
+            "as `temporal` or with a `timeUnit`, so every year collapses onto a single "
+            '"1969"/"1970" tick. Encode them as `quantitative` (or `ordinal` for bars) '
+            'with `"axis": {"format": "d"}` instead.'
         )
 
     # Resolve named sources (stub geometry, empty rows) so a geoshape/lookup spec renders
@@ -655,14 +973,51 @@ def _validate_chart_spec(spec: dict[str, Any], columns: list[str]) -> list[str]:
 
 
 async def generate_chart_spec(
-    columns: list[str], rows: list[dict[str, Any]], instructions: str
+    columns: dict[str, str],
+    rows: list[dict[str, Any]],
+    instructions: str,
+    language: LanguageCode,
+) -> dict[str, Any]:
+    """Generate a sanitized Vega-Lite spec for a result, within a deadline.
+
+    Bounds `_generate_chart_spec` by settings.CHART_SPEC_TIMEOUT_SECONDS.
+
+    Args:
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
+        instructions (str): What to chart and how, in natural language.
+        language (LanguageCode): The language of the chart's text (the user's language).
+
+    Returns:
+        dict[str, Any]: A validated, sanitized spec (no data bound yet).
+
+    Raises:
+        ChartSpecInvalid: No attempt produced a spec that validates.
+        ChartSpecTimeout: No valid spec within the deadline.
+    """
+    try:
+        async with asyncio.timeout(settings.CHART_SPEC_TIMEOUT_SECONDS):
+            return await _generate_chart_spec(columns, rows, instructions, language)
+    except TimeoutError as e:
+        raise ChartSpecTimeout(
+            f"Generating the chart took over {settings.CHART_SPEC_TIMEOUT_SECONDS:.0f} "
+            "seconds and was stopped. Try again, or describe a simpler chart."
+        ) from e
+
+
+async def _generate_chart_spec(
+    columns: dict[str, str],
+    rows: list[dict[str, Any]],
+    instructions: str,
+    language: LanguageCode,
 ) -> dict[str, Any]:
     """Generate a sanitized Vega-Lite spec for a result, retrying until it validates.
 
     Args:
-        columns (list[str]): The result's column names.
-        rows (list[dict[str, Any]]): The result rows; only a sample is shown to the model.
-        instructions (str): A natural-language description of the chart to produce.
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows; the model sees a summary and a sample.
+        instructions (str): What to chart and how, in natural language.
+        language (LanguageCode): The language of the chart's text (the user's language).
 
     Returns:
         dict[str, Any]: A validated, sanitized spec (no data bound yet).
@@ -670,7 +1025,8 @@ async def generate_chart_spec(
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
-    sample_rows = rows[:CHART_SPEC_SAMPLE_ROWS]
+    data_profile = _profile_result(columns, rows)
+    year_columns = frozenset(_integer_year_columns(list(columns), rows))
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -680,7 +1036,7 @@ async def generate_chart_spec(
                 SystemMessage(_CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     _chart_spec_user_prompt(
-                        columns, sample_rows, instructions, previous_spec, errors
+                        instructions, language, data_profile, previous_spec, errors
                     )
                 ),
             ]
@@ -694,7 +1050,9 @@ async def generate_chart_spec(
             spec = _sanitize_chart_spec(parsed.spec)
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
             previous_spec = spec  # feed the spec back if it fails to validate
-            errors = await asyncio.to_thread(_validate_chart_spec, spec, columns)
+            errors = await asyncio.to_thread(
+                _validate_chart_spec, spec, list(columns), year_columns
+            )
             if not errors:
                 return spec
 

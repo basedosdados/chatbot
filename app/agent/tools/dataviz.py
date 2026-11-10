@@ -151,7 +151,9 @@ async def chart_query_result(
     """
     handle, columns, rows = await fetch_chart_data(query_ref, runtime.context.thread_id)
 
-    spec = await generate_chart_spec(columns, rows, instructions)
+    spec = await generate_chart_spec(
+        columns, rows, instructions, runtime.context.language
+    )
 
     # A client-facing artifact (not a `query_result` handle, so it is not redacted): the
     # interface renders it with Vega-Embed. The data is bound server-side from the exact
