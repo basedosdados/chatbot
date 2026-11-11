@@ -78,6 +78,9 @@ _YEAR_RANGE = range(1000, 3001)
 # 44 s at 20,000. Most charts draw far fewer marks and render in about 40 ms.
 _VALIDATION_MAX_ROWS = 500
 
+# Most characters of a compile error fed back to the spec generator.
+_COMPILE_ERROR_MAX_CHARS = 600
+
 # What to check when an encoding fails on the rows, for the spec generator.
 _ENCODING_HINT = (
     "Check that every color `scheme` is an exact Vega scheme name, that every number "
@@ -950,6 +953,29 @@ def _rendered_text(mark: dict[str, Any]) -> list[str]:
     return texts
 
 
+def _compile_error(error: Exception) -> str:
+    """Return a compile error's message without what the generator cannot use.
+
+    vl-convert's message carries a JavaScript stack trace and, for an invalid
+    specification, the whole spec with its rows: tens of thousands of characters that
+    would go back to the model on the retry.
+
+    Args:
+        error (Exception): The error vl-convert raised.
+
+    Returns:
+        str: The message without the stack trace, its middle cut if still long.
+    """
+    lines = [
+        line for line in str(error).splitlines() if not line.lstrip().startswith("at ")
+    ]
+    message = "\n".join(lines).strip()
+    if len(message) > _COMPILE_ERROR_MAX_CHARS:
+        half = _COMPILE_ERROR_MAX_CHARS // 2
+        message = f"{message[:half]} … {message[-half:]}"
+    return message
+
+
 def _render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
     """Render a spec with rows and return what is wrong with the chart it draws.
 
@@ -989,7 +1015,7 @@ def _render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[s
         rendered = vlc.vegalite_to_scenegraph(json.dumps(render_spec))
     except Exception as e:
         # vl-convert raises on any spec the renderer rejects at build time
-        return [f"The chart spec does not compile: {e}"]
+        return [f"The chart spec does not compile: {_compile_error(e)}"]
 
     root = rendered["scenegraph"]
     if not any(group.get("items") for group in root.get("items") or []):

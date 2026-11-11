@@ -1004,6 +1004,16 @@ class TestRenderProblems:
 
         assert len(problems) == 1 and "compile" in problems[0]
 
+    def test_compile_error_leaves_out_the_spec_and_the_stack_trace(self):
+        """An invalid specification's error quotes the whole spec, rows included."""
+        rows = [{"ano": i, "total": i} for i in range(400)]
+
+        problems = _render_problems({"encoding": {"x": {"field": "ano"}}}, rows)
+
+        assert len(problems) == 1 and "Invalid specification" in problems[0]
+        assert "at least one of the following properties" in problems[0]
+        assert len(problems[0]) < 800 and "\n    at " not in problems[0]
+
     def test_undefined_text_is_rejected(self):
         """A misspelled field in a text expression shows "undefined" on the chart."""
         spec = {
