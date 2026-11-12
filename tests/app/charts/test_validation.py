@@ -100,7 +100,7 @@ class TestValidateChartSpec:
             "mark": "bar",
             "encoding": {"x": {"field": "ano"}, "y": {"field": "total"}},
         }
-        assert validate_chart_spec(spec, ["ano", "total"]) == []
+        assert validate_chart_spec(spec, ["ano", "total"], []) == []
 
     def test_layered_dual_axis_combo_is_valid(self):
         """A layer + resolve combo — the case the old allowlist could not express."""
@@ -118,13 +118,13 @@ class TestValidateChartSpec:
             "encoding": {"x": {"field": "ano", "type": "ordinal"}},
             "resolve": {"scale": {"y": "independent"}},
         }
-        assert validate_chart_spec(spec, ["ano", "media", "var"]) == []
+        assert validate_chart_spec(spec, ["ano", "media", "var"], []) == []
 
     def test_missing_column_flagged_across_layers(self):
         """A field not in the result, even nested in a layer — else it renders empty."""
         spec = {"layer": [{"mark": "bar", "encoding": {"x": {"field": "vendas"}}}]}
 
-        errors = validate_chart_spec(spec, ["ano", "total"])
+        errors = validate_chart_spec(spec, ["ano", "total"], [])
 
         assert any("vendas" in error for error in errors)
 
@@ -138,7 +138,7 @@ class TestValidateChartSpec:
                 "y": {"field": "dobro", "type": "quantitative"},
             },
         }
-        assert validate_chart_spec(spec, ["ano", "total"]) == []
+        assert validate_chart_spec(spec, ["ano", "total"], []) == []
 
     def test_fold_into_grouped_bars_is_valid(self):
         """A wide result folded into long form — the production spec this used to reject."""
@@ -163,7 +163,7 @@ class TestValidateChartSpec:
         }
         columns = ["ano", "remuneracao_media_homens", "remuneracao_media_mulheres"]
 
-        assert validate_chart_spec(spec, columns) == []
+        assert validate_chart_spec(spec, columns, []) == []
 
     def test_fold_default_output_names_are_valid(self):
         spec = {
@@ -176,7 +176,7 @@ class TestValidateChartSpec:
             },
         }
 
-        assert validate_chart_spec(spec, ["ano", "homens", "mulheres"]) == []
+        assert validate_chart_spec(spec, ["ano", "homens", "mulheres"], []) == []
 
     def test_pivot_output_fields_are_not_flagged(self):
         """A pivot's new columns are named after data values, unknown from the spec."""
@@ -189,7 +189,7 @@ class TestValidateChartSpec:
             },
         }
 
-        assert validate_chart_spec(spec, ["ano", "sexo", "total"]) == []
+        assert validate_chart_spec(spec, ["ano", "sexo", "total"], []) == []
 
     def test_missing_column_still_flagged_alongside_a_fold(self):
         spec = {
@@ -201,7 +201,7 @@ class TestValidateChartSpec:
             },
         }
 
-        errors = validate_chart_spec(spec, ["ano", "homens", "mulheres"])
+        errors = validate_chart_spec(spec, ["ano", "homens", "mulheres"], [])
 
         assert any("remuneracao" in error for error in errors)
 
@@ -209,7 +209,7 @@ class TestValidateChartSpec:
         """A structurally invalid spec is caught by the vl-convert compile step."""
         spec = {"mark": "notamark", "encoding": {"x": {"field": "ano"}}}
 
-        errors = validate_chart_spec(spec, ["ano"])
+        errors = validate_chart_spec(spec, ["ano"], [])
 
         assert any("compile" in error for error in errors)
 
@@ -227,14 +227,14 @@ class TestValidateChartSpec:
             },
         }
 
-        assert validate_chart_spec(spec, ["ano", "total"]) == []
+        assert validate_chart_spec(spec, ["ano", "total"], []) == []
 
     def test_rows_are_rendered_and_their_problems_returned(self):
         spec = line_spec(
             color={"field": "sigla_uf", "type": "nominal", "scale": {"scheme": "RdBu"}}
         )
 
-        assert validate_chart_spec(spec, ROW_COLUMNS) == []  # builds without rows
+        assert validate_chart_spec(spec, ROW_COLUMNS, []) == []  # builds without rows
         errors = validate_chart_spec(spec, ROW_COLUMNS, rows=ROWS)
 
         assert errors == [NO_MARKS_PROBLEM]
@@ -308,4 +308,4 @@ class TestValidateChartSpec:
 
     def test_choropleth_spec_is_valid(self):
         """A choropleth compiles (real geometry) and its geo properties are allowed."""
-        assert validate_chart_spec(choropleth_spec(), ["sigla_uf", "valor"]) == []
+        assert validate_chart_spec(choropleth_spec(), ["sigla_uf", "valor"], []) == []

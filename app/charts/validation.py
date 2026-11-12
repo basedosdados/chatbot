@@ -45,23 +45,22 @@ def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set
 def validate_chart_spec(
     spec: dict[str, Any],
     columns: list[str],
-    rows: list[dict[str, Any]] | None = None,
+    rows: list[dict[str, Any]],
 ) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
 
     Args:
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
-        rows (list[dict[str, Any]] | None): The result rows. Integer years are looked
-            for in all of them, and the chart is rendered with them (an even spread of
-            `_VALIDATION_MAX_ROWS`, for a larger result). None renders it with no
-            data, which checks only that it builds.
+        rows (list[dict[str, Any]]): The result rows. Integer years are looked for in
+            all of them, and the chart is rendered with them (an even spread of
+            `_VALIDATION_MAX_ROWS`, for a larger result). With no rows, only that the
+            chart builds is checked.
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
     """
     errors: list[str] = []
-    rows = rows or []
 
     referenced = collect(spec, "field")
     derived = collect_derived_fields(spec)
