@@ -8,12 +8,8 @@ from pydantic import BaseModel, Field
 
 from app.charts.binding import sanitize_chart_spec
 from app.charts.config import apply_server_config
-from app.charts.prompts import (
-    CHART_SPEC_INSTRUCTIONS,
-    chart_spec_user_prompt,
-    profile_result,
-)
-from app.charts.validation import integer_year_columns, validate_chart_spec
+from app.charts.prompts import CHART_SPEC_INSTRUCTIONS, chart_spec_user_prompt
+from app.charts.validation import validate_chart_spec
 from app.i18n import LanguageCode
 from app.settings import settings
 
@@ -79,8 +75,6 @@ async def _generate_chart_spec(
     Raises:
         ChartSpecInvalid: No attempt produced a spec that validates.
     """
-    data_profile = profile_result(columns, rows)
-    year_columns = frozenset(integer_year_columns(list(columns), rows))
     previous_spec: dict[str, Any] | None = None
     errors: list[str] = []
 
@@ -90,7 +84,7 @@ async def _generate_chart_spec(
                 SystemMessage(CHART_SPEC_INSTRUCTIONS),
                 HumanMessage(
                     chart_spec_user_prompt(
-                        instructions, language, data_profile, previous_spec, errors
+                        instructions, language, columns, rows, previous_spec, errors
                     )
                 ),
             ]
@@ -108,7 +102,7 @@ async def _generate_chart_spec(
             # what it wrote.
             chart = apply_server_config(spec, language)
             errors = await asyncio.to_thread(
-                validate_chart_spec, chart, list(columns), year_columns, rows
+                validate_chart_spec, chart, list(columns), rows
             )
             if not errors:
                 return chart

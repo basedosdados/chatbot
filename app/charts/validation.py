@@ -19,7 +19,7 @@ _YEAR_RANGE = range(1000, 3001)
 _VALIDATION_MAX_ROWS = 500
 
 
-def integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[str]:
+def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[str]:
     """Find the columns whose every non-null value is a whole-number calendar year.
 
     Args:
@@ -45,7 +45,6 @@ def integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set[
 def validate_chart_spec(
     spec: dict[str, Any],
     columns: list[str],
-    year_columns: frozenset[str] = frozenset(),
     rows: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Return the reasons a spec would not render a correct chart (empty if valid).
@@ -53,15 +52,16 @@ def validate_chart_spec(
     Args:
         spec (dict[str, Any]): The candidate spec (already sanitized).
         columns (list[str]): The result's real column names.
-        year_columns (frozenset[str]): Columns holding whole-number years (see `integer_year_columns`).
-        rows (list[dict[str, Any]] | None): The result rows the chart is rendered with
-            (an even spread of `_VALIDATION_MAX_ROWS` of them, for a larger result);
-            None renders it with no data, which checks only that it builds.
+        rows (list[dict[str, Any]] | None): The result rows. Integer years are looked
+            for in all of them, and the chart is rendered with them (an even spread of
+            `_VALIDATION_MAX_ROWS`, for a larger result). None renders it with no
+            data, which checks only that it builds.
 
     Returns:
         list[str]: Human-readable problems to feed back to the generator; empty if valid.
     """
     errors: list[str] = []
+    rows = rows or []
 
     referenced = collect(spec, "field")
     derived = collect_derived_fields(spec)
@@ -85,7 +85,8 @@ def validate_chart_spec(
     # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
     # as `ano`) is a real date by then, so it is not flagged.
     temporal_years = sorted(
-        (collect_temporal_fields(spec) & year_columns) - collect_calculated_fields(spec)
+        (collect_temporal_fields(spec) & _integer_year_columns(columns, rows))
+        - collect_calculated_fields(spec)
     )
     if temporal_years:
         errors.append(
@@ -95,7 +96,6 @@ def validate_chart_spec(
             'with `"axis": {"format": "d"}` instead.'
         )
 
-    rows = rows or []
     sample = spread_sample(rows, _VALIDATION_MAX_ROWS)
     problems = render_problems(spec, sample)
     if NO_MARKS_PROBLEM in problems and len(sample) < len(rows):

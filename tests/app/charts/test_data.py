@@ -17,7 +17,7 @@ from app.charts.data import (
     fetch_chart_data,
     spread_sample,
 )
-from app.charts.validation import integer_year_columns
+from app.charts.validation import _integer_year_columns
 from app.db.models import QueryHandle
 from app.exports import ResultTableExpired
 
@@ -100,7 +100,7 @@ class TestFetchRows:
         """A whole-number Decimal becomes an int, not a float.
 
         A NUMERIC year (`Decimal("2019")`) must arrive as 2019, not 2019.0,
-        or `integer_year_columns` would not recognize the column as years.
+        or `_integer_year_columns` would not recognize the column as years.
         """
         rows = [{"ano": Decimal("2019"), "total": Decimal("10.00")}]
         client = self._client(rows, columns=("ano", "total"))
@@ -110,7 +110,7 @@ class TestFetchRows:
 
         assert got == [{"ano": 2019, "total": 10}]
         assert all(isinstance(value, int) for value in got[0].values())
-        assert integer_year_columns(list(columns), got) == {"ano"}
+        assert _integer_year_columns(list(columns), got) == {"ano"}
 
     def test_missing_table_maps_to_expired(self, mocker):
         client = MagicMock()

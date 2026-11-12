@@ -43,7 +43,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: []
+            lambda spec, columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["bad column"],
         )
@@ -55,24 +55,6 @@ class TestGenerateChartSpec:
         assert result["encoding"] == good["encoding"]
         assert model.ainvoke.await_count == 2
 
-    async def test_year_columns_are_detected_from_all_rows(self, monkeypatch):
-        """The year check sees every row, not just the sample shown to the model."""
-        spec = {"mark": "bar", "encoding": {"x": {"field": "ano"}}}
-        self._model(monkeypatch, _structured_reply(spec))
-        seen = []
-        monkeypatch.setattr(
-            generation,
-            "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: seen.append(year_columns) or [],
-        )
-        rows = [{"ano": 2000 + i, "n": 1} for i in range(10)] + [{"ano": 1, "n": 1}]
-
-        await generate_chart_spec(
-            {"ano": "INTEGER", "n": "INTEGER"}, rows, "a bar chart", "pt"
-        )
-
-        assert seen == [frozenset()]  # the 11th row is not a year, so `ano` is not one
-
     async def test_spec_is_validated_and_returned_with_the_server_config(
         self, monkeypatch
     ):
@@ -83,7 +65,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: seen.append((spec, rows)) or [],
+            lambda spec, columns, rows: seen.append((spec, rows)) or [],
         )
         rows = [{"ano": 2025}]
 
@@ -122,7 +104,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: []
+            lambda spec, columns, rows: []
             if spec["encoding"] == good["encoding"]
             else ["column 'nope' is not in the result"],
         )
@@ -144,7 +126,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: [],
+            lambda spec, columns, rows: [],
         )
 
         await generate_chart_spec(
@@ -167,7 +149,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: [],
+            lambda spec, columns, rows: [],
         )
 
         result = await generate_chart_spec(
@@ -186,7 +168,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: [],
+            lambda spec, columns, rows: [],
         )
 
         result = await generate_chart_spec(
@@ -223,7 +205,7 @@ class TestGenerateChartSpec:
         monkeypatch.setattr(
             generation,
             "validate_chart_spec",
-            lambda spec, columns, year_columns, rows: ["always bad"],
+            lambda spec, columns, rows: ["always bad"],
         )
 
         with pytest.raises(ChartSpecInvalid):

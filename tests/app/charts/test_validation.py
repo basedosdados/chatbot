@@ -3,7 +3,7 @@ from app.charts.data import spread_sample
 from app.charts.rendering import NO_MARKS_PROBLEM
 from app.charts.validation import (
     _VALIDATION_MAX_ROWS,
-    integer_year_columns,
+    _integer_year_columns,
     validate_chart_spec,
 )
 from tests.app.charts.specs import ROW_COLUMNS, ROWS, choropleth_spec, line_spec
@@ -28,10 +28,14 @@ class TestIntegerYearColumns:
             },
         ]
 
-        assert integer_year_columns(list(rows[0]), rows) == {"ano"}
+        assert _integer_year_columns(list(rows[0]), rows) == {"ano"}
 
     def test_an_all_null_column_is_not_a_year(self):
-        assert integer_year_columns(["ano"], [{"ano": None}]) == set()
+        assert _integer_year_columns(["ano"], [{"ano": None}]) == set()
+
+
+# Rows whose `ano` holds whole-number years.
+YEAR_ROWS = [{"ano": 2020, "total": 1.5}, {"ano": 2021, "total": 2.5}]
 
 
 class TestValidateChartSpec:
@@ -47,9 +51,7 @@ class TestValidateChartSpec:
             },
         }
 
-        errors = validate_chart_spec(
-            spec, ["ano", "total"], year_columns=frozenset({"ano"})
-        )
+        errors = validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS)
 
         assert any("ano" in error and "temporal" in error for error in errors)
         assert not any("compile" in error for error in errors)
@@ -63,10 +65,7 @@ class TestValidateChartSpec:
             },
         }
 
-        assert (
-            validate_chart_spec(spec, ["ano", "total"], year_columns=frozenset({"ano"}))
-            == []
-        )
+        assert validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS) == []
 
     def test_year_converted_to_a_date_in_place_passes(self):
         """A `calculate` that rewrites the year as a date under its own name is valid."""
@@ -79,10 +78,7 @@ class TestValidateChartSpec:
             },
         }
 
-        assert (
-            validate_chart_spec(spec, ["ano", "total"], year_columns=frozenset({"ano"}))
-            == []
-        )
+        assert validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS) == []
 
     def test_year_time_unit_transform_in_place_is_rejected(self):
         """A `timeUnit` transform still reads the integer year as epoch milliseconds."""
@@ -95,9 +91,7 @@ class TestValidateChartSpec:
             },
         }
 
-        errors = validate_chart_spec(
-            spec, ["ano", "total"], year_columns=frozenset({"ano"})
-        )
+        errors = validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS)
 
         assert any("ano" in error and "temporal" in error for error in errors)
 
@@ -257,6 +251,25 @@ class TestValidateChartSpec:
         assert validate_chart_spec({"mark": "bar"}, ["ano", "total"], rows=rows) == []
         assert [len(r) for r in rendered] == [_VALIDATION_MAX_ROWS]
         assert rendered[0][0] == rows[0] and rendered[0][-1] == rows[-1]
+
+    def test_integer_years_are_looked_for_in_every_row(self):
+        """A column is a year column only if every row holds a year, not just the
+        rows the chart is rendered with."""
+        rows = [{"ano": 2020, "total": i} for i in range(_VALIDATION_MAX_ROWS * 3)]
+        rows[7] = {"ano": 1, "total": 7}  # not a year, and not in the sample
+        spec = {
+            "mark": "point",
+            "encoding": {
+                "x": {"field": "ano", "type": "temporal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        assert spread_sample(rows, _VALIDATION_MAX_ROWS).count(rows[7]) == 0
+        assert not any(
+            "integer years" in e
+            for e in validate_chart_spec(spec, ["ano", "total"], rows)
+        )
 
     def test_filter_keeping_rows_the_sample_misses_passes(self):
         """A sample with none of the rows a filter keeps draws no marks; every row

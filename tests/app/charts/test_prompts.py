@@ -1,20 +1,30 @@
-from app.charts.prompts import _summarize_column, chart_spec_user_prompt, profile_result
+from app.charts.prompts import (
+    _profile_result,
+    _summarize_column,
+    chart_spec_user_prompt,
+)
 
 
 class TestChartSpecUserPrompt:
     def test_carries_task_data_on_the_first_attempt(self):
-        prompt = chart_spec_user_prompt(
-            "a bar chart", "pt", "Rows: 1 ... ano ... total", None, []
-        )
+        columns = {"ano": "INTEGER", "total": "FLOAT"}
+        rows = [{"ano": 2024, "total": 1.5}, {"ano": 2025, "total": 2.5}]
+
+        prompt = chart_spec_user_prompt("a bar chart", "pt", columns, rows, None, [])
 
         assert "a bar chart" in prompt
         assert "Portuguese" in prompt
-        assert "ano" in prompt and "total" in prompt
+        assert _profile_result(columns, rows) in prompt  # the profile, built here
         assert "rejected" not in prompt  # no retry feedback on the first attempt
 
     def test_echoes_the_rejected_spec_and_errors_on_retry(self):
         prompt = chart_spec_user_prompt(
-            "a bar chart", "en", "Rows: 1", {"mark": "nope"}, ["bad column"]
+            "a bar chart",
+            "en",
+            {"ano": "INTEGER"},
+            [{"ano": 2025}],
+            {"mark": "nope"},
+            ["bad column"],
         )
 
         assert '"nope"' in prompt  # the model's own rejected spec, echoed back
@@ -49,7 +59,7 @@ class TestSummarizeColumn:
         summary = _summarize_column("STRING", [f"m{i:04d}" for i in range(5570)])
 
         assert summary["distinct"] == 5570
-        assert summary["examples"] == ["m0000", "m0001", "m0002"]
+        assert summary["examples"] == ["m0000", "m0001", "m0002", "m0003"]
         assert "values" not in summary
 
     def test_booleans_are_listed_not_ranged(self):
@@ -69,7 +79,7 @@ class TestProfileResult:
     def test_carries_row_count_types_summary_and_sample(self):
         rows = [{"uf": "SP", "valor": 1}, {"uf": "MG", "valor": 3}]
 
-        profile = profile_result({"uf": "STRING", "valor": "INTEGER"}, rows)
+        profile = _profile_result({"uf": "STRING", "valor": "INTEGER"}, rows)
 
         assert "Rows: 2" in profile
         assert '"type": "STRING"' in profile and '"type": "INTEGER"' in profile

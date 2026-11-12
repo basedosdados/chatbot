@@ -212,7 +212,7 @@ def _summarize_column(bq_type: str, values: list[Any]) -> dict[str, Any]:
     return summary
 
 
-def profile_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
+def _profile_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
     """Profile a result for the spec generator: size, column summaries, and a sample.
 
     Args:
@@ -239,7 +239,8 @@ def profile_result(columns: dict[str, str], rows: list[dict[str, Any]]) -> str:
 def chart_spec_user_prompt(
     instructions: str,
     language: LanguageCode,
-    data_profile: str,
+    columns: dict[str, str],
+    rows: list[dict[str, Any]],
     previous_spec: dict[str, Any] | None,
     errors: list[str],
 ) -> str:
@@ -251,7 +252,9 @@ def chart_spec_user_prompt(
     Args:
         instructions (str): What to chart and how, in natural language.
         language (LanguageCode): The language of the chart's text (the user's language).
-        data_profile (str): The result's size, column summaries and sample rows.
+        columns (dict[str, str]): The result's columns mapped to their BigQuery types.
+        rows (list[dict[str, Any]]): The result rows; the message carries their
+            profile (size, column summaries and a sample), not the rows themselves.
         previous_spec (dict[str, Any] | None): The last rejected spec, echoed back on a retry.
         errors (list[str]): The reasons the previous spec was rejected; empty on the first try.
 
@@ -261,7 +264,7 @@ def chart_spec_user_prompt(
     prompt = (
         f"What to chart and how:\n{instructions}\n"
         f"Language of the chart's text: {language_name(language)}\n\n"
-        f"Data profile:\n{data_profile}"
+        f"Data profile:\n{_profile_result(columns, rows)}"
     )
 
     if errors:
