@@ -1,13 +1,16 @@
 import json
 
+import pytest
 import vl_convert as vlc
 
 from app.charts.rendering import (
     _BRAZIL_STATES,
     NO_MARKS_PROBLEM,
     _collect_marks,
+    _contrast,
     _geo_stub_ids,
     _geo_stub_node,
+    _parse_color,
     _rendered_text,
     render_problems,
 )
@@ -399,3 +402,198 @@ class TestRenderProblems:
         ]
 
         assert render_problems(spec, rows) == []
+
+
+def _bar_spec(**overrides) -> dict:
+    """One bar per year for one state, with whatever the test changes."""
+    return {
+        "transform": [{"filter": "datum.sigla_uf == 'SP'"}],
+        "mark": "bar",
+        "encoding": {
+            "x": {"field": "ano", "type": "ordinal"},
+            "y": {"field": "total", "type": "quantitative"},
+        },
+        **overrides,
+    }
+
+
+def _labeled_bars(text_mark: dict, **overrides) -> dict:
+    """The bars of `_bar_spec` with a text layer of each bar's value."""
+    encoding = _bar_spec()["encoding"]
+    return {
+        "transform": [{"filter": "datum.sigla_uf == 'SP'"}],
+        "encoding": encoding,
+        "layer": [
+            {"mark": "bar"},
+            {
+                "mark": {"type": "text", **text_mark},
+                "encoding": {"text": {"field": "total", "type": "quantitative"}},
+            },
+        ],
+        **overrides,
+    }
+
+
+class TestChartSize:
+    def test_facet_far_wider_than_the_panel_is_rejected(self):
+        """A facet does not shrink to its container: nine 300-pixel panels in a row."""
+        spec = {
+            "facet": {"column": {"field": "ano", "type": "ordinal"}},
+            "spec": {
+                "width": 300,
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "sigla_uf", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        }
+
+        problems = render_problems(spec, ROWS)
+
+        assert len(problems) == 1 and "pixels wide" in problems[0]
+
+    def test_facet_wrapped_into_the_panel_passes(self):
+        spec = {
+            "facet": {"field": "ano", "type": "ordinal"},
+            "columns": 3,
+            "spec": {
+                "width": 130,
+                "height": 100,
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "sigla_uf", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        }
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_chart_several_screens_tall_is_rejected(self):
+        spec = {
+            "facet": {"row": {"field": "ano", "type": "ordinal"}},
+            "spec": {
+                "height": 300,
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "sigla_uf", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        }
+
+        problems = render_problems(spec, ROWS)
+
+        assert len(problems) == 1 and "pixels tall" in problems[0]
+
+    def test_plot_area_squeezed_into_a_strip_is_rejected(self):
+        """The chart is fitted to its `height`, axes included, so little is left to plot in."""
+        problems = render_problems(_bar_spec(height=70), ROWS)
+
+        assert len(problems) == 1 and "A plot area is only" in problems[0]
+
+    def test_short_but_readable_plot_area_passes(self):
+        assert render_problems(_bar_spec(height=160), ROWS) == []
+
+
+class TestTextContrast:
+    def test_white_labels_on_the_white_panel_are_rejected(self):
+        spec = _labeled_bars({"color": "white", "dy": -8})
+
+        problems = render_problems(spec, ROWS)
+
+        assert (
+            len(problems) == 1 and "A text mark's labels cannot be read" in problems[0]
+        )
+
+    def test_white_labels_inside_the_bars_pass(self):
+        spec = _labeled_bars({"color": "white", "dy": 12, "baseline": "middle"})
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_dark_labels_on_the_white_panel_pass(self):
+        assert render_problems(_labeled_bars({"dy": -8}), ROWS) == []
+
+    def test_default_text_on_a_dark_background_is_rejected(self):
+        """A dark `background` hides the title and the axes unless they get a color."""
+        spec = _bar_spec(title="Total por ano", background="#1f1f1f")
+
+        problems = render_problems(spec, ROWS)
+
+        assert {problem.split(" cannot")[0] for problem in problems} == {
+            "The title",
+            "An axis's labels",
+            "An axis's title",
+        }
+
+    def test_dark_background_with_light_text_passes(self):
+        light = {"labelColor": "white", "titleColor": "#eee"}
+        spec = _bar_spec(
+            title={"text": "Total por ano", "color": "white"},
+            background="#1f1f1f",
+            config={"axis": light},
+        )
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_dark_subtitle_on_a_dark_background_is_rejected(self):
+        light = {"labelColor": "white", "titleColor": "white"}
+        spec = _bar_spec(
+            title={"text": "Total", "color": "white", "subtitle": "Por ano"},
+            background="black",
+            config={"axis": light},
+        )
+
+        problems = render_problems(spec, ROWS)
+
+        assert len(problems) == 1 and problems[0].startswith("The subtitle cannot")
+
+    def test_white_labels_over_a_map_are_not_judged(self):
+        """A label on a state is on its shape, whose outline the scenegraph does not give."""
+        spec = choropleth_spec()
+        del spec["mark"], spec["encoding"]
+        spec["layer"] = [
+            {
+                "mark": "geoshape",
+                "encoding": {"color": {"field": "valor", "type": "quantitative"}},
+            },
+            {
+                "transform": [
+                    {"calculate": "geoCentroid(null, datum)[0]", "as": "lon"},
+                    {"calculate": "geoCentroid(null, datum)[1]", "as": "lat"},
+                ],
+                "mark": {"type": "text", "color": "white"},
+                "encoding": {
+                    "longitude": {"field": "lon", "type": "quantitative"},
+                    "latitude": {"field": "lat", "type": "quantitative"},
+                    "text": {"field": "id", "type": "nominal"},
+                },
+            },
+        ]
+        rows = [{"sigla_uf": "SP", "valor": 1}, {"sigla_uf": "RJ", "valor": 2}]
+
+        assert render_problems(spec, rows) == []
+
+
+class TestParseColor:
+    @pytest.mark.parametrize(
+        ("value", "color"),
+        [
+            ("white", (255, 255, 255)),
+            ("#000", (0, 0, 0)),
+            ("#1F77b4", (31, 119, 180)),
+            ("rgb(10, 20, 30)", (10, 20, 30)),
+            ("rgba(10,20,30,0.5)", (10, 20, 30)),
+            ("transparent", None),
+            ("rebeccapurple", None),
+            ({"gradient": "linear"}, None),
+            (None, None),
+        ],
+    )
+    def test_parses_plain_colors_only(self, value, color):
+        assert _parse_color(value) == color
+
+    def test_contrast_runs_from_the_same_color_to_black_on_white(self):
+        assert _contrast((255, 255, 255), (255, 255, 255)) == 1
+        assert round(_contrast((0, 0, 0), (255, 255, 255))) == 21
