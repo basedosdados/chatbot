@@ -1,16 +1,15 @@
-"""The Vega-Lite `config` the server sets on every chart: locale and tooltips."""
-
 from typing import Any
 
 from app.i18n import LanguageCode
 
-# Number and date formats per language, set on every chart (see `_server_config`).
+# Number formats per language, set on every chart (see `_server_config`).
 _NUMBER_LOCALES: dict[LanguageCode, dict[str, Any]] = {
     "pt": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["R$ ", ""]},
     "es": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["$", ""]},
     "en": {"decimal": ".", "thousands": ",", "grouping": [3], "currency": ["$", ""]},
 }
 
+# Datetime formats per language, set on every chart (see `_server_config`).
 _TIME_LOCALES: dict[LanguageCode, dict[str, Any]] = {
     "pt": {
         "dateTime": "%A, %e de %B de %Y. %X",

@@ -1,5 +1,3 @@
-"""The data a spec may reference: sanitizing it, and binding the real data in."""
-
 from collections.abc import Callable
 from typing import Any
 
@@ -34,6 +32,26 @@ _RESULT_SOURCE = "query_result"
 _ALLOWED_SOURCES = frozenset({_RESULT_SOURCE, *GEO_ASSETS})
 
 
+def _geo_url_node(name: str) -> dict[str, Any]:
+    """Build a Vega-Lite TopoJSON data node that points at the geometry by URL.
+
+    The URL is the website's static path for the file; the browser fetches (and caches) the
+    ~megabytes of geometry directly, so it never inflates the spec, the SSE payload, or the
+    persisted `events`.
+
+    Args:
+        name (str): A geo source name from `GEO_ASSETS` (e.g. "brazil_states").
+
+    Returns:
+        dict[str, Any]: The `data` node — a topojson `url` plus its topojson `format`.
+    """
+    asset = GEO_ASSETS[name]
+    return {
+        "url": f"{settings.GEO_ASSET_URL_BASE.rstrip('/')}/{asset['file']}",
+        "format": {"type": "topojson", "feature": asset["feature"]},
+    }
+
+
 def sanitize_chart_spec(node: JsonValue) -> JsonValue:
     """Sanitize a model spec: drop untrusted keys, keep only allowlisted named sources.
 
@@ -66,26 +84,6 @@ def sanitize_chart_spec(node: JsonValue) -> JsonValue:
     if isinstance(node, list):
         return [sanitize_chart_spec(item) for item in node]
     return node
-
-
-def _geo_url_node(name: str) -> dict[str, Any]:
-    """Build a Vega-Lite TopoJSON data node that points at the geometry by URL.
-
-    The URL is the website's static path for the file; the browser fetches (and caches) the
-    ~megabytes of geometry directly, so it never inflates the spec, the SSE payload, or the
-    persisted `events`.
-
-    Args:
-        name (str): A geo source name from `GEO_ASSETS` (e.g. "brazil_states").
-
-    Returns:
-        dict[str, Any]: The `data` node — a topojson `url` plus its topojson `format`.
-    """
-    asset = GEO_ASSETS[name]
-    return {
-        "url": f"{settings.GEO_ASSET_URL_BASE.rstrip('/')}/{asset['file']}",
-        "format": {"type": "topojson", "feature": asset["feature"]},
-    }
 
 
 def resolve_named_data(

@@ -1,5 +1,3 @@
-"""Rendering a spec with rows, and what is wrong with the chart it draws."""
-
 import json
 import math
 import re
@@ -44,8 +42,8 @@ _MISSING_VALUE_TEXT = re.compile(r"\b(?:undefined|NaN|Infinity)\b")
 
 # What a drawn item of each mark type carries in the scenegraph: at least one of these.
 # An encoding that fails on the real rows (an invalid format, an unknown scheme, a broken
-# expression) stops before the item gets any, so it is drawn nowhere. A position the
-# spec does not encode (e.g. a bar with only `y`) is legitimately absent.
+# expression) stops before the item gets any, so it is drawn nowhere. A position the spec
+# does not encode (e.g. a bar with only `y`) is legitimately absent.
 _DRAWN_ITEM_KEYS = {"shape": {"shape"}, "text": {"text"}}
 
 _DRAWN_ITEM_DEFAULT_KEYS = {"x", "y"}
@@ -172,8 +170,8 @@ def _compile_error(error: Exception) -> str:
     """Return a compile error's message without what the generator cannot use.
 
     vl-convert's message carries a JavaScript stack trace and, for an invalid
-    specification, the whole spec with its rows: tens of thousands of characters that
-    would go back to the model on the retry.
+    specification, the whole spec with its rows: tens of thousands of characters
+    that would go back to the model on the retry.
 
     Args:
         error (Exception): The error vl-convert raised.
@@ -307,10 +305,10 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
         elif not labels and drawn:
             problems.append(
                 "An axis has no tick labels with the result's rows: its scale has no valid "
-                "domain, or the values fall far outside it (e.g. a log scale over zero "
-                "or negative values, a fixed `domain` that does not fit the values, "
-                "series in different units on one scale, or values that are not valid "
-                "dates or numbers). Fix that axis's scale."
+                "domain, or the values fall far outside it (e.g. a log scale over zero or "
+                "negative values, a fixed `domain` that does not fit the values, series "
+                "in different units on one scale, or values that are not valid dates "
+                "or numbers). Fix that axis's scale."
             )
 
     return problems
