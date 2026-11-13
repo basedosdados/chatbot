@@ -1,3 +1,5 @@
+import pytest
+
 from app.charts import validation
 from app.charts.data import spread_sample
 from app.charts.rendering import NO_MARKS_PROBLEM
@@ -79,6 +81,21 @@ class TestValidateChartSpec:
         }
 
         assert validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS) == []
+
+    def test_year_rewritten_in_place_but_not_as_a_date_is_rejected(self):
+        """A `calculate` under the year's own name that leaves it a number still collapses."""
+        spec = {
+            "mark": "line",
+            "transform": [{"calculate": "toDate(datum.ano)", "as": "ano"}],
+            "encoding": {
+                "x": {"field": "ano", "type": "temporal"},
+                "y": {"field": "total", "type": "quantitative"},
+            },
+        }
+
+        errors = validate_chart_spec(spec, ["ano", "total"], rows=YEAR_ROWS)
+
+        assert any("ano" in error and "temporal" in error for error in errors)
 
     def test_year_time_unit_transform_in_place_is_rejected(self):
         """A `timeUnit` transform still reads the integer year as epoch milliseconds."""
@@ -305,6 +322,63 @@ class TestValidateChartSpec:
 
         assert errors == ["shows 'undefined' as text"]
         assert rendered == [_VALIDATION_MAX_ROWS]
+
+    @pytest.mark.parametrize("field", ["id", "properties.name"])
+    def test_geo_fields_are_flagged_outside_a_map(self, field):
+        """`id` and `properties.*` are only the geometry's fields when a spec reads one."""
+        spec = line_spec(tooltip=[{"field": field, "type": "nominal"}])
+
+        errors = validate_chart_spec(spec, ROW_COLUMNS, rows=[])
+
+        assert any(field in error and "not in the result" in error for error in errors)
+
+    def test_geo_fields_are_allowed_in_a_layered_map(self):
+        """A text layer over a geoshape shares its geometry, and so its fields."""
+        spec = choropleth_spec()
+        del spec["mark"], spec["encoding"]
+        spec["layer"] = [
+            {
+                "mark": {"type": "geoshape", "stroke": "white"},
+                "encoding": {"color": {"field": "valor", "type": "quantitative"}},
+            },
+            {
+                "transform": [
+                    {"calculate": "geoCentroid(null, datum)[0]", "as": "lon"},
+                    {"calculate": "geoCentroid(null, datum)[1]", "as": "lat"},
+                ],
+                "mark": "text",
+                "encoding": {
+                    "longitude": {"field": "lon", "type": "quantitative"},
+                    "latitude": {"field": "lat", "type": "quantitative"},
+                    "text": {"field": "id", "type": "nominal"},
+                    "tooltip": [{"field": "properties.name", "type": "nominal"}],
+                },
+            },
+        ]
+
+        assert validate_chart_spec(spec, ["sigla_uf", "valor"], []) == []
+
+    def test_geo_fields_are_allowed_in_a_map_without_a_geoshape(self):
+        """Points at the features' centroids read the geometry without drawing its shapes."""
+        spec = {
+            "data": {"name": "brazil_states"},
+            "transform": [
+                {"calculate": "geoCentroid(null, datum)[0]", "as": "lon"},
+                {"calculate": "geoCentroid(null, datum)[1]", "as": "lat"},
+            ],
+            "projection": {"type": "mercator"},
+            "mark": "circle",
+            "encoding": {
+                "longitude": {"field": "lon", "type": "quantitative"},
+                "latitude": {"field": "lat", "type": "quantitative"},
+                "tooltip": [
+                    {"field": "id", "type": "nominal"},
+                    {"field": "properties.name", "type": "nominal"},
+                ],
+            },
+        }
+
+        assert validate_chart_spec(spec, ["sigla_uf", "valor"], []) == []
 
     def test_choropleth_spec_is_valid(self):
         """A choropleth compiles (real geometry) and its geo properties are allowed."""

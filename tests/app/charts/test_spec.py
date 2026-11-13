@@ -1,6 +1,11 @@
 import pytest
 
-from app.charts.spec import collect, collect_derived_fields, collect_temporal_fields
+from app.charts.spec import (
+    collect,
+    collect_date_calculated_fields,
+    collect_derived_fields,
+    collect_temporal_fields,
+)
 
 
 class TestCollect:
@@ -81,3 +86,43 @@ class TestCollectTemporalFields:
         }
 
         assert collect_temporal_fields(spec) == {"ano", "mes", "data_tu"}
+
+
+class TestCollectDateCalculatedFields:
+    # Each expression was rendered with integer years in `ano` (vl-convert): these drew
+    # the years on a time axis, the others drew them as epoch milliseconds or not at all.
+    @pytest.mark.parametrize(
+        ("expression", "writes_a_date"),
+        [
+            ("datetime(datum.ano, 0, 1)", True),
+            ("utc(datum.ano, 0, 1)", True),
+            ("time(datetime(datum.ano, 0, 1))", True),
+            ("timeParse(toString(datum.ano), '%Y')", True),
+            ("utcParse(toString(datum.ano), '%Y')", True),
+            ("toDate(toString(datum.ano))", True),
+            ("toDate(datum.ano + '-01-01')", True),
+            ("toDate(datum.ano)", False),
+            ("toDate(datum['ano'])", False),
+            ("toString(datum.ano)", False),
+            ("datum.ano + '-01-01'", False),
+            ("datum.ano + 0", False),
+            ("utcyear(datum.ano)", False),
+        ],
+    )
+    def test_counts_only_expressions_that_write_a_date(self, expression, writes_a_date):
+        spec = {"transform": [{"calculate": expression, "as": "ano"}]}
+
+        assert collect_date_calculated_fields(spec) == (
+            {"ano"} if writes_a_date else set()
+        )
+
+    def test_collects_across_layers_and_ignores_other_transforms(self):
+        spec = {
+            "transform": [{"timeUnit": "year", "field": "data", "as": "a"}],
+            "layer": [
+                {"transform": [{"calculate": "datetime(datum.ano, 0, 1)", "as": "b"}]},
+                {"transform": [{"calculate": "datum.total * 2", "as": "c"}]},
+            ],
+        }
+
+        assert collect_date_calculated_fields(spec) == {"b"}

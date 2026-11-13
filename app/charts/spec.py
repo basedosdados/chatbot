@@ -1,4 +1,4 @@
-"""Reading a spec: the fields it references, creates and treats as dates."""
+import re
 
 from pydantic import JsonValue
 
@@ -8,6 +8,13 @@ _DEFAULT_TRANSFORM_OUTPUTS = {
     "density": ("value", "density"),
     "quantile": ("prob", "value"),
 }
+
+# A call in a Vega expression that yields a real date from an integer year: one that
+# builds or parses a date, or a `toDate` of anything but a bare field.
+_DATE_EXPRESSION = re.compile(
+    r"\b(?:datetime|utc|timeParse|utcParse)\s*\("
+    r"|\btoDate\s*\((?!\s*datum(?:\.\w+|\[[^\]]*\])\s*\))"
+)
 
 
 def collect(node: JsonValue, key: str) -> set[str]:
@@ -93,22 +100,32 @@ def collect_temporal_fields(node: JsonValue) -> set[str]:
     return found
 
 
-def collect_calculated_fields(node: JsonValue) -> set[str]:
-    """Collect every field a `calculate` transform writes, anywhere within a spec.
+def collect_date_calculated_fields(node: JsonValue) -> set[str]:
+    """Collect every field a `calculate` transform writes as a date, anywhere within a spec.
+
+    An expression writes a date when it builds one (`datetime`, `utc`), parses one from
+    a string (`timeParse`, `utcParse`) or converts anything but a bare field with
+    `toDate`: `toDate(datum.ano)` reads an integer year as epoch milliseconds.
 
     Args:
         node (JsonValue): A spec, or any node within it, to walk.
 
     Returns:
-        set[str]: Every `as` name of a `calculate` transform.
+        set[str]: Every `as` name of a `calculate` transform whose expression writes a date.
     """
     found: set[str] = set()
     if isinstance(node, dict):
-        if "calculate" in node and isinstance(node.get("as"), str):
-            found.add(node["as"])
+        expression = node.get("calculate")
+        output = node.get("as")
+        if (
+            isinstance(expression, str)
+            and isinstance(output, str)
+            and _DATE_EXPRESSION.search(expression)
+        ):
+            found.add(output)
         for value in node.values():
-            found |= collect_calculated_fields(value)
+            found |= collect_date_calculated_fields(value)
     elif isinstance(node, list):
         for item in node:
-            found |= collect_calculated_fields(item)
+            found |= collect_date_calculated_fields(item)
     return found

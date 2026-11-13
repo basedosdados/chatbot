@@ -1,10 +1,11 @@
 from typing import Any
 
+from app.charts.binding import GEO_ASSETS
 from app.charts.data import spread_sample
 from app.charts.rendering import NO_MARKS_PROBLEM, render_problems
 from app.charts.spec import (
     collect,
-    collect_calculated_fields,
+    collect_date_calculated_fields,
     collect_derived_fields,
     collect_temporal_fields,
 )
@@ -64,10 +65,19 @@ def validate_chart_spec(
 
     referenced = collect(spec, "field")
     derived = collect_derived_fields(spec)
-    # A geoshape references its geometry's own fields — the top-level `id` and its labels
-    # under `properties.*` — which are not result columns; we allow those and flag the rest.
-    unknown = referenced - set(columns) - derived - {"*", "id"}
-    missing = sorted(field for field in unknown if not field.startswith("properties."))
+    # `*` stands for "every row" (e.g. in a `count`), never a column.
+    unknown = referenced - set(columns) - derived - {"*"}
+    # A map's data is its geometry, whose features carry fields of their own: the top-level
+    # `id` and the labels under `properties.*`. They are not result columns, so they are
+    # allowed, but only in a spec that reads a geometry (a map need not draw a geoshape:
+    # it may draw only points or labels at the features' centroids).
+    if collect(spec, "name") & GEO_ASSETS.keys():
+        unknown = {
+            field
+            for field in unknown
+            if field != "id" and not field.startswith("properties.")
+        }
+    missing = sorted(unknown)
 
     # A pivot names its new columns after the pivoted field's values, which the spec alone
     # does not reveal, so the check is skipped rather than reject a valid spec.
@@ -79,13 +89,14 @@ def validate_chart_spec(
 
     # An integer year in a temporal field is read as epoch milliseconds, so every year
     # lands in the first seconds of 1970 UTC, one tick labeled with the viewer's local
-    # year: 1969 west of UTC, as in Brazil. The chart renders without any error, and its
-    # output looks like any chart with a single date, so the render check cannot tell.
-    # A year a `calculate` rewrites under its own name (e.g. `datetime(datum.ano, 0, 1)`
-    # as `ano`) is a real date by then, so it is not flagged.
+    # year. The chart renders without any error, and its output looks like any chart
+    # with a single date, so the render check cannot tell.
+    # A year a `calculate` rewrites as a date under its own name
+    # (e.g. `datetime(datum.ano, 0, 1)` as `ano`) is a real date by then, so it is not flagged;
+    # one it rewrites as anything else (e.g. `datum.ano + 0`) still is.
     temporal_years = sorted(
         (collect_temporal_fields(spec) & _integer_year_columns(columns, rows))
-        - collect_calculated_fields(spec)
+        - collect_date_calculated_fields(spec)
     )
     if temporal_years:
         errors.append(
@@ -99,8 +110,8 @@ def validate_chart_spec(
     problems = render_problems(spec, sample)
     if NO_MARKS_PROBLEM in problems and len(sample) < len(rows):
         # The sample may hold none of the rows a filter keeps, so every row decides.
-        # That render is cheap: either few rows pass the filter, or the encoding fails
-        # before anything is drawn. No other problem comes from sampling.
+        # That render is cheap: either few rows pass the filter, or the encoding
+        # fails before anything is drawn. No other problem comes from sampling.
         problems = render_problems(spec, rows)
 
     return errors + problems
