@@ -469,10 +469,36 @@ class TestChartSize:
             },
         }
 
+        spec["spec"]["width"] = 600
+
         (problem,) = render_problems(spec, ROWS)
-        wide, lose, each = map(int, re.findall(r"\d+(?= pixels| from each)", problem))
+        wide, lose, each = map(
+            int, re.findall(r"\d+(?= pixels wide| pixels:| from each)", problem)
+        )
 
         assert lose == wide - 694 and each == -(-lose // 3)
+
+    def test_too_wide_facet_of_narrow_panels_is_told_to_use_fewer_columns(self):
+        """Its width is in the axes every column repeats, not in the panels."""
+        spec = {
+            "facet": {"field": "ano", "type": "ordinal"},
+            "columns": 9,
+            "resolve": {"scale": {"y": "independent"}},
+            "spec": {
+                "width": 130,
+                "height": 100,
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "sigla_uf", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        }
+
+        (problem,) = render_problems(spec, ROWS)
+
+        assert "rather than narrowing the panels" in problem
+        assert "from each panel" not in problem
 
     def test_facet_wrapped_into_the_panel_passes(self):
         spec = {
@@ -495,7 +521,7 @@ class TestChartSize:
         spec = {
             "facet": {"row": {"field": "ano", "type": "ordinal"}},
             "spec": {
-                "height": 300,
+                "height": 400,
                 "mark": "bar",
                 "encoding": {
                     "x": {"field": "sigla_uf", "type": "nominal"},

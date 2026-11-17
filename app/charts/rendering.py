@@ -67,11 +67,17 @@ _SITE_BACKGROUND = "white"
 _MAX_CHART_PIXELS = 10_000
 
 # A chart is drawn at its container's width, but a facet or a concatenation does not
-# shrink to fit it. Past this many pixels, well wider than the chat panel, it is rejected.
-_MAX_CHART_WIDTH = 1.2 * _VALIDATION_WIDTH
+# shrink to fit it: the website scrolls it sideways instead. Past this many pixels, most
+# of the chart is out of sight at any time, and it is rejected.
+_MAX_CHART_WIDTH = 2 * _VALIDATION_WIDTH
 
-# A chart taller than this, in pixels, is rejected: the reader scrolls through screens of it.
-_MAX_CHART_HEIGHT = 2_000
+# A chart taller than this, in pixels, is rejected: the reader scrolls through screens of
+# it. It leaves room for a panel per state, 27 of them, three to a row.
+_MAX_CHART_HEIGHT = 3_000
+
+# The narrowest a small multiple's panel can be told to become, in pixels. When fitting
+# the chart would take a panel below it, the chart needs fewer columns instead.
+_MIN_PANEL_WIDTH = 120
 
 # A plot area (a view, or one panel of a facet) shorter or narrower than this, in pixels,
 # is rejected: its marks are squeezed into a strip too thin to read.
@@ -443,6 +449,52 @@ def _inspect_views(
     return sizes, unreadable
 
 
+def _narrowing_advice(spec: dict[str, Any], excess: int) -> str:
+    """Say how a chart too wide for the panel can lose its excess width.
+
+    Narrower panels only help while they stay readable. Past that, the width is going
+    to what every column repeats (axes, labels, the spacing), and fewer columns is the
+    way out.
+
+    Args:
+        spec (dict[str, Any]): The spec that was drawn.
+        excess (int): How many pixels wider than the panel the chart is.
+
+    Returns:
+        str: The advice, for the spec generator.
+    """
+    columns = spec.get("columns")
+    inner = spec.get("spec")
+    panel = inner.get("width") if isinstance(inner, dict) else None
+    fewer_columns = (
+        "lay the panels out in fewer columns (e.g. `columns: 2` or `1` beside `facet` "
+        "at the top level, or facet by `row`)"
+    )
+    if not (
+        isinstance(columns, int)
+        and isinstance(panel, (int, float))
+        and not isinstance(columns, bool)
+        and not isinstance(panel, bool)
+        and columns > 1
+    ):
+        return (
+            f"It has to lose about {excess} pixels: give each panel a smaller `width`, "
+            f"{fewer_columns}, or draw fewer panels."
+        )
+    loss = math.ceil(excess / columns)
+    if panel - loss >= _MIN_PANEL_WIDTH:
+        return (
+            f"It has to lose about {excess} pixels: take about {loss} from each "
+            f"panel's `width`, or {fewer_columns}."
+        )
+    return (
+        f"It has to lose about {excess} pixels, more than its {columns} columns of "
+        f"{panel:.0f}-pixel panels can give up: the width goes to what every column "
+        f"repeats (axes, long labels, spacing). So {fewer_columns} rather than "
+        "narrowing the panels."
+    )
+
+
 def _compile_error(error: Exception) -> str:
     """Return a compile error's message without what the generator cannot use.
 
@@ -533,23 +585,11 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
             "show. Use a smaller `height` or `step`, or fewer facet panels."
         )
     elif width > _MAX_CHART_WIDTH:
-        excess = math.ceil(width - _VALIDATION_WIDTH)
-        columns = spec.get("columns")
-        per_panel = (
-            f" (about {math.ceil(excess / columns)} from each panel's `width`, as "
-            "the axes and a legend take room too)"
-            if isinstance(columns, int)
-            and not isinstance(columns, bool)
-            and columns > 0
-            else ""
-        )
         problems.append(
             f"The chart would be {width:.0f} pixels wide in a panel of about "
-            f"{_VALIDATION_WIDTH}, so it would be cut off or squeezed out of shape: a "
-            "facet or a concatenation does not shrink to its container. It has to "
-            f"lose about {excess} pixels{per_panel}. Give each panel a smaller "
-            "`width`, lay the panels out in fewer columns (e.g. `columns: 2` or `3` "
-            "beside `facet` at the top level, or facet by `row`), or draw fewer panels."
+            f"{_VALIDATION_WIDTH}, so most of it would be out of sight: a facet or a "
+            "concatenation does not shrink to its container. "
+            + _narrowing_advice(spec, math.ceil(width - _VALIDATION_WIDTH))
         )
     elif height > _MAX_CHART_HEIGHT:
         problems.append(
