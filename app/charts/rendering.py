@@ -533,13 +533,23 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
             "show. Use a smaller `height` or `step`, or fewer facet panels."
         )
     elif width > _MAX_CHART_WIDTH:
+        excess = math.ceil(width - _VALIDATION_WIDTH)
+        columns = spec.get("columns")
+        per_panel = (
+            f" (about {math.ceil(excess / columns)} from each panel's `width`, as "
+            "the axes and a legend take room too)"
+            if isinstance(columns, int)
+            and not isinstance(columns, bool)
+            and columns > 0
+            else ""
+        )
         problems.append(
             f"The chart would be {width:.0f} pixels wide in a panel of about "
-            f"{_VALIDATION_WIDTH}, so most of it would be cut off or shrunk until "
-            "unreadable: a facet or a concatenation does not shrink to its container. "
-            "Lay the panels out in fewer columns (e.g. `columns: 2` or `3` beside "
-            "`facet` at the top level, or facet by `row`), give each panel a smaller "
-            "`width`, or draw fewer panels."
+            f"{_VALIDATION_WIDTH}, so it would be cut off or squeezed out of shape: a "
+            "facet or a concatenation does not shrink to its container. It has to "
+            f"lose about {excess} pixels{per_panel}. Give each panel a smaller "
+            "`width`, lay the panels out in fewer columns (e.g. `columns: 2` or `3` "
+            "beside `facet` at the top level, or facet by `row`), or draw fewer panels."
         )
     elif height > _MAX_CHART_HEIGHT:
         problems.append(

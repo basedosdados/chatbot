@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 import vl_convert as vlc
@@ -452,6 +453,26 @@ class TestChartSize:
         problems = render_problems(spec, ROWS)
 
         assert len(problems) == 1 and "pixels wide" in problems[0]
+
+    def test_too_wide_facet_is_told_how_much_each_panel_must_lose(self):
+        spec = {
+            "facet": {"field": "ano", "type": "ordinal"},
+            "columns": 3,
+            "spec": {
+                "width": 300,
+                "height": 100,
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "sigla_uf", "type": "nominal"},
+                    "y": {"field": "total", "type": "quantitative"},
+                },
+            },
+        }
+
+        (problem,) = render_problems(spec, ROWS)
+        wide, lose, each = map(int, re.findall(r"\d+(?= pixels| from each)", problem))
+
+        assert lose == wide - 694 and each == -(-lose // 3)
 
     def test_facet_wrapped_into_the_panel_passes(self):
         spec = {

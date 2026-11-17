@@ -39,7 +39,7 @@ The chart is shown inside a chat panel about 690 pixels wide, on a white backgro
 
 ## Layout
 
-- Small multiples must fit the panel. Use a wrapped `facet` with `columns` beside it (not inside the `facet` object) and an explicit `width` and `height` in its `spec`, so that columns × width stays under about 580 pixels: 2 columns of 280, or 3 of 190. Never lay panels out in a single row (a `column` encoding, or an `hconcat` of more than two views): 27 states in a row are 9,000 pixels wide. Put a facet's marks and layers inside its `spec`, never beside it at the top level.
+- Small multiples must fit the panel. Use a wrapped `facet` with `columns` beside it (not inside the `facet` object) and an explicit `width` and `height` in its `spec`, so that columns × width stays under about 430 pixels, since the axes, the spacing and a legend take about 250 more: 2 columns of 210, or 3 of 140. Never lay panels out in a single row (a `column` encoding, or an `hconcat` of more than two views): 27 states in a row are 9,000 pixels wide. Put a facet's marks and layers inside its `spec`, never beside it at the top level.
 - With more than about 8 categories, or category names longer than about 12 characters, draw horizontal bars (the category on `y`) so the names read without rotation.
 - For a chart with many categories along one axis (see that column's distinct count), set an explicit `height` so the bands are not overly tall; a height noticeably smaller than the width reads best. Otherwise leave the height to default.
 - Never set `labelLimit` on an axis or legend: the default (180px) already truncates an overly long label and keeps the full text on hover, and a larger one takes its space from the marks.
