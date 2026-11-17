@@ -33,6 +33,18 @@ def normalize_language(value: str | None) -> LanguageCode:
     return normalized if normalized in _LANGUAGES else DEFAULT_LANGUAGE
 
 
+def language_name(language: LanguageCode) -> str:
+    """English name of a supported language, for model prompts (e.g. "Portuguese").
+
+    Args:
+        language (LanguageCode): A supported language code.
+
+    Returns:
+        str: The language's English name.
+    """
+    return _LANGUAGE_NAMES[language]
+
+
 def localized_field(node: dict, field: str, language: LanguageCode) -> str | None:
     """Pick a GraphQL node's localized `field` for `language`, pt as fallback.
 
