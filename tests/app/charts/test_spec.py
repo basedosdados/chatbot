@@ -5,7 +5,42 @@ from app.charts.spec import (
     collect_date_calculated_fields,
     collect_derived_fields,
     collect_temporal_fields,
+    place_facet_columns,
 )
+
+
+class TestPlaceFacetColumns:
+    def test_columns_inside_a_facet_operator_moves_beside_it(self):
+        spec = {"facet": {"field": "uf", "columns": 3}, "spec": {"mark": "bar"}}
+
+        assert place_facet_columns(spec) == {
+            "facet": {"field": "uf"},
+            "columns": 3,
+            "spec": {"mark": "bar"},
+        }
+        assert spec["facet"] == {"field": "uf", "columns": 3}  # the input is untouched
+
+    def test_columns_already_beside_the_facet_wins(self):
+        spec = {"facet": {"field": "uf", "columns": 9}, "columns": 2, "spec": {}}
+
+        assert place_facet_columns(spec) == {
+            "facet": {"field": "uf"},
+            "columns": 2,
+            "spec": {},
+        }
+
+    def test_facet_inside_a_concatenation_is_reached(self):
+        view = {"facet": {"field": "uf", "columns": 2}, "spec": {"mark": "bar"}}
+
+        placed = place_facet_columns({"vconcat": [view]})
+
+        assert placed["vconcat"][0]["columns"] == 2
+
+    def test_facet_channel_keeps_its_columns(self):
+        """In an encoding, `columns` belongs inside the `facet` channel."""
+        spec = {"mark": "bar", "encoding": {"facet": {"field": "uf", "columns": 3}}}
+
+        assert place_facet_columns(spec) == spec
 
 
 class TestCollect:

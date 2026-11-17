@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.charts.binding import sanitize_chart_spec
 from app.charts.config import apply_server_config
 from app.charts.prompts import CHART_SPEC_INSTRUCTIONS, chart_spec_user_prompt
+from app.charts.spec import place_facet_columns
 from app.charts.validation import validate_chart_spec
 from app.i18n import LanguageCode
 from app.settings import settings
@@ -95,7 +96,7 @@ async def _generate_chart_spec(
         if parsed is None:
             errors = ["No chart was produced — return a complete Vega-Lite v6 spec."]
         else:
-            spec = sanitize_chart_spec(parsed.spec)
+            spec = place_facet_columns(sanitize_chart_spec(parsed.spec))
             assert isinstance(spec, dict)  # an object spec sanitizes to an object
             previous_spec = spec  # feed the spec back if it fails to validate
             # Validated as it ships, with the server's config; the model is shown only

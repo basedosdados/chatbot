@@ -55,6 +55,26 @@ class TestGenerateChartSpec:
         assert result["encoding"] == good["encoding"]
         assert model.ainvoke.await_count == 2
 
+    async def test_columns_misplaced_inside_a_facet_is_moved_beside_it(
+        self, monkeypatch
+    ):
+        """Vega-Lite ignores it there and draws every panel in one row."""
+        spec = {
+            "facet": {"field": "ano", "type": "ordinal", "columns": 2},
+            "spec": {"mark": "bar", "encoding": {"x": {"field": "ano"}}},
+        }
+        self._model(monkeypatch, _structured_reply(spec))
+        monkeypatch.setattr(
+            generation, "validate_chart_spec", lambda spec, columns, rows: []
+        )
+
+        result = await generate_chart_spec(
+            {"ano": "INTEGER"}, [{"ano": 2025}], "small multiples", "pt"
+        )
+
+        assert result["columns"] == 2
+        assert result["facet"] == {"field": "ano", "type": "ordinal"}
+
     async def test_spec_is_validated_and_returned_with_the_server_config(
         self, monkeypatch
     ):

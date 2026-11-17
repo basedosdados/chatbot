@@ -549,6 +549,78 @@ class TestTextContrast:
 
         assert len(problems) == 1 and problems[0].startswith("The subtitle cannot")
 
+    @pytest.mark.parametrize("background", ["#333333", "#2d3748", "#374151"])
+    def test_the_sites_text_on_a_dark_gray_background_is_rejected(self, background):
+        """The website draws the text in its own dark grays, lost on any dark background."""
+        problems = render_problems(_bar_spec(background=background), ROWS)
+
+        assert {problem.split(" cannot")[0] for problem in problems} == {
+            "An axis's labels",
+            "An axis's title",
+        }
+
+    def test_muted_gray_labels_on_the_white_panel_pass(self):
+        assert render_problems(_labeled_bars({"color": "#999", "dy": -8}), ROWS) == []
+
+    def test_transparent_background_is_the_white_panel(self):
+        spec = _labeled_bars({"color": "white", "dy": -8}, background="transparent")
+
+        problems = render_problems(spec, ROWS)
+
+        assert (
+            len(problems) == 1 and "A text mark's labels cannot be read" in problems[0]
+        )
+
+    def test_white_labels_on_hollow_points_are_rejected(self):
+        """A point is an outline: what is behind a label centered on it is the panel."""
+        spec = _labeled_bars({"color": "white"})
+        spec["layer"][0] = {"mark": "point"}
+
+        problems = render_problems(spec, ROWS)
+
+        assert (
+            len(problems) == 1 and "A text mark's labels cannot be read" in problems[0]
+        )
+
+    def test_white_labels_on_filled_points_pass(self):
+        spec = _labeled_bars({"color": "white"})
+        spec["layer"][0] = {"mark": {"type": "circle", "size": 600}}
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_white_halo_under_readable_labels_passes(self):
+        spec = _labeled_bars({"dy": -8})
+        halo = {"type": "text", "dy": -8, "color": "white", "stroke": "white"}
+        spec["layer"] = [
+            {"mark": "line"},
+            {"mark": halo, "encoding": spec["layer"][1]["encoding"]},
+            spec["layer"][1],
+        ]
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_white_labels_over_a_stacked_area_are_not_judged(self):
+        """An area with one series per color is drawn in a group below the labels' view."""
+        spec = {
+            "encoding": {
+                "x": {"field": "ano", "type": "ordinal"},
+                "y": {"field": "total", "type": "quantitative", "stack": True},
+                "detail": {"field": "sigla_uf", "type": "nominal"},
+            },
+            "layer": [
+                {
+                    "mark": "area",
+                    "encoding": {"color": {"field": "sigla_uf", "type": "nominal"}},
+                },
+                {
+                    "mark": {"type": "text", "color": "white", "dy": 10},
+                    "encoding": {"text": {"field": "total", "type": "quantitative"}},
+                },
+            ],
+        }
+
+        assert render_problems(spec, ROWS) == []
+
     def test_white_labels_over_a_map_are_not_judged(self):
         """A label on a state is on its shape, whose outline the scenegraph does not give."""
         spec = choropleth_spec()

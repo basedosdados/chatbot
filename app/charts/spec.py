@@ -17,6 +17,33 @@ _DATE_EXPRESSION = re.compile(
 )
 
 
+def place_facet_columns(node: JsonValue) -> JsonValue:
+    """Move a `columns` written inside a `facet` operator to where Vega-Lite reads it.
+
+    A wrapped facet takes its `columns` beside `facet`, not inside it (only the `facet`
+    encoding channel takes it inside). Vega-Lite ignores a misplaced one and lays every
+    panel out in a single row, far wider than the panel, though what was meant is clear.
+
+    Args:
+        node (JsonValue): A spec, or any node within it, to walk.
+
+    Returns:
+        JsonValue: The same node with every misplaced `columns` moved beside its `facet`.
+    """
+    if isinstance(node, list):
+        return [place_facet_columns(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {key: place_facet_columns(value) for key, value in node.items()}
+    facet = out.get("facet")
+    # A facet operator sits beside the `spec` it repeats; a facet channel does not.
+    if isinstance(facet, dict) and "spec" in out and "columns" in facet:
+        columns = facet["columns"]
+        out["facet"] = {key: value for key, value in facet.items() if key != "columns"}
+        out.setdefault("columns", columns)
+    return out
+
+
 def collect(node: JsonValue, key: str) -> set[str]:
     """Collect every string value stored under `key`, anywhere in the spec.
 

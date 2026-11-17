@@ -71,7 +71,7 @@ def _server_config(language: LanguageCode) -> dict[str, Any]:
     return {"locale": locale, **tooltips}
 
 
-def _merge_config(base: Any, override: Any) -> Any:
+def merge_config(base: Any, override: Any) -> Any:
     """Merge two config objects key by key; `override` wins where both set a value.
 
     Args:
@@ -85,7 +85,7 @@ def _merge_config(base: Any, override: Any) -> Any:
         return override
     merged = dict(base)
     for key, value in override.items():
-        merged[key] = _merge_config(base[key], value) if key in base else value
+        merged[key] = merge_config(base[key], value) if key in base else value
     return merged
 
 
@@ -99,5 +99,5 @@ def apply_server_config(spec: dict[str, Any], language: LanguageCode) -> dict[st
     Returns:
         dict[str, Any]: The spec with the server's config merged into its own.
     """
-    config = _merge_config(spec.get("config") or {}, _server_config(language))
+    config = merge_config(spec.get("config") or {}, _server_config(language))
     return {**spec, "config": config}

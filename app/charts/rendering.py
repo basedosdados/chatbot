@@ -7,6 +7,7 @@ import vl_convert as vlc
 from pydantic import JsonValue
 
 from app.charts.binding import GEO_ASSETS, VEGA_LITE_SCHEMA, resolve_named_data
+from app.charts.config import merge_config
 from app.charts.spec import collect
 
 # Most characters of a compile error fed back to the spec generator.
@@ -27,17 +28,47 @@ NO_MARKS_PROBLEM = (
     f"out, or an encoding fails. Check that no `filter` removes every row. {_ENCODING_HINT}"
 )
 
-# The width a spec is validated at: about the chat panel's, where the website draws
-# every chart at its container's width.
-_VALIDATION_WIDTH = 560
+# The width a spec is validated at: the chart container's on a desktop, where the website
+# draws every chart at its container's width. The message column is at most 808 pixels
+# wide, and its padding and the chart card's take 114 of them. A narrower window or a
+# phone gives the chart less.
+_VALIDATION_WIDTH = 694
+
+# What the website's chart config sets for a chart's text, under the spec's own `config`
+# (`CHART_CONFIG` in the website's `VegaChart.js`). The chart is validated with it, since
+# it decides what text can be read on a background and how much room the text takes.
+_SITE_CONFIG: dict[str, Any] = {
+    "font": "Roboto",
+    "axis": {
+        "labelColor": "#464A51",
+        "titleColor": "#252A32",
+        "labelFontSize": 11,
+        "titleFontSize": 12,
+    },
+    "legend": {
+        "labelColor": "#464A51",
+        "titleColor": "#252A32",
+        "labelFontSize": 11,
+        "titleFontSize": 12,
+    },
+    "title": {
+        "color": "#252A32",
+        "fontSize": 15,
+        "fontWeight": 600,
+        "anchor": "start",
+    },
+}
+
+# What is behind a chart that sets no background: the website's white chart card.
+_SITE_BACKGROUND = "white"
 
 # A chart larger than this, in pixels on either side, is rejected: no screen shows it
 # and a browser canvas cannot hold it (e.g. a fixed scale domain far from the data).
 _MAX_CHART_PIXELS = 10_000
 
 # A chart is drawn at its container's width, but a facet or a concatenation does not
-# shrink to fit it. Past this many pixels, far wider than the chat panel, it is rejected.
-_MAX_CHART_WIDTH = 1.5 * _VALIDATION_WIDTH
+# shrink to fit it. Past this many pixels, well wider than the chat panel, it is rejected.
+_MAX_CHART_WIDTH = 1.2 * _VALIDATION_WIDTH
 
 # A chart taller than this, in pixels, is rejected: the reader scrolls through screens of it.
 _MAX_CHART_HEIGHT = 2_000
@@ -47,8 +78,9 @@ _MAX_CHART_HEIGHT = 2_000
 _MIN_PLOT_PIXELS = 40
 
 # Text whose contrast ratio (WCAG) against what is behind it is below this cannot be
-# read: 1 is the same color, white on black is 21.
-_MIN_TEXT_CONTRAST = 1.5
+# read: 1 is the same color, white on black is 21. A muted gray label on white ("#999",
+# 2.8) stays above it; the website's text colors on a dark background do not.
+_MIN_TEXT_CONTRAST = 2
 
 # The color names a spec most often gives text or a background. Any other name is not
 # judged, like a gradient.
@@ -260,9 +292,36 @@ def _number(item: dict[str, Any], key: str) -> float:
     return float(value) if math.isfinite(value) else 0.0
 
 
+def _is_filled(item: dict[str, Any]) -> bool:
+    """Return whether a rect or symbol item paints its inside (a hollow point does not)."""
+    fill = item.get("fill")
+    if not fill or fill == "transparent":
+        return False
+    return item.get("opacity", 1) != 0 and item.get("fillOpacity", 1) != 0
+
+
+def _anchor(item: dict[str, Any]) -> tuple[float, float]:
+    """Return the point of its view a text item is placed at, offsets included."""
+    return (
+        _number(item, "x") + _number(item, "dx"),
+        _number(item, "y") + _number(item, "dy"),
+    )
+
+
+def _written(text_mark: dict[str, Any]) -> set[tuple[str, int, int]]:
+    """Return what a text mark writes and where: each item's text and rounded anchor."""
+    written = set()
+    for item in text_mark.get("items") or []:
+        x, y = _anchor(item)
+        written.add((str(item.get("text")), round(x), round(y)))
+    return written
+
+
 def _covers(mark: dict[str, Any], x: float, y: float) -> bool:
-    """Return whether one of a rect or symbol mark's items covers a point of its view."""
+    """Return whether one of a rect or symbol mark's filled items covers a point of its view."""
     for item in mark.get("items") or []:
+        if not _is_filled(item):
+            continue
         left, top = _number(item, "x"), _number(item, "y")
         if mark["marktype"] == "rect":
             right, bottom = left + _number(item, "width"), top + _number(item, "height")
@@ -304,8 +363,7 @@ def _unreadable(
         color = _parse_color(item.get("fill"))
         if color is None:
             return False
-        x = _number(item, "x") + _number(item, "dx")
-        y = _number(item, "y") + _number(item, "dy")
+        x, y = _anchor(item)
         if any(_covers(mark, x, y) for mark in covering):
             on_a_mark += 1
         elif _contrast(color, backdrop) >= _MIN_TEXT_CONTRAST:
@@ -352,16 +410,30 @@ def _inspect_views(
             sizes.append((width, height))
 
         covering = [m for m in data_marks if m["marktype"] in ("rect", "symbol")]
-        unbounded = any(m["marktype"] in _UNBOUNDED_MARKS for m in data_marks)
+        # A line or an area with one series per color is drawn in a group of its own
+        # inside the view, so the marks below this group count too.
+        unbounded = any(
+            mark.get("role") == "mark" and mark["marktype"] in _UNBOUNDED_MARKS
+            for mark in _collect_marks(group)
+        )
+        lost_labels, read_labels = [], []
         for mark in marks:
             if mark["marktype"] != "text":
                 continue
             role = mark.get("role")
             if role == "mark":
                 if not unbounded and _unreadable(mark, behind, covering):
-                    unreadable.add("mark")
+                    lost_labels.append(mark)
+                else:
+                    read_labels.append(mark)
             elif role in _GUIDE_TEXT and _unreadable(mark, behind, []):
                 unreadable.add(role)
+
+        # A text mark in the backdrop's color under a readable copy of itself is a halo
+        # that sets the labels off from the marks they cross, not lost text.
+        readable = set().union(*map(_written, read_labels))
+        if any(not _written(mark) <= readable for mark in lost_labels):
+            unreadable.add("mark")
 
         for child in children:
             child_sizes, child_unreadable = _inspect_views(child, behind, in_legend)
@@ -416,11 +488,13 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
         lambda name: _geo_stub_node(name, _geo_stub_ids(name, spec, rows)),
     )
     assert isinstance(render_spec, dict)  # an object spec resolves to an object
-    # Drawn as the website draws it: at the chat panel's width, fitted to it.
+    # Drawn as the website draws it: at the chat panel's width, fitted to it, with the
+    # website's text colors and sizes under the spec's own.
     render_spec = {
         **render_spec,
         "$schema": VEGA_LITE_SCHEMA,
         "width": _VALIDATION_WIDTH,
+        "config": merge_config(_SITE_CONFIG, spec.get("config") or {}),
         "autosize": {
             "type": "fit",
             "contains": "padding",
@@ -463,8 +537,9 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
             f"The chart would be {width:.0f} pixels wide in a panel of about "
             f"{_VALIDATION_WIDTH}, so most of it would be cut off or shrunk until "
             "unreadable: a facet or a concatenation does not shrink to its container. "
-            "Lay the panels out in fewer columns (e.g. `columns: 2` or `3`, or facet "
-            "by `row`), give each panel a smaller `width`, or draw fewer panels."
+            "Lay the panels out in fewer columns (e.g. `columns: 2` or `3` beside "
+            "`facet` at the top level, or facet by `row`), give each panel a smaller "
+            "`width`, or draw fewer panels."
         )
     elif height > _MAX_CHART_HEIGHT:
         problems.append(
@@ -476,11 +551,12 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
     if not rows:
         return problems
 
-    background = _parse_color(
-        spec.get("background")
-        or (spec.get("config") or {}).get("background")
-        or "white"
-    )
+    config = spec.get("config") if isinstance(spec.get("config"), dict) else {}
+    backdrop = spec.get("background") or config.get("background")
+    if not backdrop or str(backdrop).strip().lower() == "transparent":
+        # The website draws a chart with no background of its own on its white card.
+        backdrop = _SITE_BACKGROUND
+    background = _parse_color(backdrop)
     plot_sizes, unreadable = _inspect_views(root, background or (255, 255, 255))
     if not background:
         # A background that cannot be judged (a gradient, an unusual name).
