@@ -81,7 +81,7 @@ The one exception is when the instructions explicitly ask for a specific color. 
 
 Give the color as explicit CSS colors (a hex string or a standard color keyword) whenever the request names a color rather than a palette: a single fixed color as a constant color `value`, and specific per-category colors as a `range` on the color encoding's `scale`. For a gradient over a quantitative or ordinal field, give a `range` of two or more explicit colors, e.g. light-to-dark for low-to-high.
 
-When the instructions ask for a dark background, set the top-level `background` and also every text color it would hide, in `config`: `title.color`, `axis.labelColor`, `axis.titleColor`, `legend.labelColor`, `legend.titleColor`, plus a visible `axis.gridColor` and `axis.domainColor`. Never draw text or marks in the background's own color (e.g. white labels on the default white panel): they are invisible.
+When the instructions ask for a dark background, set the top-level `background` and also every text color it would hide, in `config`: `title.color`, `title.subtitleColor`, `axis.labelColor`, `axis.titleColor`, `legend.labelColor`, `legend.titleColor`, plus a visible `axis.gridColor` and `axis.domainColor`. Never draw text or marks in the background's own color (e.g. white labels on the default white panel): they are invisible.
 
 Use a named `scheme` only when the request names or clearly maps to one of the built-in Vega schemes below, and then use its name exactly as listed. If no built-in scheme matches the requested color, use an explicit `range` instead.
 

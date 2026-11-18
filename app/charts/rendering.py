@@ -67,8 +67,8 @@ _SITE_BACKGROUND = "white"
 _MAX_CHART_PIXELS = 10_000
 
 # A chart is drawn at its container's width, but a facet or a concatenation does not
-# shrink to fit it: the website scrolls it sideways instead. Past this many pixels, most
-# of the chart is out of sight at any time, and it is rejected.
+# shrink to fit it: the website scrolls it sideways instead. Past this many pixels,
+# most of the chart is out of sight at any time, and it is rejected.
 _MAX_CHART_WIDTH = 2 * _VALIDATION_WIDTH
 
 # A chart taller than this, in pixels, is rejected: the reader scrolls through screens of
@@ -369,10 +369,17 @@ def _unreadable(
         color = _parse_color(item.get("fill"))
         if color is None:
             return False
+        # An outline that stands out makes text in the backdrop's color readable.
+        outline = _parse_color(item.get("stroke"))
+        if item.get("strokeWidth", 1) == 0 or item.get("strokeOpacity", 1) == 0:
+            outline = None
         x, y = _anchor(item)
         if any(_covers(mark, x, y) for mark in covering):
             on_a_mark += 1
-        elif _contrast(color, backdrop) >= _MIN_TEXT_CONTRAST:
+        elif any(
+            ink and _contrast(ink, backdrop) >= _MIN_TEXT_CONTRAST
+            for ink in (color, outline)
+        ):
             return False
         else:
             lost += 1

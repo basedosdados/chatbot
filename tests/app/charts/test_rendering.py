@@ -559,6 +559,11 @@ class TestTextContrast:
 
         assert render_problems(spec, ROWS) == []
 
+    def test_white_labels_with_a_dark_outline_pass(self):
+        spec = _labeled_bars({"color": "white", "stroke": "#333333", "dy": -8})
+
+        assert render_problems(spec, ROWS) == []
+
     def test_dark_labels_on_the_white_panel_pass(self):
         assert render_problems(_labeled_bars({"dy": -8}), ROWS) == []
 
