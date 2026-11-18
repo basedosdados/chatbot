@@ -28,35 +28,18 @@ NO_MARKS_PROBLEM = (
     f"out, or an encoding fails. Check that no `filter` removes every row. {_ENCODING_HINT}"
 )
 
-# The width a spec is validated at: the chart container's on a desktop, where the website
-# draws every chart at its container's width. The message column is at most 808 pixels
-# wide, and its padding and the chart card's take 114 of them. A narrower window or a
-# phone gives the chart less.
-_VALIDATION_WIDTH = 694
+# The width a spec is drawn at to be checked. The website lays the chart out for the
+# reader's screen itself (its views' sizes, the columns of small multiples, the legends),
+# so nothing checked here depends on it: it only gives a single view a size to fit.
+_RENDER_WIDTH = 694
 
-# What the website's chart config sets for a chart's text, under the spec's own `config`
-# (`CHART_CONFIG` in the website's `VegaChart.js`). The chart is validated with it, since
-# it decides what text can be read on a background and how much room the text takes.
-_SITE_CONFIG: dict[str, Any] = {
-    "font": "Roboto",
-    "axis": {
-        "labelColor": "#464A51",
-        "titleColor": "#252A32",
-        "labelFontSize": 11,
-        "titleFontSize": 12,
-    },
-    "legend": {
-        "labelColor": "#464A51",
-        "titleColor": "#252A32",
-        "labelFontSize": 11,
-        "titleFontSize": 12,
-    },
-    "title": {
-        "color": "#252A32",
-        "fontSize": 15,
-        "fontWeight": 600,
-        "anchor": "start",
-    },
+# The colors the website's chart config gives a chart's text, under the spec's own
+# `config` (`CHART_CONFIG` in the website's `VegaChart.js`). They decide what text can
+# be read on a background the spec sets.
+_SITE_TEXT_COLORS: dict[str, Any] = {
+    "axis": {"labelColor": "#464A51", "titleColor": "#252A32"},
+    "legend": {"labelColor": "#464A51", "titleColor": "#252A32"},
+    "title": {"color": "#252A32", "subtitleColor": "#71757A"},
 }
 
 # What is behind a chart that sets no background: the website's white chart card.
@@ -65,23 +48,6 @@ _SITE_BACKGROUND = "white"
 # A chart larger than this, in pixels on either side, is rejected: no screen shows it
 # and a browser canvas cannot hold it (e.g. a fixed scale domain far from the data).
 _MAX_CHART_PIXELS = 10_000
-
-# A chart is drawn at its container's width, but a facet or a concatenation does not
-# shrink to fit it: the website scrolls it sideways instead. Past this many pixels,
-# most of the chart is out of sight at any time, and it is rejected.
-_MAX_CHART_WIDTH = 2 * _VALIDATION_WIDTH
-
-# A chart taller than this, in pixels, is rejected: the reader scrolls through screens of
-# it. It leaves room for a panel per state, 27 of them, three to a row.
-_MAX_CHART_HEIGHT = 3_000
-
-# The narrowest a small multiple's panel can be told to become, in pixels. When fitting
-# the chart would take a panel below it, the chart needs fewer columns instead.
-_MIN_PANEL_WIDTH = 120
-
-# A plot area (a view, or one panel of a facet) shorter or narrower than this, in pixels,
-# is rejected: its marks are squeezed into a strip too thin to read.
-_MIN_PLOT_PIXELS = 40
 
 # Text whose contrast ratio (WCAG) against what is behind it is below this cannot be
 # read: 1 is the same color, white on black is 21. A muted gray label on white ("#999",
@@ -386,29 +352,24 @@ def _unreadable(
     return lost > on_a_mark
 
 
-def _inspect_views(
+def _find_unreadable_text(
     node: JsonValue,
     backdrop: tuple[int, int, int],
-    in_legend: bool = False,
-) -> tuple[list[tuple[float, float]], set[str]]:
-    """Measure every plot area of a rendered chart and find the text lost in its backdrop.
+) -> set[str]:
+    """Find the text of a rendered chart that is lost in what is behind it.
 
     Args:
         node (JsonValue): A group mark of the scenegraph, starting from its root.
         backdrop (tuple[int, int, int]): The color behind the group: the chart's
             background, or the fill of a group around it.
-        in_legend (bool): Whether the group is part of a legend, which is no plot area.
 
     Returns:
-        tuple[list[tuple[float, float]], set[str]]: The width and height of each plot
-            area (a group that holds data marks), and what text cannot be read: a
-            guide's role (e.g. "title-subtitle") or "mark" for a text mark.
+        set[str]: What text cannot be read: a guide's role (e.g. "title-subtitle") or
+            "mark" for a text mark.
     """
-    sizes: list[tuple[float, float]] = []
     unreadable: set[str] = set()
     if not isinstance(node, dict) or node.get("marktype") != "group":
-        return sizes, unreadable
-    in_legend = in_legend or node.get("role") == "legend"
+        return unreadable
 
     for group in node.get("items") or []:
         if not isinstance(group, dict):
@@ -417,10 +378,6 @@ def _inspect_views(
         children = [c for c in group.get("items") or [] if isinstance(c, dict)]
         marks = [c for c in children if c.get("marktype") != "group"]
         data_marks = [mark for mark in marks if mark.get("role") == "mark"]
-
-        width, height = _number(group, "width"), _number(group, "height")
-        if data_marks and not in_legend and width > 0 and height > 0:
-            sizes.append((width, height))
 
         covering = [m for m in data_marks if m["marktype"] in ("rect", "symbol")]
         # A line or an area with one series per color is drawn in a group of its own
@@ -449,57 +406,9 @@ def _inspect_views(
             unreadable.add("mark")
 
         for child in children:
-            child_sizes, child_unreadable = _inspect_views(child, behind, in_legend)
-            sizes += child_sizes
-            unreadable |= child_unreadable
+            unreadable |= _find_unreadable_text(child, behind)
 
-    return sizes, unreadable
-
-
-def _narrowing_advice(spec: dict[str, Any], excess: int) -> str:
-    """Say how a chart too wide for the panel can lose its excess width.
-
-    Narrower panels only help while they stay readable. Past that, the width is going
-    to what every column repeats (axes, labels, the spacing), and fewer columns is the
-    way out.
-
-    Args:
-        spec (dict[str, Any]): The spec that was drawn.
-        excess (int): How many pixels wider than the panel the chart is.
-
-    Returns:
-        str: The advice, for the spec generator.
-    """
-    columns = spec.get("columns")
-    inner = spec.get("spec")
-    panel = inner.get("width") if isinstance(inner, dict) else None
-    fewer_columns = (
-        "lay the panels out in fewer columns (e.g. `columns: 2` or `1` beside `facet` "
-        "at the top level, or facet by `row`)"
-    )
-    if not (
-        isinstance(columns, int)
-        and isinstance(panel, (int, float))
-        and not isinstance(columns, bool)
-        and not isinstance(panel, bool)
-        and columns > 1
-    ):
-        return (
-            f"It has to lose about {excess} pixels: give each panel a smaller `width`, "
-            f"{fewer_columns}, or draw fewer panels."
-        )
-    loss = math.ceil(excess / columns)
-    if panel - loss >= _MIN_PANEL_WIDTH:
-        return (
-            f"It has to lose about {excess} pixels: take about {loss} from each "
-            f"panel's `width`, or {fewer_columns}."
-        )
-    return (
-        f"It has to lose about {excess} pixels, more than its {columns} columns of "
-        f"{panel:.0f}-pixel panels can give up: the width goes to what every column "
-        f"repeats (axes, long labels, spacing). So {fewer_columns} rather than "
-        "narrowing the panels."
-    )
+    return unreadable
 
 
 def _compile_error(error: Exception) -> str:
@@ -533,6 +442,11 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
     not raise: Vega logs the error and draws what it had, so the checks read the
     scenegraph. They look at the output only, whatever in the spec caused it.
 
+    How the chart fits the screen is not checked: the website sizes its views and lays
+    out its panels for the reader's screen, and shows a chart too large for it as a
+    preview that opens in full. Only a chart with no size, or one too large for any
+    screen, is rejected.
+
     Args:
         spec (dict[str, Any]): The candidate spec (already sanitized).
         rows (list[dict[str, Any]]): The rows to render it with. Without any, only the
@@ -547,13 +461,12 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
         lambda name: _geo_stub_node(name, _geo_stub_ids(name, spec, rows)),
     )
     assert isinstance(render_spec, dict)  # an object spec resolves to an object
-    # Drawn as the website draws it: at the chat panel's width, fitted to it, with the
-    # website's text colors and sizes under the spec's own.
+    # Drawn with the website's text colors under the spec's own.
     render_spec = {
         **render_spec,
         "$schema": VEGA_LITE_SCHEMA,
-        "width": _VALIDATION_WIDTH,
-        "config": merge_config(_SITE_CONFIG, spec.get("config") or {}),
+        "width": _RENDER_WIDTH,
+        "config": merge_config(_SITE_TEXT_COLORS, spec.get("config") or {}),
         "autosize": {
             "type": "fit",
             "contains": "padding",
@@ -591,19 +504,6 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
             f"The chart would be {width:.0f}x{height:.0f} pixels, far too large to "
             "show. Use a smaller `height` or `step`, or fewer facet panels."
         )
-    elif width > _MAX_CHART_WIDTH:
-        problems.append(
-            f"The chart would be {width:.0f} pixels wide in a panel of about "
-            f"{_VALIDATION_WIDTH}, so most of it would be out of sight: a facet or a "
-            "concatenation does not shrink to its container. "
-            + _narrowing_advice(spec, math.ceil(width - _VALIDATION_WIDTH))
-        )
-    elif height > _MAX_CHART_HEIGHT:
-        problems.append(
-            f"The chart would be {height:.0f} pixels tall, several screens of "
-            "scrolling. Use more columns, a smaller `height` or `step` for each "
-            "panel, or fewer panels."
-        )
 
     if not rows:
         return problems
@@ -614,19 +514,8 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
         # The website draws a chart with no background of its own on its white card.
         backdrop = _SITE_BACKGROUND
     background = _parse_color(backdrop)
-    plot_sizes, unreadable = _inspect_views(root, background or (255, 255, 255))
-    if not background:
-        # A background that cannot be judged (a gradient, an unusual name).
-        unreadable = set()
-
-    smallest = min(plot_sizes, key=min, default=None)
-    if smallest and min(smallest) < _MIN_PLOT_PIXELS and not problems:
-        problems.append(
-            f"A plot area is only {smallest[0]:.0f}x{smallest[1]:.0f} pixels, too "
-            "small to read its marks. Give it a larger `height` (or a `step` per "
-            "category of about 20 or more), use fewer panels per row, or move a "
-            "legend or long labels out of its way."
-        )
+    # A background that cannot be judged (a gradient, an unusual name) is left alone.
+    unreadable = _find_unreadable_text(root, background) if background else set()
 
     for role in sorted(unreadable):
         subject = _GUIDE_TEXT.get(role, "A text mark's labels")

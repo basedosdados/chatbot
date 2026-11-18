@@ -1,5 +1,4 @@
 import json
-import re
 
 import pytest
 import vl_convert as vlc
@@ -436,8 +435,8 @@ def _labeled_bars(text_mark: dict, **overrides) -> dict:
 
 
 class TestChartSize:
-    def test_facet_far_wider_than_the_panel_is_rejected(self):
-        """A facet does not shrink to its container: nine 300-pixel panels in a row."""
+    def test_facet_wider_than_the_panel_is_left_to_the_website(self):
+        """The website lays panels out for the screen, so their sizes are not judged."""
         spec = {
             "facet": {"column": {"field": "ano", "type": "ordinal"}},
             "spec": {
@@ -450,98 +449,10 @@ class TestChartSize:
             },
         }
 
-        problems = render_problems(spec, ROWS)
-
-        assert len(problems) == 1 and "pixels wide" in problems[0]
-
-    def test_too_wide_facet_is_told_how_much_each_panel_must_lose(self):
-        spec = {
-            "facet": {"field": "ano", "type": "ordinal"},
-            "columns": 3,
-            "spec": {
-                "width": 300,
-                "height": 100,
-                "mark": "bar",
-                "encoding": {
-                    "x": {"field": "sigla_uf", "type": "nominal"},
-                    "y": {"field": "total", "type": "quantitative"},
-                },
-            },
-        }
-
-        spec["spec"]["width"] = 600
-
-        (problem,) = render_problems(spec, ROWS)
-        wide, lose, each = map(
-            int, re.findall(r"\d+(?= pixels wide| pixels:| from each)", problem)
-        )
-
-        assert lose == wide - 694 and each == -(-lose // 3)
-
-    def test_too_wide_facet_of_narrow_panels_is_told_to_use_fewer_columns(self):
-        """Its width is in the axes every column repeats, not in the panels."""
-        spec = {
-            "facet": {"field": "ano", "type": "ordinal"},
-            "columns": 9,
-            "resolve": {"scale": {"y": "independent"}},
-            "spec": {
-                "width": 130,
-                "height": 100,
-                "mark": "bar",
-                "encoding": {
-                    "x": {"field": "sigla_uf", "type": "nominal"},
-                    "y": {"field": "total", "type": "quantitative"},
-                },
-            },
-        }
-
-        (problem,) = render_problems(spec, ROWS)
-
-        assert "rather than narrowing the panels" in problem
-        assert "from each panel" not in problem
-
-    def test_facet_wrapped_into_the_panel_passes(self):
-        spec = {
-            "facet": {"field": "ano", "type": "ordinal"},
-            "columns": 3,
-            "spec": {
-                "width": 130,
-                "height": 100,
-                "mark": "bar",
-                "encoding": {
-                    "x": {"field": "sigla_uf", "type": "nominal"},
-                    "y": {"field": "total", "type": "quantitative"},
-                },
-            },
-        }
-
         assert render_problems(spec, ROWS) == []
 
-    def test_chart_several_screens_tall_is_rejected(self):
-        spec = {
-            "facet": {"row": {"field": "ano", "type": "ordinal"}},
-            "spec": {
-                "height": 400,
-                "mark": "bar",
-                "encoding": {
-                    "x": {"field": "sigla_uf", "type": "nominal"},
-                    "y": {"field": "total", "type": "quantitative"},
-                },
-            },
-        }
-
-        problems = render_problems(spec, ROWS)
-
-        assert len(problems) == 1 and "pixels tall" in problems[0]
-
-    def test_plot_area_squeezed_into_a_strip_is_rejected(self):
-        """The chart is fitted to its `height`, axes included, so little is left to plot in."""
-        problems = render_problems(_bar_spec(height=70), ROWS)
-
-        assert len(problems) == 1 and "A plot area is only" in problems[0]
-
-    def test_short_but_readable_plot_area_passes(self):
-        assert render_problems(_bar_spec(height=160), ROWS) == []
+    def test_short_plot_area_is_left_to_the_website(self):
+        assert render_problems(_bar_spec(height=70), ROWS) == []
 
 
 class TestTextContrast:
@@ -592,7 +503,12 @@ class TestTextContrast:
     def test_dark_subtitle_on_a_dark_background_is_rejected(self):
         light = {"labelColor": "white", "titleColor": "white"}
         spec = _bar_spec(
-            title={"text": "Total", "color": "white", "subtitle": "Por ano"},
+            title={
+                "text": "Total",
+                "color": "white",
+                "subtitle": "Por ano",
+                "subtitleColor": "#252A32",
+            },
             background="black",
             config={"axis": light},
         )
