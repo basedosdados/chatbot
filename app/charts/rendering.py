@@ -33,13 +33,13 @@ NO_MARKS_PROBLEM = (
 # so nothing checked here depends on it: it only gives a single view a size to fit.
 _RENDER_WIDTH = 694
 
-# The colors the website's chart config gives a chart's text, under the spec's own
-# `config` (`CHART_CONFIG` in the website's `VegaChart.js`). They decide what text can
-# be read on a background the spec sets.
+# The colors the website gives a chart's text, under the spec's own `config`. They
+# decide what text can be read on a background the spec sets. The subtitle is judged
+# in Vega's default black, so a spec on a dark background must give it a color itself.
 _SITE_TEXT_COLORS: dict[str, Any] = {
     "axis": {"labelColor": "#464A51", "titleColor": "#252A32"},
     "legend": {"labelColor": "#464A51", "titleColor": "#252A32"},
-    "title": {"color": "#252A32", "subtitleColor": "#71757A"},
+    "title": {"color": "#252A32"},
 }
 
 # What is behind a chart that sets no background: the website's white chart card.
@@ -70,10 +70,6 @@ _NAMED_COLORS = {
 }
 
 _RGB_COLOR = re.compile(r"rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)")
-
-# The marks a label may sit on without the scenegraph saying where they end (a map's
-# shapes, a pie's slices, a stacked area), so text drawn in a view with one is not judged.
-_UNBOUNDED_MARKS = frozenset({"shape", "arc", "area", "path", "image", "trail"})
 
 # What each guide's text is called in a problem fed back to the generator.
 _GUIDE_TEXT = {
@@ -256,107 +252,38 @@ def _contrast(color: tuple[int, int, int], other: tuple[int, int, int]) -> float
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def _number(item: dict[str, Any], key: str) -> float:
-    """Return a scenegraph item's numeric property, or 0 where it has none."""
-    value = item.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 0.0
-    return float(value) if math.isfinite(value) else 0.0
-
-
-def _is_filled(item: dict[str, Any]) -> bool:
-    """Return whether a rect or symbol item paints its inside (a hollow point does not)."""
-    fill = item.get("fill")
-    if not fill or fill == "transparent":
-        return False
-    return item.get("opacity", 1) != 0 and item.get("fillOpacity", 1) != 0
-
-
-def _anchor(item: dict[str, Any]) -> tuple[float, float]:
-    """Return the point of its view a text item is placed at, offsets included."""
-    return (
-        _number(item, "x") + _number(item, "dx"),
-        _number(item, "y") + _number(item, "dy"),
-    )
-
-
-def _written(text_mark: dict[str, Any]) -> set[tuple[str, int, int]]:
-    """Return what a text mark writes and where: each item's text and rounded anchor."""
-    written = set()
-    for item in text_mark.get("items") or []:
-        x, y = _anchor(item)
-        written.add((str(item.get("text")), round(x), round(y)))
-    return written
-
-
-def _covers(mark: dict[str, Any], x: float, y: float) -> bool:
-    """Return whether one of a rect or symbol mark's filled items covers a point of its view."""
-    for item in mark.get("items") or []:
-        if not _is_filled(item):
-            continue
-        left, top = _number(item, "x"), _number(item, "y")
-        if mark["marktype"] == "rect":
-            right, bottom = left + _number(item, "width"), top + _number(item, "height")
-        else:
-            # A symbol's `size` is its area, centered on its position.
-            half = math.sqrt(max(_number(item, "size"), 0)) / 2
-            left, top, right, bottom = left - half, top - half, left + half, top + half
-        if left <= x <= right and top <= y <= bottom:
-            return True
-    return False
-
-
-def _unreadable(
-    text_mark: dict[str, Any],
-    backdrop: tuple[int, int, int],
-    covering: list[dict[str, Any]],
-) -> bool:
-    """Return whether none of a text mark's visible text can be told from its backdrop.
-
-    Text placed on a bar or a point is left out: what is behind it is that mark, not
-    the backdrop, and white on a dark bar is a common, readable label. A mark is only
-    reported when most of its text is lost, so a few labels that spill off their bars
-    do not reject a chart whose other labels read well.
+def _unreadable(text_mark: dict[str, Any], backdrop: tuple[int, int, int]) -> bool:
+    """Return whether a guide's text mark writes text and none of it stands out.
 
     Args:
-        text_mark (dict[str, Any]): A text mark of the scenegraph.
-        backdrop (tuple[int, int, int]): The color behind the view the mark is in.
-        covering (list[dict[str, Any]]): The rect and symbol marks of the same view.
+        text_mark (dict[str, Any]): A text mark of the scenegraph (a title, an axis's or
+            a legend's labels or title).
+        backdrop (tuple[int, int, int]): The color behind the group the mark is in.
 
     Returns:
-        bool: True if the mark writes text and most of it is lost in the backdrop.
+        bool: True if the mark writes visible text in colors all lost in the backdrop.
     """
-    lost = on_a_mark = 0
+    lost = False
     for item in text_mark.get("items") or []:
         if not str(item.get("text") or "").strip():
             continue
         if item.get("opacity", 1) == 0 or item.get("fillOpacity", 1) == 0:
             continue
         color = _parse_color(item.get("fill"))
-        if color is None:
+        if color is None or _contrast(color, backdrop) >= _MIN_TEXT_CONTRAST:
             return False
-        # An outline that stands out makes text in the backdrop's color readable.
-        outline = _parse_color(item.get("stroke"))
-        if item.get("strokeWidth", 1) == 0 or item.get("strokeOpacity", 1) == 0:
-            outline = None
-        x, y = _anchor(item)
-        if any(_covers(mark, x, y) for mark in covering):
-            on_a_mark += 1
-        elif any(
-            ink and _contrast(ink, backdrop) >= _MIN_TEXT_CONTRAST
-            for ink in (color, outline)
-        ):
-            return False
-        else:
-            lost += 1
-    return lost > on_a_mark
+        lost = True
+    return lost
 
 
 def _find_unreadable_text(
     node: JsonValue,
     backdrop: tuple[int, int, int],
 ) -> set[str]:
-    """Find the text of a rendered chart that is lost in what is behind it.
+    """Find the guides of a rendered chart whose text is lost in what is behind it.
+
+    Only titles, axes and legends are judged. A value label may sit on a bar, a point or
+    a map's shape, whose color the scenegraph does not reliably give, so it is not.
 
     Args:
         node (JsonValue): A group mark of the scenegraph, starting from its root.
@@ -364,8 +291,7 @@ def _find_unreadable_text(
             background, or the fill of a group around it.
 
     Returns:
-        set[str]: What text cannot be read: a guide's role (e.g. "title-subtitle") or
-            "mark" for a text mark.
+        set[str]: The roles of the guides whose text cannot be read (e.g. "title-subtitle").
     """
     unreadable: set[str] = set()
     if not isinstance(node, dict) or node.get("marktype") != "group":
@@ -375,38 +301,17 @@ def _find_unreadable_text(
         if not isinstance(group, dict):
             continue
         behind = _parse_color(group.get("fill")) or backdrop
-        children = [c for c in group.get("items") or [] if isinstance(c, dict)]
-        marks = [c for c in children if c.get("marktype") != "group"]
-        data_marks = [mark for mark in marks if mark.get("role") == "mark"]
-
-        covering = [m for m in data_marks if m["marktype"] in ("rect", "symbol")]
-        # A line or an area with one series per color is drawn in a group of its own
-        # inside the view, so the marks below this group count too.
-        unbounded = any(
-            mark.get("role") == "mark" and mark["marktype"] in _UNBOUNDED_MARKS
-            for mark in _collect_marks(group)
-        )
-        lost_labels, read_labels = [], []
-        for mark in marks:
-            if mark["marktype"] != "text":
+        for child in group.get("items") or []:
+            if not isinstance(child, dict):
                 continue
-            role = mark.get("role")
-            if role == "mark":
-                if not unbounded and _unreadable(mark, behind, covering):
-                    lost_labels.append(mark)
-                else:
-                    read_labels.append(mark)
-            elif role in _GUIDE_TEXT and _unreadable(mark, behind, []):
-                unreadable.add(role)
-
-        # A text mark in the backdrop's color under a readable copy of itself is a halo
-        # that sets the labels off from the marks they cross, not lost text.
-        readable = set().union(*map(_written, read_labels))
-        if any(not _written(mark) <= readable for mark in lost_labels):
-            unreadable.add("mark")
-
-        for child in children:
-            unreadable |= _find_unreadable_text(child, behind)
+            if child.get("marktype") == "group":
+                unreadable |= _find_unreadable_text(child, behind)
+            elif (
+                child.get("marktype") == "text"
+                and child.get("role") in _GUIDE_TEXT
+                and _unreadable(child, behind)
+            ):
+                unreadable.add(child["role"])
 
     return unreadable
 
@@ -518,18 +423,12 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
     unreadable = _find_unreadable_text(root, background) if background else set()
 
     for role in sorted(unreadable):
-        subject = _GUIDE_TEXT.get(role, "A text mark's labels")
         problems.append(
-            f"{subject} cannot be read: the text is drawn in the color of what is "
-            "behind it (e.g. white text on the white panel, or the default dark text "
-            "on a dark `background`). Give that text a color that contrasts with the "
-            "background"
-            + (
-                ", whatever color the instructions name for it."
-                if role == "mark"
-                else " (e.g. `subtitleColor` in `title`, or `labelColor` and "
-                "`titleColor` in `config.axis` and `config.legend`)."
-            )
+            f"{_GUIDE_TEXT[role]} cannot be read: the text is drawn in the color of "
+            "what is behind it (e.g. white text on the white panel, or the default dark "
+            "text on a dark `background`). Give that text a color that contrasts with "
+            "the background (e.g. `subtitleColor` in `title`, or `labelColor` and "
+            "`titleColor` in `config.axis` and `config.legend`)."
         )
 
     marks = _collect_marks(root)
