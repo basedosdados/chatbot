@@ -383,3 +383,51 @@ class TestValidateChartSpec:
     def test_choropleth_spec_is_valid(self):
         """A choropleth compiles (real geometry) and its geo properties are allowed."""
         assert validate_chart_spec(choropleth_spec(), ["sigla_uf", "valor"], []) == []
+
+
+def _municipality_map(lookup_key: str = "id_municipio") -> dict:
+    """A municipalities choropleth joined to the result on `lookup_key`."""
+    spec = choropleth_spec()
+    spec["data"] = {"name": "brazil_municipalities"}
+    spec["transform"][0]["from"]["key"] = lookup_key
+    return spec
+
+
+class TestMunicipalityJoin:
+    @pytest.mark.parametrize("code", ["3550308", 3550308, 3550308.0])
+    def test_seven_digit_codes_pass(self, code):
+        rows = [{"id_municipio": code, "valor": 1.0}]
+
+        assert (
+            validate_chart_spec(_municipality_map(), ["id_municipio", "valor"], rows)
+            == []
+        )
+
+    @pytest.mark.parametrize("codes", [["355030", "330455"], ["São Paulo", "Rio"]])
+    def test_a_key_in_another_form_is_rejected(self, codes):
+        """Six-digit codes or names match no feature in the browser: the map is empty."""
+        rows = [{"id_municipio": code, "valor": 1.0} for code in codes]
+
+        errors = validate_chart_spec(
+            _municipality_map(), ["id_municipio", "valor"], rows
+        )
+
+        assert len(errors) == 1
+        assert errors[0].startswith("Column 'id_municipio' is joined")
+        assert repr(sorted(codes)[0]) in errors[0]
+
+    def test_a_few_rows_without_a_code_pass(self):
+        rows = [
+            *({"id_municipio": f"35{i:05d}", "valor": 1.0} for i in range(9)),
+            {"id_municipio": "Total", "valor": 9.0},
+        ]
+
+        assert (
+            validate_chart_spec(_municipality_map(), ["id_municipio", "valor"], rows)
+            == []
+        )
+
+    def test_the_states_map_is_not_checked(self):
+        rows = [{"sigla_uf": "SP", "valor": 1.0}]
+
+        assert validate_chart_spec(choropleth_spec(), ["sigla_uf", "valor"], rows) == []

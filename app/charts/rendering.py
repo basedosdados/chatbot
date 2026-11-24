@@ -103,6 +103,23 @@ _BRAZIL_STATES = (
 )  # fmt: skip
 
 
+def join_key_text(value: Any) -> str:
+    """Return a value as the text a Vega `lookup` matches it by.
+
+    A lookup indexes its keys as text, and the browser reads a whole float as an
+    integer, so 3550308, 3550308.0 and "3550308" all match the feature "3550308".
+
+    Args:
+        value (Any): A join column's value in a row (not None).
+
+    Returns:
+        str: The text it is matched by.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _geo_stub_ids(
     name: str, spec: dict[str, Any], rows: list[dict[str, Any]]
 ) -> list[str]:
@@ -124,7 +141,7 @@ def _geo_stub_ids(
         return list(_BRAZIL_STATES)
     join_columns = collect(spec, "lookup") | collect(spec, "key")
     ids = {
-        str(row[column])
+        join_key_text(row[column])
         for row in rows
         for column in join_columns & row.keys()
         if row[column] is not None

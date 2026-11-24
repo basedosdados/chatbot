@@ -1,14 +1,18 @@
+import re
 from typing import Any
 
 from app.charts.binding import GEO_ASSETS
 from app.charts.data import spread_sample
-from app.charts.rendering import NO_MARKS_PROBLEM, render_problems
+from app.charts.rendering import NO_MARKS_PROBLEM, join_key_text, render_problems
 from app.charts.spec import (
     collect,
     collect_date_calculated_fields,
     collect_derived_fields,
     collect_temporal_fields,
 )
+
+# A municipality's feature `id` in the website's geometry: its 7-digit IBGE code as text.
+_MUNICIPALITY_ID = re.compile(r"\d{7}")
 
 # Whole-number values in this range are read as calendar years.
 _YEAR_RANGE = range(1000, 3001)
@@ -41,6 +45,48 @@ def _integer_year_columns(columns: list[str], rows: list[dict[str, Any]]) -> set
         ):
             year_columns.add(column)
     return year_columns
+
+
+def _municipality_join_problems(
+    spec: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
+) -> list[str]:
+    """Find the result columns a municipality map joins on that hold no codes.
+
+    The render check cannot see this: its stand-in geometry takes its feature ids from
+    the rows, so any key matches. In the browser, a key in another form (a 6-digit code,
+    a name) matches no municipality, and the map shows no data.
+
+    Every result column a `lookup` names is taken as joined to the municipalities, as
+    the stand-in geometry takes them, so a map that also joins another column (e.g. a
+    states layer on `sigla_uf`) is rejected too.
+
+    Args:
+        spec (dict[str, Any]): The candidate spec (already sanitized).
+        columns (list[str]): The result's real column names.
+        rows (list[dict[str, Any]]): The result rows.
+
+    Returns:
+        list[str]: One problem per join column whose values are mostly not 7-digit codes.
+    """
+    if "brazil_municipalities" not in collect(spec, "name"):
+        return []
+
+    problems = []
+    joined = (collect(spec, "lookup") | collect(spec, "key")) & set(columns)
+    for column in sorted(joined):
+        values = [join_key_text(row[column]) for row in rows if row[column] is not None]
+        wrong = [value for value in values if not _MUNICIPALITY_ID.fullmatch(value)]
+        if not values or len(wrong) * 2 <= len(values):
+            continue
+        examples = sorted(set(wrong))[:3]
+        problems.append(
+            f"Column {column!r} is joined to the municipalities' `id`, the 7-digit IBGE "
+            f'code as text (e.g. "3550308"), but most of its values are not one (e.g. '
+            f"{examples}), so they match no municipality and the map would show no "
+            "data. Join on the result's 7-digit municipality code column (usually "
+            "`id_municipio`)."
+        )
+    return problems
 
 
 def validate_chart_spec(
@@ -105,6 +151,8 @@ def validate_chart_spec(
             '"1969"/"1970" tick. Encode them as `quantitative` (or `ordinal` for bars) '
             'with `"axis": {"format": "d"}` instead.'
         )
+
+    errors += _municipality_join_problems(spec, columns, rows)
 
     sample = spread_sample(rows, _VALIDATION_MAX_ROWS)
     problems = render_problems(spec, sample)
