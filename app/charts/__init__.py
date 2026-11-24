@@ -11,7 +11,12 @@ The pipeline, as the `chart_query_result` tool runs it:
 """
 
 from app.charts.binding import inject_chart_data
-from app.charts.data import ChartHandleNotFound, ChartResultTooLarge, fetch_chart_data
+from app.charts.data import (
+    ChartHandleNotFound,
+    ChartResultEmpty,
+    ChartResultTooLarge,
+    fetch_chart_data,
+)
 from app.charts.generation import (
     ChartSpecInvalid,
     ChartSpecTimeout,
@@ -20,6 +25,7 @@ from app.charts.generation import (
 
 __all__ = [
     "ChartHandleNotFound",
+    "ChartResultEmpty",
     "ChartResultTooLarge",
     "ChartSpecInvalid",
     "ChartSpecTimeout",

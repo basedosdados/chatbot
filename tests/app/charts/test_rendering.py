@@ -250,6 +250,35 @@ class TestRenderProblems:
 
         assert any("same label '0'" in p for p in problems)
 
+    def test_axis_blanked_on_purpose_passes(self):
+        """A sparkline hides its labels with an empty `labelExpr`."""
+        spec = line_spec(
+            y={"field": "total", "type": "quantitative", "axis": {"labelExpr": "''"}}
+        )
+
+        assert render_problems(spec, ROWS) == []
+
+    def test_a_problem_on_every_panels_axis_is_reported_once(self):
+        spec = {
+            "facet": {"column": {"field": "sigla_uf", "type": "nominal"}},
+            "spec": {
+                "mark": "line",
+                "encoding": {
+                    "x": {"field": "ano", "type": "ordinal"},
+                    "y": {
+                        "field": "total",
+                        "type": "quantitative",
+                        "axis": {"labelExpr": "'x'"},
+                    },
+                },
+            },
+            "resolve": {"axis": {"y": "independent"}},
+        }
+
+        problems = render_problems(spec, ROWS)
+
+        assert len([p for p in problems if "same label 'x'" in p]) == 1
+
     def test_log_scale_over_zero_has_no_tick_labels(self):
         rows = [*ROWS, {"ano": 2014, "sigla_uf": "SP", "total": 0}]
         spec = line_spec(
@@ -538,6 +567,11 @@ class TestTextContrast:
 
         assert len(problems) == 1 and problems[0].startswith("An axis's labels cannot")
 
+    @pytest.mark.parametrize("background", ["rgba(0,0,0,0)", "rgba(0, 0, 0, 0.05)"])
+    def test_clear_or_faint_background_is_not_judged(self, background):
+        """What shows through a translucent background cannot be told from it."""
+        assert render_problems(_bar_spec(background=background), ROWS) == []
+
 
 class TestParseColor:
     @pytest.mark.parametrize(
@@ -547,7 +581,11 @@ class TestParseColor:
             ("#000", (0, 0, 0)),
             ("#1F77b4", (31, 119, 180)),
             ("rgb(10, 20, 30)", (10, 20, 30)),
-            ("rgba(10,20,30,0.5)", (10, 20, 30)),
+            ("rgba(10,20,30,1)", (10, 20, 30)),
+            ("rgb(10 20 30 / 100%)", (10, 20, 30)),
+            ("rgba(10,20,30,0.5)", None),
+            ("rgb(10 20 30 / 25%)", None),
+            ("#1f77b480", None),
             ("transparent", None),
             ("rebeccapurple", None),
             ({"gradient": "linear"}, None),

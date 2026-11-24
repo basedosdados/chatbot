@@ -12,6 +12,7 @@ from google.api_core.exceptions import NotFound
 import app.charts.data as chart_data
 from app.charts.data import (
     ChartHandleNotFound,
+    ChartResultEmpty,
     ChartResultTooLarge,
     _fetch_rows,
     fetch_chart_data,
@@ -96,6 +97,21 @@ class TestFetchRows:
         # The bound rows must be plain JSON values, or spec serialization fails.
         json.dumps(got)
 
+    def test_non_finite_floats_become_null(self, mocker):
+        """NaN has no JSON form: a bare `NaN` in the spec fails to compile."""
+        rows = [
+            {"uf": "SP", "taxa": float("nan")},
+            {"uf": "RJ", "taxa": float("inf")},
+            {"uf": "MG", "taxa": 1.5},
+        ]
+        client = self._client(rows, columns=("uf", "taxa"))
+        mocker.patch("app.charts.data._bq_client", return_value=client)
+
+        _, got = _fetch_rows(DESTINATION)
+
+        assert [row["taxa"] for row in got] == [None, None, 1.5]
+        json.dumps(got, allow_nan=False)
+
     def test_whole_number_decimal_becomes_int(self, mocker):
         """A whole-number Decimal becomes an int, not a float.
 
@@ -148,6 +164,15 @@ class TestFetchChartData:
         assert got_handle is handle
         assert columns == {"ano": "INTEGER"}
         assert rows == [{"ano": 2025}]
+
+    async def test_empty_result_raises(self, monkeypatch):
+        self._patch_db(monkeypatch, _handle(age=timedelta(hours=1)))
+        monkeypatch.setattr(
+            chart_data, "_fetch_rows", lambda dest: ({"ano": "INTEGER"}, [])
+        )
+
+        with pytest.raises(ChartResultEmpty, match="no rows"):
+            await fetch_chart_data("qr_1", "test-thread")
 
     async def test_missing_handle_raises(self, monkeypatch):
         self._patch_db(monkeypatch, None)

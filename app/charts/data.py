@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from decimal import Decimal
 from functools import cache
 from typing import Any
@@ -19,6 +20,10 @@ class ChartHandleNotFound(Exception):
 
 class ChartResultTooLarge(Exception):
     """The result has more rows than a chart should bind."""
+
+
+class ChartResultEmpty(Exception):
+    """The result has no rows, so there is nothing to chart."""
 
 
 @cache
@@ -81,9 +86,15 @@ def _fetch_rows(
             # Serialize once to both measure the row and coerce BigQuery types
             # (date/datetime/Decimal/…) to JSON-native values. Raw objects are
             # not valid JSON and would fail serialization when the spec is bound.
-            serialized = json.dumps(
-                dict(row), ensure_ascii=False, default=_json_default
-            )
+            # NaN and Infinity have no JSON form (json.dumps writes a bare `NaN` that
+            # vl-convert and browsers reject), so they become null: a missing value.
+            values = {
+                name: None
+                if isinstance(value, float) and not math.isfinite(value)
+                else value
+                for name, value in dict(row).items()
+            }
+            serialized = json.dumps(values, ensure_ascii=False, default=_json_default)
             size += len(serialized.encode())
             if size > settings.CHART_MAX_BYTES:
                 raise ChartResultTooLarge(
@@ -113,6 +124,7 @@ async def fetch_chart_data(
 
     Raises:
         ChartHandleNotFound: No such result in this thread.
+        ChartResultEmpty: The result has no rows.
         ResultTableExpired: The result expired (by age or missing table).
     """
     async with sessionmaker() as session:
@@ -133,6 +145,12 @@ async def fetch_chart_data(
         )
 
     columns, rows = await asyncio.to_thread(_fetch_rows, handle.destination_table)
+
+    if not rows:
+        raise ChartResultEmpty(
+            f"The result for '{query_ref}' has no rows, so there is nothing to chart. "
+            "Check the query's filters, then chart a result that returns rows."
+        )
 
     return handle, columns, rows
 

@@ -69,7 +69,9 @@ _NAMED_COLORS = {
     "black": (0, 0, 0),
 }
 
-_RGB_COLOR = re.compile(r"rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)")
+_RGB_COLOR = re.compile(
+    r"rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:\s*[,/]\s*(\d*\.?\d+)(%?))?"
+)
 
 # What each guide's text is called in a problem fed back to the generator.
 _GUIDE_TEXT = {
@@ -215,9 +217,13 @@ def _rendered_text(mark: dict[str, Any]) -> list[str]:
 def _parse_color(value: Any) -> tuple[int, int, int] | None:
     """Parse a CSS color into its red, green and blue, or None if it is not a plain one.
 
+    A translucent color shows what is behind it, which cannot be told from the color
+    alone, so it is not judged.
+
     Args:
-        value (Any): A fill as the scenegraph holds it: a hex string, an `rgb()` call, a
-            color name, or something else (a gradient, `transparent`, nothing).
+        value (Any): A fill as the scenegraph holds it: a hex string, an `rgb()` or
+            `rgba()` call, a color name, or something else (a gradient, `transparent`,
+            nothing).
 
     Returns:
         tuple[int, int, int] | None: The color, or None for one that cannot be judged.
@@ -228,7 +234,10 @@ def _parse_color(value: Any) -> tuple[int, int, int] | None:
     if color in _NAMED_COLORS:
         return _NAMED_COLORS[color]
     if match := _RGB_COLOR.match(color):
-        red, green, blue = (min(int(part), 255) for part in match.groups())
+        alpha, percent = match.group(4, 5)
+        if alpha is not None and float(alpha) < (100 if percent else 1):
+            return None
+        red, green, blue = (min(int(part), 255) for part in match.group(1, 2, 3))
         return red, green, blue
     if re.fullmatch(r"#[0-9a-f]{3}(?:[0-9a-f]{3})?", color):
         digits = color[1:]
@@ -419,7 +428,8 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
         # The website draws a chart with no background of its own on its white card.
         backdrop = _SITE_BACKGROUND
     background = _parse_color(backdrop)
-    # A background that cannot be judged (a gradient, an unusual name) is left alone.
+    # A background that cannot be judged (a gradient, a translucent or unusual color)
+    # is left alone.
     unreadable = _find_unreadable_text(root, background) if background else set()
 
     for role in sorted(unreadable):
@@ -468,21 +478,25 @@ def render_problems(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[st
             "columns and their values."
         )
 
+    # Collected as a set: a faceted chart has one axis per panel, all alike.
+    axis_problems: set[str] = set()
     for role, labels in text_marks:
         if role != "axis-label":
             continue
-        if len(labels) >= 3 and len(set(labels)) == 1:
-            problems.append(
+        # Labels blanked on purpose (`labelExpr: "''"`, e.g. a sparkline) are not broken.
+        if len(labels) >= 3 and len(set(labels)) == 1 and labels[0].strip():
+            axis_problems.add(
                 f"An axis shows the same label {labels[0]!r} on all of its {len(labels)} "
                 "ticks, so its `labelExpr` or `format` discards the value. Fix that axis."
             )
         elif not labels and drawn:
-            problems.append(
+            axis_problems.add(
                 "An axis has no tick labels with the result's rows: its scale has no valid "
                 "domain, or the values fall far outside it (e.g. a log scale over zero or "
                 "negative values, a fixed `domain` that does not fit the values, series "
                 "in different units on one scale, or values that are not valid dates "
                 "or numbers). Fix that axis's scale."
             )
+    problems.extend(sorted(axis_problems))
 
     return problems
