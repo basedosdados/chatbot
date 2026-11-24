@@ -32,3 +32,5 @@ htmlcov/
 
 # Eval artifacts (generated transcripts + scores; regenerable, can be large)
 eval/*.json
+eval/charts/*.json
+eval/charts/*.html

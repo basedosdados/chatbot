@@ -237,7 +237,7 @@ class TestChartQueryResult:
                 return_value=(handle, {"ano": "INTEGER", "total": "INTEGER"}, rows)
             ),
         )
-        # The spec generator (validate-and-repair loop) is exercised in test_charts;
+        # The spec generator (validate-and-repair loop) is exercised in tests/app/charts;
         # here it stands in for the returned, already-validated spec.
         monkeypatch.setattr(
             dataviz_module,
